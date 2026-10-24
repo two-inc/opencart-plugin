@@ -19,7 +19,8 @@ declare(strict_types=1);
  *
  * Environment:
  *   OPENCART_DIR     shop root holding config.php (default /var/www/html)
- *   TWO_ENVIRONMENT  production, sandbox or staging; stored when set
+ *   TWO_ENVIRONMENT  production, sandbox or staging; stored when set, and
+ *                    any other value fails the run
  *   TWO_API_KEY      merchant API key; PLUGIN_DEMO_STORE_API_KEY is the
  *                    fallback name the staging shops provide. Stored when set,
  *                    never printed.
@@ -134,7 +135,10 @@ $given = ['status' => '1'];
 $environment = (string) getenv('TWO_ENVIRONMENT');
 if ($environment !== '') {
     $known = [Environment::PRODUCTION, Environment::SANDBOX, Environment::STAGING];
-    $given['environment'] = in_array($environment, $known, true) ? $environment : Environment::DEFAULT;
+    if (!in_array($environment, $known, true)) {
+        fail('unknown TWO_ENVIRONMENT "' . $environment . '" (expected one of: ' . implode(', ', $known) . ')');
+    }
+    $given['environment'] = $environment;
 }
 $apiKey = (string) (getenv('TWO_API_KEY') ?: getenv('PLUGIN_DEMO_STORE_API_KEY'));
 if ($apiKey !== '') {
