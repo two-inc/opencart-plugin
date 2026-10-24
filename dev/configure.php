@@ -131,7 +131,17 @@ foreach (query($db, "SELECT `user_group_id`, `permission` FROM `{$p}user_group`"
 }
 
 // 4. Settings: defaults only where nothing is stored, then the given inputs.
-$defaults = ['sort_order' => '0'] + SettingsProvider::DEFAULTS;
+// The status maps start on the shop's own statuses, found by name in the default language.
+$statusDefaults = [];
+$language = query($db, "SELECT `value` FROM `{$p}setting` WHERE `store_id` = 0 AND `key` = 'config_language_id'");
+foreach (SettingsProvider::DEFAULT_STATUS_NAMES as $key => $name) {
+    $found = query($db, "SELECT `order_status_id` FROM `{$p}order_status` WHERE `name` = ? AND `language_id` = ? ORDER BY `order_status_id` LIMIT 1", [$name, (string) ($language[0]['value'] ?? '1')]);
+    if ($found !== []) {
+        $id = (int) $found[0]['order_status_id'];
+        $statusDefaults[$key] = $key === 'fulfil_status_ids' ? (string) json_encode([$id]) : (string) $id;
+    }
+}
+$defaults = ['sort_order' => '0'] + $statusDefaults + SettingsProvider::DEFAULTS;
 $given = ['status' => '1'];
 $environment = (string) getenv('TWO_ENVIRONMENT');
 if ($environment !== '') {
