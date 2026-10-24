@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Opencart\Catalog\Model\Extension\Two\Payment;
 
+use Opencart\System\Library\Extension\Two\Opencart\OrderTax;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
@@ -14,13 +15,13 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * order_total). OpenCart stores tax per product line and per rate for the
  * order, but none for a charge total such as shipping: there the tax is
  * what the shop's own tax engine gives the stored tax class at the order's
- * addresses, the computation OpenCart itself made at checkout. The default
+ * addresses and customer group (OrderTax, never the request's session),
+ * the computation OpenCart itself made at checkout. The default
  * handler's shop-match check then refuses the order unless the lines add up
  * to the tax and total the shop actually charged, so nothing is invented.
  *
  * @property-read \Opencart\System\Engine\Loader $load
  * @property-read \Opencart\System\Engine\Config $config
- * @property-read \Opencart\System\Engine\Registry $registry
  * @property-read \Opencart\System\Library\Language $language
  * @property-read \Opencart\System\Library\DB $db
  * @property-read \Opencart\System\Library\Log $log
@@ -73,7 +74,7 @@ class Two extends \Opencart\System\Engine\Model
         if (!$order) {
             return null;
         }
-        $tax = $this->taxAt($order);
+        $tax = OrderTax::engine($this->db, OrderTax::scope($order, OrderTax::storeSettings($this->db, (int) $order['store_id'])));
 
         $lines = [];
         foreach ($this->model_checkout_order->getProducts($orderId) as $row) {
@@ -85,7 +86,7 @@ class Two extends \Opencart\System\Engine\Model
                 'total' => (float) $row['total'],
                 'tax' => (float) $row['tax'],
                 'type' => !isset($product['shipping']) || $product['shipping'] ? 'PHYSICAL' : 'DIGITAL',
-            ] + self::rateOf($tax, (float) $row['price'], (int) ($product['tax_class_id'] ?? 0));
+            ] + OrderTax::rateOf($tax, (float) $row['price'], (int) ($product['tax_class_id'] ?? 0));
         }
 
         $taxTotal = 0.0;
@@ -97,7 +98,7 @@ class Two extends \Opencart\System\Engine\Model
             }
             $class = $this->chargeTaxClass($total['code'], $order);
             if ($class !== null) {
-                $rate = self::rateOf($tax, $total['value'], $class);
+                $rate = OrderTax::rateOf($tax, $total['value'], $class);
                 $total += $rate + ['tax' => $class > 0 ? $tax->getTax($total['value'], $class) : 0.0];
             }
             $totals[] = $total;
@@ -108,7 +109,7 @@ class Two extends \Opencart\System\Engine\Model
         // Section 21.3: what the shop's shipping tax setting (here the shipping method's
         // tax class) applies at the order's addresses, whether or not the line was taxed.
         $shippingClass = (int) ($method['tax_class_id'] ?? 0);
-        $shippingRate = $shippingClass > 0 ? self::rateOf($tax, (float) ($method['cost'] ?? 0), $shippingClass)['rate'] : null;
+        $shippingRate = $shippingClass > 0 ? OrderTax::rateOf($tax, (float) ($method['cost'] ?? 0), $shippingClass)['rate'] : null;
 
         return [
             'order' => [
@@ -138,32 +139,6 @@ class Two extends \Opencart\System\Engine\Model
     }
 
     /**
-     * The shop's tax rules at the order's addresses, set the way the
-     * storefront sets them for a checkout.
-     *
-     * @param array<string, mixed> $order
-     */
-    private function taxAt(array $order): \Opencart\System\Library\Cart\Tax
-    {
-        $tax = new \Opencart\System\Library\Cart\Tax($this->registry);
-        $storeCountry = (int) $this->config->get('config_country_id');
-        $storeZone = (int) $this->config->get('config_zone_id');
-        if ((int) $order['shipping_country_id']) {
-            $tax->setShippingAddress((int) $order['shipping_country_id'], (int) $order['shipping_zone_id']);
-        } elseif ($this->config->get('config_tax_default') === 'shipping') {
-            $tax->setShippingAddress($storeCountry, $storeZone);
-        }
-        if ((int) $order['payment_country_id']) {
-            $tax->setPaymentAddress((int) $order['payment_country_id'], (int) $order['payment_zone_id']);
-        } elseif ($this->config->get('config_tax_default') === 'payment') {
-            $tax->setPaymentAddress($storeCountry, $storeZone);
-        }
-        $tax->setStoreAddress($storeCountry, $storeZone);
-
-        return $tax;
-    }
-
-    /**
      * The tax class of a charge total, or null for a total that is not one.
      *
      * @param array<string, mixed> $order
@@ -178,27 +153,6 @@ class Two extends \Opencart\System\Engine\Model
         }
 
         return null;
-    }
-
-    /**
-     * The percentage the class applies, as a fraction, and whether it also
-     * holds a fixed-amount rate. Null rate when the class has no rate here.
-     *
-     * @return array{rate: float|null, fixed_tax: bool}
-     */
-    private static function rateOf(\Opencart\System\Library\Cart\Tax $tax, float $value, int $class): array
-    {
-        $percent = null;
-        $fixed = false;
-        foreach ($class > 0 ? $tax->getRates($value, $class) : [] as $rate) {
-            if ($rate['type'] === 'F') {
-                $fixed = true;
-            } else {
-                $percent = ($percent ?? 0.0) + (float) $rate['rate'] / 100;
-            }
-        }
-
-        return ['rate' => $percent, 'fixed_tax' => $fixed];
     }
 
     /**

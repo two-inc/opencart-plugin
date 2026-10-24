@@ -110,11 +110,23 @@ table() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT ENGINE
 [ "$(table)" = InnoDB ] || fail "the two_order table is missing or not InnoDB (got '$(table)')"
 ok "two_order table (InnoDB)"
 sql() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "$1"; }
+legacy() { sql "SHOW TABLES LIKE 'oc\_two\_order\_legacy\_%'" | wc -l; }
+before=$(legacy)
 sql "DROP TABLE oc_two_order; CREATE TABLE oc_two_order (two_order_id INT NOT NULL, order_id INT NOT NULL, PRIMARY KEY (two_order_id)) ENGINE=MyISAM"
 configure > /dev/null
 [ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'token_hash'" | wc -l)" = 1 ] || fail "configure.php did not replace a legacy two_order table"
-[ "$(sql "SHOW TABLES LIKE 'oc\_two\_order\_legacy\_%'" | wc -l)" = 1 ] || fail "the legacy two_order table was not kept aside"
+[ "$(legacy)" = $((before + 1)) ] || fail "the legacy two_order table was not kept aside"
 ok "configure.php renames a legacy two_order table aside"
+
+# An order's tax rates come from its own customer group, never the request's session: the
+# probe runs OpenCart's tax engine as the plugin sets it up, with no session at all.
+# A Norway zone with one rate per customer group, on the Taxable Goods class (9).
+sql "REPLACE INTO oc_customer_group SET customer_group_id = 9001, approval = 0, sort_order = 9; REPLACE INTO oc_geo_zone SET geo_zone_id = 9001, name = 'Smoke NO', description = 'Smoke NO'; REPLACE INTO oc_zone_to_geo_zone SET zone_to_geo_zone_id = 9001, geo_zone_id = 9001, country_id = 160, zone_id = 0; REPLACE INTO oc_tax_rate SET tax_rate_id = 9001, geo_zone_id = 9001, name = 'Smoke 15', rate = 15, type = 'P'; REPLACE INTO oc_tax_rate SET tax_rate_id = 9002, geo_zone_id = 9001, name = 'Smoke 25', rate = 25, type = 'P'; DELETE FROM oc_tax_rate_to_customer_group WHERE tax_rate_id IN (9001, 9002); INSERT INTO oc_tax_rate_to_customer_group SET tax_rate_id = 9001, customer_group_id = 1; INSERT INTO oc_tax_rate_to_customer_group SET tax_rate_id = 9002, customer_group_id = 9001; REPLACE INTO oc_tax_rule SET tax_rule_id = 9001, tax_class_id = 9, tax_rate_id = 9001, based = 'shipping', priority = 1; REPLACE INTO oc_tax_rule SET tax_rule_id = 9002, tax_class_id = 9, tax_rate_id = 9002, based = 'shipping', priority = 1"
+probe() { docker exec -u www-data -e OPENCART_DIR=/var/www/html "$app" php /var/www/html/extension/two/dev/ci/order-tax-probe.php "{\"customer_group_id\":$1,\"shipping_country_id\":160,\"shipping_zone_id\":0,\"payment_country_id\":160,\"payment_zone_id\":0,\"store_id\":0}" 9; }
+[ "$(probe 9001)" = '{"rate":0.25,"fixed_tax":false}' ] || fail "an order from another customer group did not get its group's rate (got '$(probe 9001)')"
+ok "an order's own customer group gives its rate, with no session"
+[ "$(probe 1)" = '{"rate":0.15,"fixed_tax":false}' ] || fail "an order from the default group did not get its rate (got '$(probe 1)')"
+ok "the default group gives its own rate"
 
 # Storefront: the tile template and language load, and the callbacks from Two are guarded.
 [ "$(status 'index.php?route=extension/two/payment/two&language=en-gb')" = 200 ] || fail "the tile did not render"
