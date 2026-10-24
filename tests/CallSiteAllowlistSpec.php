@@ -8,7 +8,8 @@ use Opencart\System\Library\Extension\Two\Opencart\EventSubscribers;
  * Build Guide section 21.7: no order request bypasses the choke point. Only
  * the listed files call the Client; order requests come from OrderFlow
  * alone, and every request there that changes an order goes through
- * Postprocessing::apply in the same method first. Also pins which event
+ * Postprocessing::apply (directly or through OrderFlow::payload) in the
+ * same method first. Also pins which event
  * triggers OpenCart would run for the hook.
  */
 final class CallSiteAllowlistSpec
@@ -49,12 +50,30 @@ final class CallSiteAllowlistSpec
                 continue;
             }
             $posts++;
-            $hook = strpos($method, 'postprocessing->apply(');
+            $hook = preg_match('~postprocessing->apply\(|this->payload\(~', $method, $found, PREG_OFFSET_CAPTURE) === 1 ? $found[0][1] : false;
             TinyAssert::true($hook !== false && $hook < $post, 'every order request in OrderFlow passes the hook first: ' . strtok($method, '('));
         }
         TinyAssert::same(3, $posts, 'OrderFlow sends order create, confirm and cancel');
+        TinyAssert::true(preg_match('~function payload\([^{]*\{[^}]*postprocessing->apply\(~s', $flow) === 1, 'OrderFlow::payload runs the hook');
 
         self::testTriggers();
+        self::testLoadable();
+    }
+
+    private static function testLoadable(): void
+    {
+        eval('namespace Opencart\\Catalog\\Controller\\Extension\\Acme\\Module; final class OrderFix { public function handle(): void {} private function hidden(): void {} }');
+        $cases = [
+            ['action' => 'extension/acme/module/order_fix.handle', 'loadable' => true, 'description' => 'a public method on a loadable controller'],
+            ['action' => 'extension/acme/module/order_fix.hidden', 'loadable' => false, 'description' => 'a private method'],
+            ['action' => 'extension/acme/module/order_fix.missing', 'loadable' => false, 'description' => 'a method that does not exist'],
+            ['action' => 'extension/acme/module/order_fix.__construct', 'loadable' => false, 'description' => 'a magic method, which OpenCart refuses'],
+            ['action' => 'extension/acme/module/gone.handle', 'loadable' => false, 'description' => 'a controller that does not load'],
+            ['action' => '', 'loadable' => false, 'description' => 'an empty action'],
+        ];
+        foreach ($cases as $case) {
+            TinyAssert::same($case['loadable'], EventSubscribers::loadable($case['action']), 'event action: ' . $case['description']);
+        }
     }
 
     private static function testTriggers(): void

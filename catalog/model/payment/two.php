@@ -64,7 +64,7 @@ class Two extends \Opencart\System\Engine\Model
      *
      * @param array{company_name: string, organization_number: string, country_code: string} $company
      * @param array<string, string>                                                           $urls
-     * @return array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>}|null
+     * @return array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context: array<string, mixed>}|null
      */
     public function orderInput(int $orderId, array $company, array $urls): ?array
     {
@@ -105,6 +105,10 @@ class Two extends \Opencart\System\Engine\Model
 
         $shipping = $order['shipping_method'] ? $this->address($order, 'shipping') : null;
         $method = is_array($order['shipping_method']) ? $order['shipping_method'] : [];
+        // Section 21.3: what the shop's shipping tax setting (here the shipping method's
+        // tax class) applies at the order's addresses, whether or not the line was taxed.
+        $shippingClass = (int) ($method['tax_class_id'] ?? 0);
+        $shippingRate = $shippingClass > 0 ? self::rateOf($tax, (float) ($method['cost'] ?? 0), $shippingClass)['rate'] : null;
 
         return [
             'order' => [
@@ -129,6 +133,7 @@ class Two extends \Opencart\System\Engine\Model
             ],
             'lines' => $lines,
             'totals' => $totals,
+            'context' => ['order' => $order, 'shipping_tax_rate' => $shippingRate],
         ];
     }
 

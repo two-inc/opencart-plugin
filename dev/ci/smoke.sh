@@ -109,6 +109,12 @@ ok "configure.php refuses an unknown environment"
 table() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'opencart' AND TABLE_NAME = 'oc_two_order'"; }
 [ "$(table)" = InnoDB ] || fail "the two_order table is missing or not InnoDB (got '$(table)')"
 ok "two_order table (InnoDB)"
+sql() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "$1"; }
+sql "DROP TABLE oc_two_order; CREATE TABLE oc_two_order (two_order_id INT NOT NULL, order_id INT NOT NULL, PRIMARY KEY (two_order_id)) ENGINE=MyISAM"
+configure > /dev/null
+[ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'token_hash'" | wc -l)" = 1 ] || fail "configure.php did not replace a legacy two_order table"
+[ "$(sql "SHOW TABLES LIKE 'oc\_two\_order\_legacy\_%'" | wc -l)" = 1 ] || fail "the legacy two_order table was not kept aside"
+ok "configure.php renames a legacy two_order table aside"
 
 # Storefront: the tile template and language load, and the callbacks from Two are guarded.
 [ "$(status 'index.php?route=extension/two/payment/two&language=en-gb')" = 200 ] || fail "the tile did not render"

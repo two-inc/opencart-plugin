@@ -178,6 +178,9 @@ if (query($db, "SELECT `cron_id` FROM `{$p}cron` WHERE `code` = ?", [Services::C
 }
 
 // 6. The order-scoped table, as install() creates it.
-$db->query(DbOrderRecords::createTableSql($p));
+$renamed = DbOrderRecords::install(static fn (string $sql): array => query($db, $sql), $p);
+if ($renamed !== null) {
+    say('renamed the old ' . $p . DbOrderRecords::TABLE . ' table to ' . $renamed);
+}
 
 say('extension ' . TWO_CODE . ' ' . $manifest['version'] . ' installed and enabled');

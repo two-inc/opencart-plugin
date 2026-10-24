@@ -237,7 +237,11 @@ class Two extends \Opencart\System\Engine\Controller
         $this->model_setting_cron->addCron(Services::CRON_CODE, Services::CRON_DESCRIPTION, Services::CRON_CYCLE, Services::CRON_ACTION, true);
 
         // The order-scoped table. Kept on uninstall: it holds the Two order ids of placed orders.
-        $this->db->query(DbOrderRecords::createTableSql(DB_PREFIX));
+        DbOrderRecords::install(function (string $sql): array {
+            $result = $this->db->query($sql);
+
+            return is_object($result) ? $result->rows : [];
+        }, DB_PREFIX);
     }
 
     public function uninstall(): void

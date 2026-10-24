@@ -35,7 +35,7 @@ final class EventSubscribers implements PostprocessingSubscribers
         $query = $this->db->query('SELECT `code`, `trigger`, `action` FROM `' . DB_PREFIX . "event` WHERE `status` = '1' ORDER BY `sort_order` ASC, `event_id` ASC");
         $names = [];
         foreach (is_object($query) ? $query->rows : [] as $row) {
-            if (self::matches((string) $row['trigger'])) {
+            if (self::matches((string) $row['trigger']) && self::loadable((string) $row['action'])) {
                 $names[] = $row['code'] . ' (' . $row['action'] . ')';
             }
         }
@@ -49,6 +49,28 @@ final class EventSubscribers implements PostprocessingSubscribers
         $this->event->trigger(self::EVENT, [&$result, $context]);
 
         return $result;
+    }
+
+    /**
+     * Whether OpenCart can run the action: its controller class and public
+     * method exist, resolved by OpenCart's own rule (Action and Factory).
+     * OpenCart drops an action it cannot load without a word, so counting
+     * one would stand the shop-match checks down for a handler that never
+     * runs.
+     */
+    public static function loadable(string $action): bool
+    {
+        $action = (string) preg_replace('/[^a-zA-Z0-9_|\/\.]/', '', $action);
+        $pos = strrpos($action, '.');
+        $route = $pos === false ? $action : substr($action, 0, $pos);
+        $method = $pos === false ? 'index' : substr($action, $pos + 1);
+        $class = 'Opencart\\Catalog\\Controller\\' . str_replace(['_', '/'], ['', '\\'], ucwords($route, '_/'));
+        if ($route === '' || str_starts_with($method, '__') || !class_exists($class)) {
+            return false;
+        }
+        $reflection = new \ReflectionClass($class);
+
+        return $reflection->hasMethod($method) && $reflection->getMethod($method)->isPublic();
     }
 
     /** OpenCart's own rule (Event::trigger): the trigger, with * and ? as wildcards, matches the start of the event name. */

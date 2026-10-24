@@ -15,8 +15,8 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * Two's hosted checkout), and the confirm and cancel callbacks Two sends the
  * buyer back to. The rules live in the core's OrderFlow.
  *
- * The order stays unplaced (status 0, OpenCart's missing order) until Two
- * confirms it, as OpenCart's own redirect payment methods leave it: moving
+ * The order stays unplaced (status 0, OpenCart's missing order, or the void
+ * status OpenCart 4.1.0.0 sets on every checkout edit) until Two confirms it, as OpenCart's own redirect payment methods leave it: moving
  * an order off status 0 is what sends the buyer the order confirmation.
  *
  * @property-read \Opencart\System\Engine\Loader $load
@@ -69,7 +69,7 @@ class Two extends \Opencart\System\Engine\Controller
         $orderId = (int) ($this->session->data['order_id'] ?? 0);
         $this->load->model('checkout/order');
         $order = $orderId > 0 ? $this->model_checkout_order->getOrder($orderId) : [];
-        if (!$order || (int) $order['order_status_id'] !== 0) {
+        if (!$order || !$this->unplaced($order)) {
             $json['error'] = $this->language->get('error_order');
         } elseif (($this->session->data['payment_method']['code'] ?? '') !== 'two.two') {
             $json['error'] = $this->language->get('error_payment_method');
@@ -85,8 +85,8 @@ class Two extends \Opencart\System\Engine\Controller
             ];
             $token = OrderFlow::newToken();
             $urls = [
-                'merchant_confirmation_url' => $this->callbackUrl('confirmation', $orderId, $token, false),
-                'merchant_cancel_order_url' => $this->callbackUrl('cancel', $orderId, $token, false),
+                'merchant_confirmation_url' => $this->callbackUrl(OrderFlow::CALLBACK_CONFIRM, $orderId, $token, false),
+                'merchant_cancel_order_url' => $this->callbackUrl(OrderFlow::CALLBACK_CANCEL, $orderId, $token, false),
                 'merchant_edit_order_url' => '',
                 'merchant_order_verification_failed_url' => '',
                 'merchant_invoice_url' => '',
@@ -96,12 +96,12 @@ class Two extends \Opencart\System\Engine\Controller
             $input = $this->model_extension_two_payment_two->orderInput($orderId, $company, $urls);
             $result = $input === null
                 ? ['ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'reason' => 'The order could not be read.']
-                : $this->services()->orderFlow($this->event)->create($input['order'], $input['lines'], $input['totals'], $token, ['order' => $order]);
+                : $this->services()->orderFlow($this->event)->create($input['order'], $input['lines'], $input['totals'], $token, $input['context']);
             if ($result['ok']) {
                 $json['redirect'] = $result['redirect'];
             } else {
                 if ($result['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
-                    $this->model_checkout_order->addHistory($orderId, 0, $this->language->get('text_history_prefix') . $result['reason']);
+                    $this->note($orderId, $result['reason']);
                 }
                 $json['error'] = $this->buyerMessage($result['buyer']);
             }
@@ -114,13 +114,13 @@ class Two extends \Opencart\System\Engine\Controller
     /** Two sent the buyer back after verifying: confirm, then the shop's success page. */
     public function confirmation(): void
     {
-        $this->callback('confirmation');
+        $this->callback(OrderFlow::CALLBACK_CONFIRM);
     }
 
     /** Two sent the buyer back after cancelling: cancel, then back to the cart with a notice. */
     public function cancel(): void
     {
-        $this->callback('cancel');
+        $this->callback(OrderFlow::CALLBACK_CANCEL);
     }
 
     private function callback(string $kind): void
@@ -129,7 +129,7 @@ class Two extends \Opencart\System\Engine\Controller
         $orderId = (int) ($this->request->get['order_id'] ?? 0);
         $token = (string) ($this->request->get['token'] ?? '');
         if ($orderId <= 0 || preg_match(self::TOKEN_PATTERN, $token) !== 1) {
-            $this->leave($this->buyerMessage([ErrorMapper::GENERIC]));
+            $this->leave('cart', 'generic');
 
             return;
         }
@@ -139,45 +139,74 @@ class Two extends \Opencart\System\Engine\Controller
         $this->load->model('checkout/order');
         $order = $this->model_checkout_order->getOrder($orderId);
         if (!$order) {
-            $this->leave($this->buyerMessage([ErrorMapper::GENERIC]));
+            $this->leave('cart', 'generic');
 
             return;
         }
-        $placed = (int) $order['order_status_id'] !== 0;
         $flow = $this->services()->orderFlow($this->event);
 
-        if ($kind === 'cancel') {
+        if ($kind === OrderFlow::CALLBACK_CANCEL) {
             $owner = (int) ($this->session->data['order_id'] ?? 0) === $orderId
                 || ($this->customer->isLogged() && (int) $order['customer_id'] === $this->customer->getId());
-            if (!$owner || $placed) {
-                $this->log->write('Two error: cancel callback for order ' . $orderId . ' refused: ' . ($placed ? 'the order is already placed' : 'not the buyer\'s session'));
-                $this->leave($this->buyerMessage([ErrorMapper::GENERIC]));
+            if (!$owner || !$this->unplaced($order)) {
+                $reason = 'Cancel callback refused: ' . ($owner ? 'the order is already placed.' : 'it did not come from the buyer\'s session.');
+                $this->log->write('Two error: order ' . $orderId . ': ' . $reason);
+                $this->note($orderId, $reason);
+                $this->leave('cart', 'generic');
 
                 return;
             }
             $result = $flow->cancel($orderId, $token);
+        } elseif (!$this->unplaced($order) && $flow->owns($orderId, $token)) {
+            // A second hit (the bounce page's link and its refresh) on the order the first hit placed.
+            $this->leave('success', null);
+
+            return;
         } else {
-            $result = $flow->confirm($orderId, $token);
+            $this->load->model(self::ROUTE);
+            $model = $this->model_extension_two_payment_two;
+            $rebuild = static fn (array $record): ?array => $model->orderInput($orderId, [
+                'company_name' => $record['company_name'] ?? '',
+                'organization_number' => $record['organization_number'] ?? '',
+                'country_code' => $record['country_code'] ?? '',
+            ], []);
+            $result = $flow->confirm($orderId, $token, $rebuild);
         }
 
         if ($result['outcome'] === OrderFlow::UNAUTHORISED) {
             $this->log->write('Two error: ' . $kind . ' callback for order ' . $orderId . ': ' . $result['reason']);
-            $this->leave($this->buyerMessage([ErrorMapper::GENERIC]));
+        }
+        // Read again: a concurrent hit may have placed the order while Two answered.
+        $order = $this->model_checkout_order->getOrder($orderId);
+        $after = OrderFlow::afterCallback($kind, $result['outcome'], $order && !$this->unplaced($order));
+        if ($after['place']) {
+            $this->model_checkout_order->addHistory($orderId, (int) $this->config->get('config_order_status_id'), $this->language->get('text_history_prefix') . $result['reason']);
+        } elseif ($after['note']) {
+            $this->note($orderId, $result['reason']);
+        }
+        $this->leave($after['goto'], $after['notice']);
+    }
 
-            return;
-        }
-        if ($result['outcome'] === OrderFlow::CONFIRMED) {
-            if (!$placed) {
-                $this->model_checkout_order->addHistory($orderId, (int) $this->config->get('config_order_status_id'), $this->language->get('text_history_prefix') . $result['reason']);
-            }
-            $this->response->redirect($this->url->link('checkout/success', 'language=' . $this->config->get('config_language'), true));
+    /**
+     * Not yet placed: status 0, or the shop's void status, which OpenCart
+     * 4.1.0.0 sets on every checkout edit of an unplaced order.
+     *
+     * @param array<string, mixed> $order
+     */
+    private function unplaced(array $order): bool
+    {
+        $status = (int) $order['order_status_id'];
 
-            return;
+        return $status === 0 || $status === (int) $this->config->get('config_void_status_id');
+    }
+
+    /** The reason in the order history of an unplaced order, its status unchanged. Placed orders are left alone. */
+    private function note(int $orderId, string $reason): void
+    {
+        $order = $this->model_checkout_order->getOrder($orderId);
+        if ($order && $this->unplaced($order)) {
+            $this->model_checkout_order->addHistory($orderId, (int) $order['order_status_id'], $this->language->get('text_history_prefix') . $reason);
         }
-        if (!$placed) {
-            $this->model_checkout_order->addHistory($orderId, 0, $this->language->get('text_history_prefix') . $result['reason']);
-        }
-        $this->leave($result['outcome'] === OrderFlow::CANCELLED ? $this->language->get('text_cancelled') : $this->buyerMessage([ErrorMapper::GENERIC]));
     }
 
     /**
@@ -213,11 +242,18 @@ class Two extends \Opencart\System\Engine\Controller
         return $this->url->link(self::ROUTE . '.' . $kind, $args, true);
     }
 
-    /** Back to the cart, where OpenCart shows the notice. */
-    private function leave(string $notice): void
+    /**
+     * The success page, or the cart with a notice (where OpenCart shows it).
+     *
+     * @param 'cancelled'|'generic'|null $notice
+     */
+    private function leave(string $goto, ?string $notice): void
     {
-        $this->session->data['error'] = $notice;
-        $this->response->redirect($this->url->link('checkout/cart', 'language=' . $this->config->get('config_language'), true));
+        if ($notice !== null) {
+            $this->session->data['error'] = $notice === 'cancelled' ? $this->language->get('text_cancelled') : $this->buyerMessage([ErrorMapper::GENERIC]);
+        }
+        $route = $goto === 'success' ? 'checkout/success' : 'checkout/cart';
+        $this->response->redirect($this->url->link($route, 'language=' . $this->config->get('config_language'), true));
     }
 
     /**

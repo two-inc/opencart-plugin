@@ -26,7 +26,34 @@ final class DbOrderRecords implements OrderRecords
     {
     }
 
-    /** The table, for install() and configure.php. Idempotent. */
+    /**
+     * Creates the table, for install() and configure.php. Idempotent. A
+     * `two_order` table in another shape (the pre-rewrite extension keyed it
+     * by the Two order id and had no token column) is renamed aside first:
+     * CREATE TABLE IF NOT EXISTS would keep it, and every callback would then
+     * fail on the missing token. No working installs of that extension exist.
+     *
+     * @param \Closure(string): list<array<string, mixed>> $query runs one statement, returning the rows of a SHOW
+     * @return string|null the name the old table was renamed to, null when there was none
+     */
+    public static function install(\Closure $query, string $prefix): ?string
+    {
+        $table = $prefix . self::TABLE;
+        $renamed = null;
+        if ($query("SHOW TABLES LIKE '" . str_replace('_', '\\_', $table) . "'") !== []) {
+            $columns = array_map(static fn (array $row): string => (string) $row['Field'], $query('SHOW COLUMNS FROM `' . $table . '`'));
+            $primary = array_map(static fn (array $row): string => (string) $row['Column_name'], $query("SHOW KEYS FROM `" . $table . "` WHERE `Key_name` = 'PRIMARY'"));
+            if ($primary !== ['order_id'] || array_diff(array_merge(['order_id'], self::FIELDS), $columns) !== []) {
+                $renamed = $table . '_legacy_' . gmdate('YmdHis');
+                $query('RENAME TABLE `' . $table . '` TO `' . $renamed . '`');
+            }
+        }
+        $query(self::createTableSql($prefix));
+
+        return $renamed;
+    }
+
+    /** The table's definition. */
     public static function createTableSql(string $prefix): string
     {
         return 'CREATE TABLE IF NOT EXISTS `' . $prefix . self::TABLE . '` ('
@@ -35,6 +62,7 @@ final class DbOrderRecords implements OrderRecords
             . '`two_order_state` VARCHAR(32) NOT NULL DEFAULT \'\','
             . '`two_order_status` VARCHAR(32) NOT NULL DEFAULT \'\','
             . '`token_hash` CHAR(64) NOT NULL DEFAULT \'\','
+            . '`payload_hash` CHAR(64) NOT NULL DEFAULT \'\','
             . '`company_name` VARCHAR(255) NOT NULL DEFAULT \'\','
             . '`organization_number` VARCHAR(64) NOT NULL DEFAULT \'\','
             . '`country_code` CHAR(2) NOT NULL DEFAULT \'\','
