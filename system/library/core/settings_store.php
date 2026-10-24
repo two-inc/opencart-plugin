@@ -15,7 +15,8 @@ interface SettingsStore
     public function get(string $key): ?string;
 
     /**
-     * Writes only the given keys and leaves every other key as it is.
+     * Writes only the given keys and leaves every other key as it is. A key
+     * with nothing stored yet is created, never dropped.
      *
      * @param array<string, string> $values
      */

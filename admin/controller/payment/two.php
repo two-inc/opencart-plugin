@@ -6,6 +6,7 @@ namespace Opencart\Admin\Controller\Extension\Two\Payment;
 
 use Opencart\System\Library\Extension\Two\Core\Brand;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
+use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;
 
 /**
  * Admin adapter for the Two payment extension (Extensions > Payments > Two).
@@ -23,6 +24,7 @@ use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
  * @property-read \Opencart\System\Library\Request $request
  * @property-read \Opencart\System\Library\Response $response
  * @property-read \Opencart\System\Library\Cart\User $user
+ * @property-read \Opencart\System\Library\DB $db
  * @property-read \Opencart\Admin\Model\Setting\Setting $model_setting_setting
  */
 class Two extends \Opencart\System\Engine\Controller
@@ -78,12 +80,12 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         if (!$json) {
-            $this->load->model('setting/setting');
-
+            $values = [];
             foreach (self::FORM_KEYS as $key) {
-                $field = self::CODE . '_' . $key;
-                $this->model_setting_setting->editValue(self::CODE, $field, (string) ($this->request->post[$field] ?? ''));
+                $values[$key] = (string) ($this->request->post[self::CODE . '_' . $key] ?? '');
             }
+            // Upserts: a key with no row yet (added after this shop installed) is inserted, not dropped.
+            (new DbSettingsStore($this->db))->setMany($values);
 
             $json['success'] = $this->language->get('text_success');
         }

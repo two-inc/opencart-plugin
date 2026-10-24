@@ -7,7 +7,7 @@ parameters:
         - catalog
         - system
         - dev
-        - tests
+    # tests/ is left out: its OpenCart DB double shares the real class name.
     bootstrapFiles:
         - dev/ci/phpstan-bootstrap.php
     # Real OpenCart sources at the supported floor (4.1.0.0), fetched by

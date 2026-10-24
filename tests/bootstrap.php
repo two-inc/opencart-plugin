@@ -2,7 +2,21 @@
 
 declare(strict_types=1);
 
+// CLI only: the staging shops serve the whole repo under the web root.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
 require dirname(__DIR__) . '/dev/autoload.php';
+
+// What a shop's config.php defines, at the values the specs assume.
+if (!defined('DB_PREFIX')) {
+    define('DB_PREFIX', 'oc_');
+}
+if (!class_exists('Opencart\\System\\Library\\DB', false)) {
+    require __DIR__ . '/fixtures/opencart-db-double.php';
+}
 
 /** The harness's assertions. Every message names the case that failed. */
 final class TinyAssert
