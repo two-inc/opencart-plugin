@@ -59,10 +59,27 @@ final class OrderTax
     public static function storeSettings(\Opencart\System\Library\DB $db, int $storeId): array
     {
         $keys = implode("', '", self::STORE_KEYS);
-        $query = $db->query('SELECT `key`, `value` FROM `' . DB_PREFIX . "setting` WHERE `store_id` = '" . $storeId . "' AND `code` = 'config' AND `key` IN ('" . $keys . "')");
+        $query = $db->query('SELECT `store_id`, `key`, `value` FROM `' . DB_PREFIX . "setting` WHERE `store_id` IN ('0', '" . $storeId . "') AND `code` = 'config' AND `key` IN ('" . $keys . "')");
+
+        return self::overlay(is_object($query) ? $query->rows : [], $storeId);
+    }
+
+    /**
+     * Store N's settings laid over the default store's, as OpenCart's
+     * setting startup loads them: a key store N lacks takes store 0's value.
+     *
+     * @param list<array<string, mixed>> $rows setting rows: store_id, key, value
+     * @return array<string, string>
+     */
+    public static function overlay(array $rows, int $storeId): array
+    {
         $settings = [];
-        foreach (is_object($query) ? $query->rows : [] as $row) {
-            $settings[(string) $row['key']] = (string) $row['value'];
+        foreach ([0, $storeId] as $store) {
+            foreach ($rows as $row) {
+                if ((int) $row['store_id'] === $store && in_array($row['key'], self::STORE_KEYS, true)) {
+                    $settings[(string) $row['key']] = (string) $row['value'];
+                }
+            }
         }
 
         return $settings;

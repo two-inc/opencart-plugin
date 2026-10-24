@@ -29,5 +29,16 @@ final class OrderTaxSpec
             $actual = $scope['customer_group_id'] . '|' . $address($scope['shipping']) . '|' . $address($scope['payment']) . '|' . $address($scope['store']);
             TinyAssert::same($case['expected'], $actual, 'order tax scope: ' . $case['description']);
         }
+
+        $row = static fn (int $store, string $key, string $value): array => ['store_id' => (string) $store, 'key' => $key, 'value' => $value];
+        $rows = [$row(0, 'config_country_id', '222'), $row(0, 'config_zone_id', '3563'), $row(0, 'config_customer_group_id', '1'), $row(2, 'config_country_id', '160'), $row(2, 'config_zone_id', '0'), $row(3, 'config_country_id', '203'), $row(0, 'config_name', 'ignored')];
+        $overlays = [
+            ['store' => 0, 'expected' => ['config_country_id' => '222', 'config_zone_id' => '3563', 'config_customer_group_id' => '1'], 'description' => 'the default store as stored'],
+            ['store' => 2, 'expected' => ['config_country_id' => '160', 'config_zone_id' => '0', 'config_customer_group_id' => '1'], 'description' => 'store 2 over store 0: a key store 2 lacks takes store 0\'s value'],
+            ['store' => 5, 'expected' => ['config_country_id' => '222', 'config_zone_id' => '3563', 'config_customer_group_id' => '1'], 'description' => 'a store with no rows of its own: store 0'],
+        ];
+        foreach ($overlays as $case) {
+            TinyAssert::same($case['expected'], OrderTax::overlay($rows, $case['store']), 'store settings: ' . $case['description']);
+        }
     }
 }
