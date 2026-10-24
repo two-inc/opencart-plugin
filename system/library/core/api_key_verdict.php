@@ -75,17 +75,45 @@ final class ApiKeyVerdict
             return ['status' => self::NOT_CONFIGURED, 'code' => null, 'merchant' => null];
         }
         $fingerprint = $this->settings->credentialFingerprint();
-        $response = $this->client->request('GET', self::VERIFY_PATH, null, $timeoutSeconds);
-        $merchant = $response->json();
-        $status = self::categorise($response, $merchant);
-        $code = $response->reachedTwo() ? $response->status : null;
+        $result = self::ask($this->client, $timeoutSeconds);
 
-        $this->write($fingerprint, $status, $code, false, null);
+        $this->write($fingerprint, $result['status'], $result['code'], false, null);
         if ($fingerprint === $this->settings->credentialFingerprint()) {
-            $this->memo = ['status' => $status, 'code' => $code];
+            $this->memo = ['status' => $result['status'], 'code' => $result['code']];
         }
 
-        return ['status' => $status, 'code' => $code, 'merchant' => $status === self::OK ? $merchant : null];
+        return $result;
+    }
+
+    /**
+     * A live check of credentials the merchant has typed but not saved: the
+     * admin's live check and the save-time gate. Nothing is cached, since the
+     * verdict describes a key this shop does not hold (yet).
+     *
+     * @return array{status: string, code: int|null, merchant: array<string, mixed>|null}
+     */
+    public function check(string $apiKey, string $environment, int $timeoutSeconds = self::LIVE_TIMEOUT_SECONDS): array
+    {
+        if (trim($apiKey) === '') {
+            return ['status' => self::NOT_CONFIGURED, 'code' => null, 'merchant' => null];
+        }
+
+        return self::ask($this->client->withCredentials(trim($apiKey), $environment), $timeoutSeconds);
+    }
+
+    /**
+     * The last verdict reached for the stored credentials, however old, or
+     * null when none was: whether the stored key is known good, which a save
+     * must not overwrite with a key it could not verify.
+     */
+    public function lastStatus(): ?string
+    {
+        $stored = $this->read();
+        if ($stored === null || $stored['fingerprint'] !== $this->settings->credentialFingerprint() || $stored['status'] === self::VERIFYING) {
+            return null;
+        }
+
+        return $stored['status'];
     }
 
     /**
@@ -128,11 +156,6 @@ final class ApiKeyVerdict
         return $this->verify(self::LIVE_TIMEOUT_SECONDS)['status'];
     }
 
-    public function isVerified(bool $allowLiveCheck = true): bool
-    {
-        return $this->status($allowLiveCheck) === self::OK;
-    }
-
     /**
      * Whether the stored key is known to be unusable, as opposed to merely
      * unconfirmed: the question an order submit asks, cache-only. Reads past
@@ -157,6 +180,16 @@ final class ApiKeyVerdict
     public static function isDefinitive(string $status): bool
     {
         return $status === self::INVALID || $status === self::NOT_CONFIGURED;
+    }
+
+    /** @return array{status: string, code: int|null, merchant: array<string, mixed>|null} */
+    private static function ask(Client $client, int $timeoutSeconds): array
+    {
+        $response = $client->request('GET', self::VERIFY_PATH, null, $timeoutSeconds);
+        $merchant = $response->json();
+        $status = self::categorise($response, $merchant);
+
+        return ['status' => $status, 'code' => $response->reachedTwo() ? $response->status : null, 'merchant' => $status === self::OK ? $merchant : null];
     }
 
     /** @param array<string, mixed>|null $body */

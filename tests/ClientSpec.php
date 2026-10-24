@@ -6,6 +6,7 @@ use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
+use Opencart\System\Library\Extension\Two\Core\SettingsOverlay;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 
 /**
@@ -48,6 +49,8 @@ final class ClientSpec
         }
 
         self::testBadCallsAreRefused();
+        self::testScrubFloor();
+        self::testWithCredentials();
     }
 
     /** @param array{stored: array<string, string>, flag: bool, call: array<int, mixed>, response: HttpResponse|null, url: string, headers: array<string, string>, body: string|null, tls: bool, timeout: int, errors: int, description: string} $case */
@@ -93,6 +96,45 @@ final class ClientSpec
             TinyAssert::throws(static fn () => $client->request(...$case['call']), InvalidArgumentException::class, 'refuses ' . $case['description']);
             TinyAssert::same([], $transport->calls, 'refuses ' . $case['description'] . ' before the wire');
         }
+    }
+
+    /**
+     * A custom header value is scrubbed from log text only when it is at
+     * least MIN_SCRUB_LENGTH long; the header itself is always redacted by name.
+     */
+    private static function testScrubFloor(): void
+    {
+        $cases = [
+            ['value' => 'ab', 'scrubbed' => false, 'description' => 'a two-character value is left in the text'],
+            ['value' => 'abc', 'scrubbed' => false, 'description' => 'a three-character value is left in the text'],
+            ['value' => 'abcd', 'scrubbed' => true, 'description' => 'a four-character value is scrubbed'],
+            ['value' => 'fw-secret', 'scrubbed' => true, 'description' => 'a longer value is scrubbed'],
+        ];
+        foreach ($cases as $case) {
+            $logger = new RecordingLogger();
+            $stored = ['api_key' => self::KEY, 'custom_headers' => (string) json_encode([['name' => 'X-Short', 'value' => $case['value']]])];
+            $echo = 'status ' . $case['value'] . ' accepted';
+            self::client($stored, new ScriptedTransport([new HttpResponse(200, $echo)]), $logger, false)->request('GET', '/v1/x');
+            $context = $logger->lines[0]['context'];
+            TinyAssert::same('[REDACTED]', $context['request']['headers']['X-Short'], $case['description'] . ' (header redacted by name)');
+            TinyAssert::same($case['scrubbed'] ? 'status [REDACTED] accepted' : $echo, $context['response']['body'], $case['description']);
+        }
+    }
+
+    /** Candidate credentials reach the wire; the stored ones and the store are untouched. */
+    private static function testWithCredentials(): void
+    {
+        $transport = new ScriptedTransport();
+        $store = new MemoryStore(['api_key' => self::KEY, 'environment' => 'sandbox', 'disable_ssl_verify' => '1']);
+        $client = new Client(new Environment(false), new SettingsProvider($store), new CustomHeaders(), $transport, new RecordingLogger(), self::VERSION);
+        $client->withCredentials('candidate-key', 'production')->request('GET', '/v1/x');
+        $sent = $transport->calls[0];
+        TinyAssert::same('candidate-key', $sent['headers']['X-API-Key'], 'withCredentials sends the candidate key');
+        TinyAssert::same(true, str_starts_with($sent['url'], 'https://api.two.inc/v1/x?'), 'withCredentials calls the candidate environment');
+        TinyAssert::same(false, $sent['verifyTls'], 'withCredentials keeps every other stored setting');
+        TinyAssert::same(['api_key' => self::KEY, 'environment' => 'sandbox', 'disable_ssl_verify' => '1'], $store->values, 'withCredentials leaves the store as it was');
+        $overlay = new SettingsOverlay($store, ['api_key' => 'x']);
+        TinyAssert::throws(static fn () => $overlay->setMany(['api_key' => 'y']), LogicException::class, 'the overlay refuses writes');
     }
 
     /** @param array<string, string> $stored */

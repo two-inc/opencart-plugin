@@ -16,6 +16,12 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   successful fetch replaces it.
  * - A 200 that answers none of the record's questions (a captive portal, a
  *   proxy page) is a failed fetch, never a merchant with no restrictions.
+ * - Reading the record stands in for a schedule that is not running: a cold
+ *   cache is fetched on read (at most every RETRY_COLD seconds), and a record
+ *   older than STALE_AFTER is refetched on read (at most every RETRY_STALE
+ *   seconds, with a short timeout since a buyer may be waiting). Every
+ *   attempt (read, save or schedule) is stamped before the call, so
+ *   concurrent reads share one.
  *
  * Readers of individual fields (terms, buyer countries, minimum order) land
  * with the phases that use them (P6, P7); this class holds the record whole.
@@ -24,8 +30,15 @@ final class RecordProvider
 {
     public const CACHE_KEY = 'merchant_record';
     public const CRON_LAST_RUN_KEY = 'cron_last_run';
+    public const ATTEMPT_KEY = 'merchant_record_attempt';
     public const MERCHANT_PATH = '/v1/merchant/';
     public const TIMEOUT_SECONDS = 10;
+
+    /** A daily schedule that has missed a run by two hours. */
+    public const STALE_AFTER = 93_600;
+    public const RETRY_COLD = 300;
+    public const RETRY_STALE = 3_600;
+    public const STALE_TIMEOUT_SECONDS = 2;
 
     public const CRON_REFRESHED = 'refreshed';
     public const CRON_FAILED = 'failed';
@@ -50,12 +63,14 @@ final class RecordProvider
 
     /**
      * The cached record for the credentials in force, or null before the
-     * first successful fetch for them.
+     * first successful fetch for them. Refreshes first when one is due (see
+     * refreshIfDue), and serves whatever the cache then holds.
      *
      * @return array<string, mixed>|null
      */
     public function record(): ?array
     {
+        $this->refreshIfDue();
         $slot = $this->slot();
 
         return $slot !== null && $slot['fingerprint'] === $this->settings->credentialFingerprint() ? $slot['record'] : null;
@@ -74,14 +89,16 @@ final class RecordProvider
      * merchant (the verification call, which also refreshes the heartbeat);
      * the record is then read by that id. Whether the cache was replaced.
      */
-    public function refresh(): bool
+    public function refresh(int $timeoutSeconds = self::TIMEOUT_SECONDS): bool
     {
         if ($this->settings->apiKey() === '') {
             return false;
         }
         $fingerprint = $this->settings->credentialFingerprint();
+        // Every attempt, by any path, holds back the read-time stand-in.
+        $this->settings->store()->setMany([self::ATTEMPT_KEY => (string) json_encode(['fingerprint' => $fingerprint, 'at' => ($this->clock)()])]);
 
-        $verified = $this->verdict->verify(self::TIMEOUT_SECONDS);
+        $verified = $this->verdict->verify($timeoutSeconds);
         $merchantId = is_scalar($verified['merchant']['id'] ?? null) ? trim((string) $verified['merchant']['id']) : '';
         if ($merchantId === '') {
             $this->logger->error('Two merchant record not refreshed: the API key resolved no merchant (' . $verified['status'] . '). The cached record stays in use.');
@@ -89,7 +106,7 @@ final class RecordProvider
             return false;
         }
 
-        $response = $this->client->request('GET', self::MERCHANT_PATH . rawurlencode($merchantId), null, self::TIMEOUT_SECONDS);
+        $response = $this->client->request('GET', self::MERCHANT_PATH . rawurlencode($merchantId), null, $timeoutSeconds);
         $record = $response->json();
         if ($response->status !== 200 || $record === null || !self::isRecord($record)) {
             $this->logger->error('Two merchant record refresh failed (HTTP ' . $response->status . '). The cached record stays in use.');
@@ -125,6 +142,41 @@ final class RecordProvider
         $this->settings->store()->setMany([self::CRON_LAST_RUN_KEY => (string) ($this->clock)()]);
 
         return $this->refresh() ? self::CRON_REFRESHED : self::CRON_FAILED;
+    }
+
+    /**
+     * The read-time stand-in for the schedule. Due when the credentials in
+     * force have no record (cold) or one older than STALE_AFTER (stale), and
+     * no attempt for them was made within that case's retry window. A failed
+     * attempt never clears the cache. refresh() stamps the attempt before it
+     * calls, so concurrent reads share one. Whether a fetch was attempted.
+     */
+    public function refreshIfDue(): bool
+    {
+        if ($this->settings->apiKey() === '') {
+            return false;
+        }
+        $now = ($this->clock)();
+        $fetchedAt = $this->fetchedAt();
+        $stale = $fetchedAt !== null;
+        if ($stale && $now - $fetchedAt < self::STALE_AFTER) {
+            return false;
+        }
+        $fingerprint = $this->settings->credentialFingerprint();
+        $attempt = json_decode((string) $this->settings->store()->get(self::ATTEMPT_KEY), true);
+        $triedAt = is_array($attempt) && ($attempt['fingerprint'] ?? null) === $fingerprint && is_int($attempt['at'] ?? null) ? $attempt['at'] : null;
+        if ($triedAt !== null && $now - $triedAt < ($stale ? self::RETRY_STALE : self::RETRY_COLD)) {
+            return false;
+        }
+
+        if ($stale) {
+            $ranAt = (int) $this->settings->store()->get(self::CRON_LAST_RUN_KEY);
+            $this->logger->error('Two merchant record is over ' . self::STALE_AFTER . ' seconds old, refreshing on read. The scheduled refresh last ran: '
+                . ($ranAt > 0 ? gmdate('Y-m-d H:i', $ranAt) . 'Z' : 'never') . '.');
+        }
+        $this->refresh($stale ? self::STALE_TIMEOUT_SECONDS : self::TIMEOUT_SECONDS);
+
+        return true;
     }
 
     /** @param array<string, mixed> $body */

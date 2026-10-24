@@ -22,6 +22,39 @@ final class ApiKeyVerdictSpec
     {
         self::testCategories();
         self::testCache();
+        self::testCandidates();
+    }
+
+    /** check() asks about typed credentials and caches nothing; lastStatus() reads the stored pair's verdict at any age. */
+    private static function testCandidates(): void
+    {
+        $checks = [
+            ['key' => ' cand ', 'environment' => 'production', 'responses' => [new HttpResponse(200, '{"id":"m2"}')], 'status' => ApiKeyVerdict::OK, 'url' => 'https://api.two.inc' . ApiKeyVerdict::VERIFY_PATH, 'description' => 'a candidate Two accepts, in its own environment, trimmed'],
+            ['key' => 'cand', 'environment' => 'sandbox', 'responses' => [new HttpResponse(403, '')], 'status' => ApiKeyVerdict::INVALID, 'url' => 'https://api.sandbox.two.inc' . ApiKeyVerdict::VERIFY_PATH, 'description' => 'a candidate Two rejects'],
+            ['key' => '  ', 'environment' => 'sandbox', 'responses' => [], 'status' => ApiKeyVerdict::NOT_CONFIGURED, 'url' => null, 'description' => 'a blank candidate makes no call'],
+        ];
+        foreach ($checks as $case) {
+            [$verdict, $transport, $store] = self::verdict(['api_key' => 'stored'], $case['responses']);
+            $result = $verdict->check($case['key'], $case['environment']);
+            TinyAssert::same($case['status'], $result['status'], 'check: ' . $case['description']);
+            TinyAssert::same($case['url'], isset($transport->calls[0]) ? strstr($transport->calls[0]['url'], '?', true) : null, 'check: ' . $case['description'] . ' (endpoint)');
+            TinyAssert::same(isset($transport->calls[0]) ? trim($case['key']) : null, $transport->calls[0]['headers']['X-API-Key'] ?? null, 'check: ' . $case['description'] . ' (key sent)');
+            TinyAssert::same(null, $store->get(ApiKeyVerdict::CACHE_KEY), 'check: ' . $case['description'] . ' (nothing cached)');
+        }
+
+        $fingerprint = (new SettingsProvider(new MemoryStore(['api_key' => 'k'])))->credentialFingerprint();
+        $slot = static fn (string $status, string $print, bool $claim = false): string => (string) json_encode(['status' => $status, 'code' => null, 'fingerprint' => $print, 'claim' => $claim, 'verified_on' => 0, 'checked_on' => 0]);
+        $lasts = [
+            ['slot' => null, 'expected' => null, 'description' => 'no verdict yet'],
+            ['slot' => $slot('ok', $fingerprint), 'expected' => ApiKeyVerdict::OK, 'description' => 'an ok long past its TTL still says the key was good'],
+            ['slot' => $slot('invalid_key', $fingerprint), 'expected' => ApiKeyVerdict::INVALID, 'description' => 'a rejection'],
+            ['slot' => $slot('ok', 'other'), 'expected' => null, 'description' => 'a verdict for other credentials says nothing'],
+            ['slot' => $slot('verifying', $fingerprint, true), 'expected' => null, 'description' => 'a claim with nothing carried says nothing'],
+        ];
+        foreach ($lasts as $case) {
+            [$verdict] = self::verdict($case['slot'] === null ? ['api_key' => 'k'] : ['api_key' => 'k', ApiKeyVerdict::CACHE_KEY => $case['slot']], []);
+            TinyAssert::same($case['expected'], $verdict->lastStatus(), 'lastStatus: ' . $case['description']);
+        }
     }
 
     private static function testCategories(): void
