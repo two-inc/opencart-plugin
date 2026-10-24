@@ -12,6 +12,11 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * - Every order request goes through Postprocessing just before it is sent.
  * - The callbacks are guarded by a per-order token: its hash is stored with
  *   the order, the token itself only travels in the callback URLs Two holds.
+ * - The order Two confirms is the order the shop will place: the create
+ *   payload's hash is stored, and confirm rebuilds the payload from the
+ *   shop's stored order (hook included, section 21.1) and refuses on any
+ *   difference. OpenCart rewrites an unplaced order on every checkout
+ *   render, so the cart can change after the Two order was created.
  * - Two's order state decides the outcome, never the URL the buyer arrived on.
  * - Outcomes are plain arrays the adapter turns into order history, notices
  *   and redirects. A refusal carries the buyer's language keys and the
@@ -25,6 +30,9 @@ final class OrderFlow
     public const CANCELLED = 'cancelled';
     public const REFUSED = 'refused';
     public const UNAUTHORISED = 'unauthorised';
+
+    public const CALLBACK_CONFIRM = 'confirmation';
+    public const CALLBACK_CANCEL = 'cancel';
 
     /** Two order states in which the buyer has verified and the order stands. */
     public const PLACED_STATES = ['CONFIRMED', 'FULFILLING', 'FULFILLED', 'PARTIALLY_FULFILLED', 'REFUNDED', 'PARTIALLY_REFUNDED'];
@@ -48,10 +56,10 @@ final class OrderFlow
     /**
      * Creates the Two order. On success the buyer goes to the redirect URL.
      *
-     * @param array<string, mixed>       $order  OrderBuilder's order shape, merchant_urls carrying the token
+     * @param array<string, mixed>       $order   OrderBuilder's order shape, merchant_urls carrying the token
      * @param list<array<string, mixed>> $lines
      * @param list<array<string, mixed>> $totals
-     * @param array<string, mixed>       $context platform objects for the hook
+     * @param array<string, mixed>       $context platform objects and request facts for the hook
      * @return array{ok: true, redirect: string, two_order_id: string}|array{ok: false, buyer: non-empty-list<string>, reason: string}
      */
     public function create(array $order, array $lines, array $totals, string $token, array $context = []): array
@@ -65,22 +73,26 @@ final class OrderFlow
         }
 
         try {
-            $payload = $this->builder->build($order, $lines, $totals);
-            $failures = OrderBuilder::shopMatchFailures($payload, $order);
-            $payload = $this->postprocessing->apply(Postprocessing::ORDER_CREATE, 'checkout', '/v1/order', $payload, $context + ['order_id' => $orderId], $failures);
+            $payload = $this->payload($order, $lines, $totals, $context, 'checkout');
         } catch (OrderRefused $refused) {
             return $this->refused($orderId, 'Two order not created: ' . $refused->detail);
         }
 
-        $this->records->put($orderId, [
+        $stored = [
             'token_hash' => self::tokenHash($token),
+            'payload_hash' => self::payloadHash($payload),
             'two_order_id' => '',
             'two_order_state' => '',
             'two_order_status' => '',
             'company_name' => (string) $company['company_name'],
             'organization_number' => (string) $company['organization_number'],
             'country_code' => (string) $company['country_code'],
-        ]);
+        ];
+        $this->records->put($orderId, $stored);
+        $record = $this->records->get($orderId) ?? [];
+        if (($record['token_hash'] ?? '') !== $stored['token_hash'] || ($record['payload_hash'] ?? '') !== $stored['payload_hash']) {
+            return $this->refused($orderId, 'Two order not created: the two_order table could not store the callback token. Run the extension install again.');
+        }
 
         $response = $this->client->request('POST', '/v1/order', $payload);
         $body = $response->json();
@@ -104,11 +116,14 @@ final class OrderFlow
 
     /**
      * Two sent the buyer back to the confirmation URL. Confirms a verified
-     * order; an order Two already holds as placed confirms again harmlessly.
+     * order whose payload the shop's stored order still rebuilds exactly; an
+     * order Two already holds as placed confirms again harmlessly.
      *
+     * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
+     *        the shop's stored order as create's inputs, given the stored record (company included); null when it is gone
      * @return array{outcome: string, reason: string, two_order_id: string}
      */
-    public function confirm(int $orderId, string $token): array
+    public function confirm(int $orderId, string $token, \Closure $rebuild): array
     {
         $record = $this->authorised($orderId, $token);
         if ($record === null) {
@@ -118,6 +133,15 @@ final class OrderFlow
         if ($twoOrderId === '') {
             return self::outcome(self::REFUSED, 'No Two order was created for this order, so there is nothing to confirm.', '');
         }
+
+        $changed = $this->changedSince($record, $rebuild);
+        if ($changed !== null) {
+            $this->sendCancel($twoOrderId, 'order_changed', $orderId);
+            $this->readState($orderId, $twoOrderId);
+
+            return self::outcome(self::REFUSED, 'Two order ' . $twoOrderId . ' not confirmed and cancelled: ' . $changed, $twoOrderId);
+        }
+
         $state = $this->readState($orderId, $twoOrderId);
         if ($state === null) {
             return self::outcome(self::REFUSED, 'Two could not be asked for the state of order ' . $twoOrderId . '.', $twoOrderId);
@@ -149,7 +173,8 @@ final class OrderFlow
 
     /**
      * Two sent the buyer back to the cancel URL. Cancels the Two order and
-     * reads it back: the order counts as cancelled only once Two says so.
+     * reads it back whatever the cancel answered: the order counts as
+     * cancelled once Two says so, including when it already was.
      *
      * @return array{outcome: string, reason: string, two_order_id: string}
      */
@@ -163,16 +188,104 @@ final class OrderFlow
         if ($twoOrderId === '') {
             return self::outcome(self::CANCELLED, 'No Two order was created for this order.', '');
         }
-        if ($this->sendCancel($twoOrderId, 'buyer_cancel', $orderId) && $this->readState($orderId, $twoOrderId) === 'CANCELLED') {
+        $this->sendCancel($twoOrderId, 'buyer_cancel', $orderId);
+        if ($this->readState($orderId, $twoOrderId) === 'CANCELLED') {
             return self::outcome(self::CANCELLED, 'The buyer cancelled Two order ' . $twoOrderId . ' at Two.', $twoOrderId);
         }
 
         return self::outcome(self::REFUSED, 'Two order ' . $twoOrderId . ' could not be confirmed as cancelled.', $twoOrderId);
     }
 
+    /** Whether the token is the order's own, without asking Two anything. */
+    public function owns(int $orderId, string $token): bool
+    {
+        return $this->authorised($orderId, $token) !== null;
+    }
+
+    /**
+     * What the adapter does with a callback's outcome, given whether the shop
+     * order is placed now (read after the flow ran, so a second hit on an
+     * order the first hit placed never writes over it): place the order,
+     * note the reason on the unplaced order, and where the buyer goes.
+     *
+     * @return array{place: bool, note: bool, goto: 'success'|'cart', notice: 'cancelled'|'generic'|null}
+     */
+    public static function afterCallback(string $kind, string $outcome, bool $placed): array
+    {
+        if ($outcome === self::UNAUTHORISED) {
+            return ['place' => false, 'note' => false, 'goto' => 'cart', 'notice' => 'generic'];
+        }
+        if ($kind === self::CALLBACK_CONFIRM && $placed) {
+            return ['place' => false, 'note' => false, 'goto' => 'success', 'notice' => null];
+        }
+        if ($placed) {
+            return ['place' => false, 'note' => false, 'goto' => 'cart', 'notice' => 'generic'];
+        }
+        if ($kind === self::CALLBACK_CONFIRM && $outcome === self::CONFIRMED) {
+            return ['place' => true, 'note' => false, 'goto' => 'success', 'notice' => null];
+        }
+
+        return ['place' => false, 'note' => true, 'goto' => 'cart', 'notice' => $outcome === self::CANCELLED ? 'cancelled' : 'generic'];
+    }
+
     public static function tokenHash(string $token): string
     {
         return hash('sha256', $token);
+    }
+
+    /**
+     * The create payload's identity: everything Two is asked to buy, without
+     * the callback URLs (which carry the token).
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function payloadHash(array $payload): string
+    {
+        unset($payload['merchant_urls']);
+
+        return hash('sha256', (string) json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION));
+    }
+
+    /**
+     * The payload as it is sent: built, shop-matched, through the hook.
+     *
+     * @param array<string, mixed>       $order
+     * @param list<array<string, mixed>> $lines
+     * @param list<array<string, mixed>> $totals
+     * @param array<string, mixed>       $context
+     * @return array<string, mixed>
+     */
+    private function payload(array $order, array $lines, array $totals, array $context, string $trigger): array
+    {
+        $payload = $this->builder->build($order, $lines, $totals);
+        $failures = OrderBuilder::shopMatchFailures($payload, $order);
+
+        return $this->postprocessing->apply(Postprocessing::ORDER_CREATE, $trigger, '/v1/order', $payload, $context + ['order_id' => (int) $order['order_id']], $failures);
+    }
+
+    /**
+     * Why the shop's stored order no longer rebuilds the payload Two holds,
+     * or null when it still does.
+     *
+     * @param array<string, string> $record
+     * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
+     */
+    private function changedSince(array $record, \Closure $rebuild): ?string
+    {
+        if (($record['payload_hash'] ?? '') === '') {
+            return 'no payload hash was stored at create.';
+        }
+        $input = $rebuild($record);
+        if ($input === null) {
+            return 'the shop order can no longer be read.';
+        }
+        try {
+            $payload = $this->payload($input['order'], $input['lines'], $input['totals'], $input['context'] ?? [], 'snapshot_hash');
+        } catch (OrderRefused $refused) {
+            return 'the shop order no longer builds: ' . $refused->detail;
+        }
+
+        return hash_equals($record['payload_hash'], self::payloadHash($payload)) ? null : 'the shop order changed after the Two order was created (cart, amounts or addresses).';
     }
 
     /**

@@ -28,6 +28,8 @@ final class OrderFlowSpec
         self::testConfirm();
         self::testCancel();
         self::testNewToken();
+        self::testAfterCallback();
+        self::testOwns();
     }
 
     private static function testCreate(): void
@@ -45,17 +47,18 @@ final class OrderFlowSpec
             ['responses' => [$created], 'order' => ['total' => 300], 'handlers' => ['m' => static fn (array $p): array => $p], 'ok' => true, 'buyer' => null, 'calls' => ['POST /v1/order'], 'state' => 'UNVERIFIED', 'description' => 'a merchant handler owns the shop-match checks'],
             ['responses' => [], 'order' => [], 'handlers' => $throws, 'ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'calls' => [], 'state' => null, 'description' => 'a faulting handler: nothing sent'],
             ['responses' => [], 'order' => ['currency_value' => 0], 'handlers' => [], 'ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'calls' => [], 'state' => null, 'description' => 'an order that cannot be built: nothing sent'],
+            ['responses' => [$created], 'order' => [], 'handlers' => [], 'lossy' => true, 'ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'calls' => [], 'state' => '', 'description' => 'a table that cannot hold the token: nothing sent'],
         ];
         foreach ($cases as $case) {
-            $records = new MemoryRecords();
+            $records = empty($case['lossy']) ? new MemoryRecords() : new TokenlessRecords();
             [$flow, $transport] = self::flow($case['responses'], $records, $case['handlers']);
-            $result = $flow->create($case['order'] + self::order(), [['name' => 'Widget', 'quantity' => 2, 'price' => 100, 'total' => 200, 'tax' => 25, 'rate' => 0.25, 'type' => 'PHYSICAL']], [], self::TOKEN);
+            $result = $flow->create($case['order'] + self::order(), self::lines(2), [], self::TOKEN);
             $d = 'create: ' . $case['description'];
             TinyAssert::same($case['ok'], $result['ok'], $d . ': ok');
             TinyAssert::same($case['buyer'], $result['ok'] ? null : $result['buyer'], $d . ': buyer keys');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['state'], $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
-            if ($case['state'] !== null) {
+            if ($case['state'] !== null && empty($case['lossy'])) {
                 TinyAssert::same(OrderFlow::tokenHash(self::TOKEN), $records->rows[42]['token_hash'], $d . ': the token hash is stored, not the token');
             }
             if ($result['ok']) {
@@ -68,6 +71,7 @@ final class OrderFlowSpec
     {
         $get = static fn (string $state): HttpResponse => self::json(200, ['id' => self::ID, 'state' => $state, 'status' => 'APPROVED']);
         $paths = ['GET /v1/order/' . self::ID, 'POST /v1/order/' . self::ID . '/confirm'];
+        $cancelPaths = ['POST /v1/order/' . self::ID . '/cancel', 'GET /v1/order/' . self::ID];
         $cases = [
             ['row' => true, 'token' => self::TOKEN, 'responses' => [$get('VERIFIED'), self::json(200, ['state' => 'CONFIRMED'])], 'outcome' => OrderFlow::CONFIRMED, 'calls' => $paths, 'state' => 'CONFIRMED', 'description' => 'verified: confirmed with Two'],
             ['row' => true, 'token' => self::TOKEN, 'responses' => [$get('CONFIRMED')], 'outcome' => OrderFlow::CONFIRMED, 'calls' => [$paths[0]], 'state' => 'CONFIRMED', 'description' => 'already confirmed: nothing more sent'],
@@ -79,6 +83,10 @@ final class OrderFlowSpec
             ['row' => true, 'token' => '', 'responses' => [], 'outcome' => OrderFlow::UNAUTHORISED, 'calls' => [], 'state' => '', 'description' => 'no token: unauthorised'],
             ['row' => false, 'token' => self::TOKEN, 'responses' => [], 'outcome' => OrderFlow::UNAUTHORISED, 'calls' => [], 'state' => null, 'description' => 'no record for the order: unauthorised'],
             ['row' => 'no-id', 'token' => self::TOKEN, 'responses' => [], 'outcome' => OrderFlow::REFUSED, 'calls' => [], 'state' => '', 'description' => 'no Two order was created: nothing to confirm'],
+            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [3, ['total' => 375, 'tax_total' => 75]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the cart grew after create: not confirmed, the Two order cancelled'],
+            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [1, ['total' => 125, 'tax_total' => 25]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the cart shrank after create: not confirmed'],
+            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [2, ['billing_address' => ['city' => 'Bergen'] + self::order()['billing_address']]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the address changed after create: not confirmed'],
+            ['row' => true, 'token' => self::TOKEN, 'rebuild' => null, 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the shop order is gone: not confirmed'],
         ];
         self::runCallbackCases('confirm', $cases);
     }
@@ -90,7 +98,8 @@ final class OrderFlowSpec
         $cases = [
             ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(200, []), $cancelled], 'outcome' => OrderFlow::CANCELLED, 'calls' => $paths, 'state' => 'CANCELLED', 'description' => 'cancelled and read back as cancelled'],
             ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(200, []), self::json(200, ['state' => 'VERIFIED'])], 'outcome' => OrderFlow::REFUSED, 'calls' => $paths, 'state' => 'VERIFIED', 'description' => 'Two still holds it verified: not cancelled'],
-            ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(409, [])], 'outcome' => OrderFlow::REFUSED, 'calls' => [$paths[0]], 'state' => '', 'description' => 'Two refuses the cancel'],
+            ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(409, []), self::json(200, ['state' => 'VERIFIED'])], 'outcome' => OrderFlow::REFUSED, 'calls' => $paths, 'state' => 'VERIFIED', 'description' => 'Two refuses the cancel and holds the order verified'],
+            ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(409, []), $cancelled], 'outcome' => OrderFlow::CANCELLED, 'calls' => $paths, 'state' => 'CANCELLED', 'description' => 'already cancelled at Two: the buyer is told it is cancelled'],
             ['row' => 'no-id', 'token' => self::TOKEN, 'responses' => [], 'outcome' => OrderFlow::CANCELLED, 'calls' => [], 'state' => '', 'description' => 'no Two order was created: nothing to cancel'],
             ['row' => true, 'token' => str_repeat('b', 48), 'responses' => [], 'outcome' => OrderFlow::UNAUTHORISED, 'calls' => [], 'state' => '', 'description' => 'another token: unauthorised, nothing sent'],
         ];
@@ -103,16 +112,57 @@ final class OrderFlowSpec
         foreach ($cases as $case) {
             $rows = [];
             if ($case['row'] !== false) {
-                $rows[42] = ['token_hash' => OrderFlow::tokenHash(self::TOKEN), 'two_order_id' => $case['row'] === 'no-id' ? '' : self::ID, 'two_order_state' => ''];
+                $rows[42] = ['token_hash' => OrderFlow::tokenHash(self::TOKEN), 'payload_hash' => OrderFlow::payloadHash((new OrderBuilder())->build(self::order(), self::lines(2), [])), 'two_order_id' => $case['row'] === 'no-id' ? '' : self::ID, 'two_order_state' => '', 'company_name' => 'Acme AS'];
             }
             $records = new MemoryRecords($rows);
             [$flow, $transport] = self::flow($case['responses'], $records);
-            $result = $kind === 'confirm' ? $flow->confirm(42, $case['token']) : $flow->cancel(42, $case['token']);
+            $spec = array_key_exists('rebuild', $case) ? $case['rebuild'] : [2, []];
+            $rebuild = static fn (array $record): ?array => $spec === null ? null : ['order' => $spec[1] + self::order(), 'lines' => self::lines($spec[0]), 'totals' => []];
+            $result = $kind === 'confirm' ? $flow->confirm(42, $case['token'], $rebuild) : $flow->cancel(42, $case['token']);
             $d = $kind . ': ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'], $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['state'], $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
         }
+    }
+
+    /** What the adapter does after a callback; the double-hit rows are the second hit on an order the first placed. */
+    private static function testAfterCallback(): void
+    {
+        $c = OrderFlow::CALLBACK_CONFIRM;
+        $x = OrderFlow::CALLBACK_CANCEL;
+        $cases = [
+            [$c, OrderFlow::CONFIRMED, false, 'place|success|', 'confirmed: place the order'],
+            [$c, OrderFlow::CONFIRMED, true, 'none|success|', 'double hit, Two confirmed: nothing written'],
+            [$c, OrderFlow::REFUSED, true, 'none|success|', 'double hit, the second confirm failed: nothing written over the placed order'],
+            [$c, OrderFlow::REFUSED, false, 'note|cart|generic', 'refused: noted on the unplaced order'],
+            [$c, OrderFlow::CANCELLED, false, 'note|cart|cancelled', 'cancelled at Two on return'],
+            [$c, OrderFlow::UNAUTHORISED, true, 'none|cart|generic', 'unauthorised, even on a placed order'],
+            [$x, OrderFlow::CANCELLED, false, 'note|cart|cancelled', 'cancel: noted, back to the cart'],
+            [$x, OrderFlow::REFUSED, false, 'note|cart|generic', 'cancel refused: noted'],
+            [$x, OrderFlow::CANCELLED, true, 'none|cart|generic', 'cancel on a placed order writes nothing'],
+            [$x, OrderFlow::UNAUTHORISED, false, 'none|cart|generic', 'cancel unauthorised'],
+        ];
+        foreach ($cases as [$kind, $outcome, $placed, $expected, $description]) {
+            $after = OrderFlow::afterCallback($kind, $outcome, $placed);
+            $action = $after['place'] ? 'place' : ($after['note'] ? 'note' : 'none');
+            TinyAssert::same($expected, $action . '|' . $after['goto'] . '|' . ($after['notice'] ?? ''), 'after callback: ' . $description);
+        }
+    }
+
+    private static function testOwns(): void
+    {
+        [$flow, $transport] = self::flow([], new MemoryRecords([42 => ['token_hash' => OrderFlow::tokenHash(self::TOKEN), 'two_order_id' => self::ID]]));
+        TinyAssert::true($flow->owns(42, self::TOKEN), 'owns: the order\'s own token');
+        TinyAssert::true(!$flow->owns(42, str_repeat('b', 48)), 'owns: another token');
+        TinyAssert::true(!$flow->owns(43, self::TOKEN), 'owns: another order');
+        TinyAssert::same([], self::calls($transport), 'owns asks Two nothing');
+    }
+
+    /** @return list<array<string, mixed>> */
+    private static function lines(int $quantity): array
+    {
+        return [['name' => 'Widget', 'quantity' => $quantity, 'price' => 100, 'total' => 100 * $quantity, 'tax' => 25, 'rate' => 0.25, 'type' => 'PHYSICAL']];
     }
 
     private static function testNewToken(): void
@@ -127,7 +177,7 @@ final class OrderFlowSpec
      * @param array<string, \Closure(array<string, mixed>, array<string, mixed>): mixed> $handlers
      * @return array{0: OrderFlow, 1: ScriptedTransport}
      */
-    private static function flow(array $responses, MemoryRecords $records, array $handlers = []): array
+    private static function flow(array $responses, \Opencart\System\Library\Extension\Two\Core\OrderRecords $records, array $handlers = []): array
     {
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
@@ -159,5 +209,23 @@ final class OrderFlowSpec
             'billing_address' => ['street_address' => 'Gate 1', 'postal_code' => '0150', 'city' => 'Oslo', 'region' => '', 'country' => 'NO'],
             'merchant_urls' => ['merchant_confirmation_url' => 'https://shop.example/confirm'],
         ];
+    }
+}
+
+/** An order table missing the token column, as a legacy table would be. */
+final class TokenlessRecords implements \Opencart\System\Library\Extension\Two\Core\OrderRecords
+{
+    /** @var array<int, array<string, string>> */
+    public array $rows = [];
+
+    public function get(int $orderId): ?array
+    {
+        return $this->rows[$orderId] ?? null;
+    }
+
+    public function put(int $orderId, array $fields): void
+    {
+        unset($fields['token_hash']);
+        $this->rows[$orderId] = $fields + ($this->rows[$orderId] ?? []);
     }
 }

@@ -7,12 +7,12 @@ namespace Opencart\System\Library\Extension\Two\Core;
 /**
  * Port: the plugin's own order-scoped store (Build Guide section 12.4), one
  * row per shop order id, holding what later requests need after the checkout
- * session is gone: the Two order id and state, the callback token's hash and
+ * session is gone: the Two order id and state, the callback token's hash, the create payload's hash and
  * the company the buyer entered.
  */
 interface OrderRecords
 {
-    public const FIELDS = ['two_order_id', 'two_order_state', 'two_order_status', 'token_hash', 'company_name', 'organization_number', 'country_code'];
+    public const FIELDS = ['two_order_id', 'two_order_state', 'two_order_status', 'token_hash', 'payload_hash', 'company_name', 'organization_number', 'country_code'];
 
     /**
      * The row for a shop order, or null when the plugin has none.
