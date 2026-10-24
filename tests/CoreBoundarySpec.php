@@ -12,7 +12,7 @@ use Opencart\System\Library\Extension\Two\Core\NotImplemented;
  * - every core type the rewrite plan names loads through OpenCart 4's
  *   library file-name rule, and the directory holds nothing else;
  * - no core file, comments aside, uses any of the OpenCart or I/O surfaces in
- *   FORBIDDEN, each of which proves it can catch its own sample.
+ *   FORBIDDEN, each of which proves it catches its own samples.
  */
 final class CoreBoundarySpec
 {
@@ -25,14 +25,16 @@ final class CoreBoundarySpec
         'SettingsStore', 'Transport', 'Logger', 'HttpResponse', 'NotImplemented',
     ];
 
-    /** @var list<array{pattern: string, sample: string, description: string}> */
+    /** @var list<array{pattern: string, samples: list<string>, description: string}> */
     private const FORBIDDEN = [
-        ['pattern' => '~\$this->(load|db|config|registry|request|response|session|url|language|document|cart|customer|user|event|log|cache|model_\w+)\b~', 'sample' => '$this->load->model("x");', 'description' => 'OpenCart registry access'],
-        ['pattern' => '~\\\\?Opencart\\\\(Admin|Catalog|Install|System\\\\Engine)\b~', 'sample' => 'class X extends \Opencart\System\Engine\Controller {}', 'description' => 'an OpenCart engine, admin or catalog class'],
-        ['pattern' => '~\b(DB_[A-Z]+|DIR_[A-Z]+|HTTPS?_(SERVER|CATALOG)|VERSION)\b~', 'sample' => '$t = DB_PREFIX . "order";', 'description' => 'an OpenCart config constant'],
-        ['pattern' => '~\b(mysqli\w*|PDO)\b~i', 'sample' => '$db = new mysqli();', 'description' => 'direct database access'],
-        ['pattern' => '~\b(curl_\w+|file_get_contents|fopen|fsockopen|stream_context_create)\s*\(~', 'sample' => 'curl_init();', 'description' => 'direct network or file I/O (use the Transport port)'],
-        ['pattern' => '~(\bgetenv\s*\(|\$_(GET|POST|SERVER|COOKIE|SESSION|REQUEST|ENV|FILES)\b)~', 'sample' => '$a = $_POST["x"];', 'description' => 'process or request globals (the adapter passes values in)'],
+        ['pattern' => '~\$this->(load|db|config|registry|request|response|session|url|language|document|cart|customer|user|event|log|cache|model_\w+)\b~', 'samples' => ['$this->load->model("x");'], 'description' => 'OpenCart registry access'],
+        ['pattern' => '~Opencart\\\\(Admin|Catalog|Install|Extension|System\\\\(?!Library\\\\Extension\\\\Two\\\\Core\b))~', 'samples' => ['class X extends \Opencart\System\Engine\Controller {}', 'new \Opencart\System\Library\Cart\Tax($registry);', 'use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;'], 'description' => 'an OpenCart class (engine, library such as Cart\\Tax or Log, admin, catalog) or the adapter'],
+        ['pattern' => '~\boc_\w+\s*\(~', 'samples' => ['$n = oc_strlen($name);'], 'description' => 'an OpenCart oc_*() helper'],
+        ['pattern' => '~\$registry\b|\bRegistry\b~', 'samples' => ['$db = $registry->get("db");'], 'description' => 'the OpenCart registry'],
+        ['pattern' => '~\b(DB_[A-Z]+|DIR_[A-Z]+|HTTPS?_(SERVER|CATALOG)|VERSION)\b~', 'samples' => ['$t = DB_PREFIX . "order";'], 'description' => 'an OpenCart config constant'],
+        ['pattern' => '~\b(mysqli\w*|PDO)\b~i', 'samples' => ['$db = new mysqli();'], 'description' => 'direct database access'],
+        ['pattern' => '~\b(curl_\w+|file_get_contents|fopen|fsockopen|stream_context_create)\s*\(~', 'samples' => ['curl_init();'], 'description' => 'direct network or file I/O (use the Transport port)'],
+        ['pattern' => '~(\bgetenv\s*\(|\$_(GET|POST|SERVER|COOKIE|SESSION|REQUEST|ENV|FILES)\b)~', 'samples' => ['$a = $_POST["x"];'], 'description' => 'process or request globals (the adapter passes values in)'],
     ];
 
     public static function runAll(): void
@@ -65,7 +67,9 @@ final class CoreBoundarySpec
     private static function testEveryForbiddenPatternCatchesItsSample(): void
     {
         foreach (self::FORBIDDEN as $rule) {
-            TinyAssert::same(1, preg_match($rule['pattern'], $rule['sample']), 'rule "' . $rule['description'] . '" catches its sample');
+            foreach ($rule['samples'] as $sample) {
+                TinyAssert::same(1, preg_match($rule['pattern'], $sample), 'rule "' . $rule['description'] . '" catches ' . $sample);
+            }
         }
     }
 

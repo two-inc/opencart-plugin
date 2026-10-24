@@ -33,7 +33,7 @@ OPENCART_FLOOR        := 4.1.0.0
 OPENCART_FLOOR_SHA256 := 5d9883de4e37852dbb71c83b8833b9aa4419bc3e71d808e62e38522b2fd1b294
 CACHE                 := .cache
 
-.PHONY: help install configure run stop clean logs test lint phpstan archive patch minor major
+.PHONY: help install configure smoke run stop clean logs test lint phpstan archive patch minor major
 
 .DEFAULT_GOAL := help
 
@@ -66,6 +66,10 @@ configure:
 		-e TWO_API_KEY=$(TWO_API_KEY) \
 		$(CONTAINER) php /var/www/html/extension/two/dev/configure.php
 
+## Smoke-test the running shop: admin pages, save, install, configure.php, error log
+smoke:
+	dev/ci/smoke.sh
+
 ## Start the existing shop containers
 run:
 	$(COMPOSE) start
@@ -91,10 +95,11 @@ test:
 lint:
 	@git ls-files -z '*.php' | xargs -0 -n1 php -l > /dev/null && echo "lint: ok"
 
-## Run PHPStan against the OpenCart floor sources (downloads both, pinned)
+## Run PHPStan: everything against the OpenCart floor sources, then the core with no OpenCart symbols
 phpstan: $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar
 	dev/ci/fetch-opencart.sh $(OPENCART_FLOOR) $(OPENCART_FLOOR_SHA256) $(CACHE)/opencart
 	php $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar analyse --configuration=phpstan.neon --no-progress --memory-limit=1G
+	php $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar analyse --configuration=phpstan-core.neon --no-progress --memory-limit=1G
 
 $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar:
 	@mkdir -p $(CACHE)
