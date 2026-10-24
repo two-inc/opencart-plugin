@@ -35,7 +35,9 @@ services:
       TWO_INTERNAL_ENVIRONMENTS: ${TWO_INTERNAL_ENVIRONMENTS:-}
     volumes:
       # The repo root is the extension directory, as on the staging shops.
-      - .:/var/www/html/extension/two
+      # Read-only: OpenCart's Installer > Uninstall deletes everything under
+      # extension/two, which here is the checkout and its .git.
+      - .:/var/www/html/extension/two:ro
     networks:
       - opencart
 
