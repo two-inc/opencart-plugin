@@ -8,13 +8,27 @@ namespace Opencart\System\Library\Extension\Two\Core;
 final class HttpResponse
 {
     /**
-     * @param array<string, string> $headers lower-cased names
+     * @param int                   $status         0 when nothing came back (DNS, TLS, routing, timeout)
+     * @param array<string, string> $headers        lower-cased names
+     * @param string                $transportError why nothing came back, empty otherwise
      */
     public function __construct(
         public readonly int $status,
         public readonly string $body,
         public readonly array $headers = [],
+        public readonly string $transportError = '',
     ) {
+    }
+
+    /** A transport failure that never reached Two, as opposed to any HTTP answer. */
+    public static function unreachable(string $error): self
+    {
+        return new self(0, '', [], $error === '' ? 'no response' : $error);
+    }
+
+    public function reachedTwo(): bool
+    {
+        return $this->status > 0 && $this->transportError === '';
     }
 
     /**

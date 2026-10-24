@@ -41,7 +41,8 @@ admin() { local route="$1"; shift; curl -s -b "$jar" "$@" "$base/admin/index.php
 page=$(admin extension/two/payment/two)
 contains "settings page" "$page" 'Edit Two settings'
 contains "settings page version" "$page" "Version $(php -r 'echo json_decode(file_get_contents("install.json"), true)["version"];')"
-contains "payments list" "$(admin extension/payment)" 'extension/two/payment/two'
+# The rendered heading, from our language file: a broken language path renders the key instead.
+contains "payments list heading" "$(admin extension/payment)" '<td>Two</td>'
 # Drop the sort_order row first: a save must insert a key that has no row (upgraded installs), not only update.
 docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_setting WHERE store_id = 0 AND code = 'payment_two' AND \`key\` = 'payment_two_sort_order'"
 contains "save" "$(admin extension/two/payment/two.save -X POST -d payment_two_status=1 -d payment_two_sort_order=2)" '"success"'
@@ -53,12 +54,19 @@ contains "payments uninstall" "$(admin 'extension/payment.uninstall&extension=tw
 contains "payments install" "$(admin 'extension/payment.install&extension=two&code=two')" '"success"'
 [ "$(setting environment)" = sandbox ] || fail "install() did not seed the core defaults"
 ok "install() seeded the core defaults"
+cron() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(action, '|', cycle, '|', status) FROM oc_cron WHERE code = 'two_record_refresh'"; }
+[ "$(cron)" = 'extension/two/cron/two|day|1' ] || fail "install() did not register the record refresh cron (got '$(cron)')"
+ok "install() registered the record refresh cron"
 
 # configure.php: puts the extension back, is idempotent, refuses a bad environment.
 configure > /dev/null
 [ "$(setting status)" = 1 ] || fail "configure.php did not enable the extension"
 [ "$(configure | grep -c '^\[configure\] set')" = 0 ] || fail "a second configure.php run changed settings"
 ok "configure.php enables and is idempotent"
+docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_cron WHERE code = 'two_record_refresh'"
+configure > /dev/null
+[ "$(cron)" = 'extension/two/cron/two|day|1' ] || fail "configure.php did not register the record refresh cron"
+ok "configure.php registers the record refresh cron"
 if configure -e TWO_ENVIRONMENT=bogus > /dev/null 2>&1; then fail "configure.php accepted TWO_ENVIRONMENT=bogus"; fi
 ok "configure.php refuses an unknown environment"
 

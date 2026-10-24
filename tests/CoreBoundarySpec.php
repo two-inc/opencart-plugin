@@ -18,9 +18,9 @@ final class CoreBoundarySpec
 {
     private const NAMESPACE = 'Opencart\\System\\Library\\Extension\\Two\\Core\\';
 
-    /** The plan's ten core classes, then the ports and value objects they share. */
+    /** The plan's ten core classes plus the key verdict heartbeat, then the ports and value objects they share. */
     private const CORE_TYPES = [
-        'Client', 'Environment', 'RecordProvider', 'SettingsProvider', 'Availability',
+        'Client', 'Environment', 'RecordProvider', 'SettingsProvider', 'Availability', 'ApiKeyVerdict',
         'OrderBuilder', 'Postprocessing', 'ErrorMapper', 'CustomHeaders', 'Brand',
         'SettingsStore', 'Transport', 'Logger', 'HttpResponse', 'NotImplemented',
     ];

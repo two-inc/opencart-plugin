@@ -95,11 +95,12 @@ test:
 lint:
 	@git ls-files -z '*.php' | xargs -0 -n1 php -l > /dev/null && echo "lint: ok"
 
-## Run PHPStan: everything against the OpenCart floor sources, then the core with no OpenCart symbols
+## Run PHPStan: everything against the OpenCart floor sources, the core with no OpenCart symbols, then the tests
 phpstan: $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar
 	dev/ci/fetch-opencart.sh $(OPENCART_FLOOR) $(OPENCART_FLOOR_SHA256) $(CACHE)/opencart
 	php $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar analyse --configuration=phpstan.neon --no-progress --memory-limit=1G
 	php $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar analyse --configuration=phpstan-core.neon --no-progress --memory-limit=1G
+	php $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar analyse --configuration=phpstan-tests.neon --no-progress --memory-limit=1G
 
 $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar:
 	@mkdir -p $(CACHE)
