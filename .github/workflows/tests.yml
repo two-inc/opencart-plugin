@@ -1,0 +1,94 @@
+name: Tests
+
+on:
+  push:
+    branches: [staging, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: PHP ${{ matrix.php-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The OpenCart 4.1 floor and the PHP the staging shops run.
+        php-version: ["8.1", "8.4"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-version }}
+          coverage: none
+
+      - name: Syntax check
+        run: make lint
+
+      - name: Offline test suite
+        run: make test
+
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          coverage: none
+
+      # Pins (PHPStan and the OpenCart floor sources, both checksum-verified)
+      # live in the Makefile, so CI and a local run use the same ones.
+      - name: PHPStan
+        run: make phpstan
+
+  smoke:
+    name: Install smoke (OpenCart 4.1.0.4)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The same docker shop as `make install`: MariaDB, OpenCart from the
+      # pinned upstream zip via cli_install.php, then dev/configure.php.
+      - name: Install the shop and the extension
+        run: make install
+
+      - name: Smoke
+        run: make smoke
+
+      - name: Shop logs
+        if: failure()
+        run: docker compose logs --no-color | tail -200
+
+      - name: Tear down
+        if: always()
+        run: make clean
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build two.ocmod.zip
+        run: make archive
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: two.ocmod.zip
+          path: dist/two.ocmod.zip
+          if-no-files-found: error

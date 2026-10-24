@@ -1,49 +1,28 @@
-## Synopsis
-### Overview
-**Two is the world's first pure-B2B online payment method** 
-Sell to your business customers in one click. The Two payment Module simplifies B2B shopping, making it easy and safe for Merchants to offer invoices as payment method.
+# Two for OpenCart
 
-### Benefits for Merchants
-Hurry! For a limited time Two will reimburse merchants for the cost of deploying this plugin from the Prestashop App Store.
+The Two payment extension for OpenCart 4.1: pay by invoice for business buyers.
 
-Two allows you to offer a seamless Buy now, Pay later option for your business customers which will enhance the buyer journey and reduce the manual work related to doing business with other Businesses.
+**Status: being rewritten.** This branch holds the new OpenCart 4.1 foundation. It installs and appears under Extensions > Payments, but does not offer Two at checkout yet. The 1.x releases for OpenCart 3 call API hosts that no longer exist, so they cannot reach Two.
 
-Two will:
-- Run an instant credit check on your customers
-- Allow you to enable a B2B Guest Checkout - increases conversion by up to 36%
-- Offer customers flexible invoice payment terms from 14 to 90 days
-- Automatically issue an invoice - already integrated with PEPPOL e-invoicing network
-- Handle partial capture and refunds in a click
-- You get paid instantly on fulfilment of an order
+## Requirements
 
-Completely remove any credit risk - if the customer doesn't repay, it's Two's problem, and not yours.
+- OpenCart 4.1.0.0 or later
+- PHP 8.1 or later
 
-### Benefit for customers
-**Two Buy now, Pay later** offers your business customers the option to pay with a frictionless invoice solution that will send the invoice directly to their accountant through electronic invoicing. 
+## Install
 
-- Total flexibility on repayment terms - customers can choose to repay on any timescale they like
-- Instantly checkout without any burdensome onboarding
-- PDF + Electronic invoicing using the [PEPPOL](https://peppol.eu/) framework - invoices flow straight to the ERP
+Upload `two.ocmod.zip` in Extensions > Installer, install it, then install and enable Two in Extensions > Extensions > Payments.
 
-**How to get your Two keys:** 
+## Development
 
-1. Go to [two.inc](http://two.inc) and sign up your company
-2. You will receive an e-mail with your test keys. And as soon as you are ready, your production keys as well. 
-3. Once you have changed out your test keys with the production ones - you are ready to offer your B2B customers the Two solution.
+Needs Docker and PHP 8.1+ on the host.
 
-### Features
+```sh
+cp .env.example .env   # optional: API key and environment
+make install           # OpenCart 4.1.0.4 on http://localhost:1238/ with the extension enabled
+make test              # offline test suite
+make phpstan           # static analysis
+make archive           # dist/two.ocmod.zip
+```
 
-- Dynamic and user-friendly merchant portal
-- Order fulfilment in the Prestashop backoffice
-- All Two Buy now, Pay Later offerings to you business customers
-- Automatic updates
-
-## How To Install Extension
-1. Download as a zip from git
-2. Rename it to `two_oc3.ocmod.zip`
-3. Go to `Admin -> Extension installer -> Upload`
-4. Go to `Admin -> Modification -> Refresh`
-
-## How To Configure Extension
-Please find configuration guide in [opencart marketplace](https://www.opencart.com/index.php?route=marketplace/extension/info&extension_id=42797&filter_search=bnpl)
-
+`make help` lists every target. See [AGENTS.md](AGENTS.md) for the layout and conventions.

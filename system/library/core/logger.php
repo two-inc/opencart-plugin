@@ -1,0 +1,22 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Opencart\System\Library\Extension\Two\Core;
+
+/**
+ * Port: the shop's log. The core never passes an API key or other credential
+ * in a message or context (Build Guide section 13.3).
+ */
+interface Logger
+{
+    /** @param array<string, mixed> $context */
+    public function error(string $message, array $context = []): void;
+
+    /**
+     * Written only when the merchant has debug logging on.
+     *
+     * @param array<string, mixed> $context
+     */
+    public function debug(string $message, array $context = []): void;
+}
