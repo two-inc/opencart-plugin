@@ -62,6 +62,9 @@ The buyer picks Two, enters the company in the tile (name, organisation number, 
 
 - Tax: the plugin reports the shop's stored nets, taxes and rates and never computes or adjusts a tax. Where OpenCart keeps no per-line tax (shipping and other charge totals) the shop's own tax engine gives it, and the default handler refuses the order unless the lines add up to what the shop charged. A discount's tax is what the stored tax total leaves; at mixed rates, or with a fixed-amount tax rate, the order is refused rather than guessed.
 - Every order request goes through `Postprocessing::apply` in `OrderFlow`; `tests/CallSiteAllowlistSpec.php` fails a request that bypasses it. The README carries the merchant contract.
+- Confirm checks the order against the Two order: create stores the sent payload's hash, and confirm rebuilds it from the stored order (hook included) and refuses, cancelling the Two order, on any difference. OpenCart rewrites an unplaced order on every checkout render, so the cart can change after create.
+- Unplaced means status 0 or the shop's void status, which OpenCart 4.1.0.0 sets on every checkout edit. A second callback hit on a placed order writes nothing; the status is read again before any write (`OrderFlow::afterCallback`).
+- install() and `configure.php` rename a `two_order` table of another shape (the pre-rewrite extension's) aside before creating the table, and an order create is refused unless its token row was stored.
 - The callbacks are guarded by a per-order token (its hash in `two_order`). OpenCart's session cookie is SameSite=Strict by default, so a callback arriving without it bounces once through a same-site page rebuilt from the route and the validated id and token.
 - Refusals: the buyer gets `ErrorMapper`'s copy (section 6.4), the merchant's order history and the log get the reason.
 
