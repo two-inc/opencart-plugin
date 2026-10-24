@@ -9,9 +9,9 @@ The repo root is the extension directory: a shop serves it as `extension/two/`.
 | Path | What lives there |
 |---|---|
 | `install.json` | OpenCart 4 extension manifest. Holds the one version string |
-| `system/library/opencart/` | OpenCart 4 implementations of the core's ports (for example `DbSettingsStore`, which upserts) |
-| `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, plus the ports they need (`SettingsStore`, `Transport`, `Logger`) |
-| `admin/`, `catalog/` | Thin OpenCart 4 adapters: controllers, models, language files, templates |
+| `system/library/opencart/` | OpenCart 4 implementations of the core's ports (`DbSettingsStore`, which upserts; `CurlTransport`; `LogLogger`) and `Services`, the one place the core graph is built |
+| `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, `ApiKeyVerdict` (the key heartbeat), plus the ports they need (`SettingsStore`, `Transport`, `Logger`) |
+| `admin/`, `catalog/` | Thin OpenCart 4 adapters: controllers, models, language files, templates. `catalog/controller/cron/two.php` is the daily merchant-record refresh, registered in OpenCart's cron table by install() and `configure.php` |
 | `dev/` | `configure.php` (installs and enables the extension), the docker image, CI scripts (`ci/smoke.sh`), packaging |
 | `tests/` | Offline PHP suite: `tests/*Spec.php`, run by `tests/run.php` |
 
@@ -29,7 +29,7 @@ Stubs throw `NotImplemented::inPhase(...)` naming the phase that implements them
 |---|---|
 | `make test` | Offline suite |
 | `make lint` | `php -l` over every tracked PHP file |
-| `make phpstan` | PHPStan level 6 against the OpenCart 4.1.0.0 sources (pinned, checksum-verified), then the core alone with no OpenCart symbols |
+| `make phpstan` | PHPStan level 6 against the OpenCart 4.1.0.0 sources (pinned, checksum-verified), then the core alone with no OpenCart symbols, then `tests/` (apart, since its DB double shares OpenCart's class name) |
 | `make install` | Fresh docker shop (MariaDB plus OpenCart 4.1.0.4 from the upstream zip, installed with `cli_install.php`), extension installed and enabled |
 | `make configure` | Re-run `dev/configure.php` in the running shop |
 | `make smoke` | Install smoke against the running shop: admin page, save, install, `configure.php`, empty error log |

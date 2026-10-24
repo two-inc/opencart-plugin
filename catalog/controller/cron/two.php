@@ -7,9 +7,10 @@ namespace Opencart\Catalog\Controller\Extension\Two\Cron;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
- * The scheduled merchant-record refresh, run by OpenCart 4's native cron
- * (the shop's cron.php runs every due row of the cron table; the admin
- * install() registers this one daily). The cron runner always passes a
+ * The scheduled merchant-record refresh, run by OpenCart 4's native cron:
+ * the merchant's crontab calls index.php?route=cron/cron (the URL the admin
+ * Cron Jobs page shows), which runs every due row of the cron table.
+ * install() and dev/configure.php register this one daily. The cron runner always passes a
  * cron id; a direct web request to this route has none and does nothing,
  * so the public route cannot be used to make the shop call Two.
  *
