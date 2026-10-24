@@ -21,8 +21,9 @@ final class CoreBoundarySpec
     /** The plan's ten core classes plus the key verdict heartbeat, then the ports and value objects they share. */
     private const CORE_TYPES = [
         'Client', 'Environment', 'RecordProvider', 'SettingsProvider', 'Availability', 'ApiKeyVerdict',
-        'OrderBuilder', 'Postprocessing', 'ErrorMapper', 'CustomHeaders', 'Brand',
+        'OrderBuilder', 'Postprocessing', 'ErrorMapper', 'CustomHeaders', 'Brand', 'OrderFlow',
         'SettingsStore', 'SettingsOverlay', 'SettingsSave', 'Transport', 'Logger', 'HttpResponse', 'NotImplemented',
+        'OrderRecords', 'OrderRefused', 'PostprocessingSubscribers',
     ];
 
     /** @var list<array{pattern: string, samples: list<string>, description: string}> */
@@ -87,7 +88,7 @@ final class CoreBoundarySpec
     private static function testStubsSayWhichPhaseImplementsThem(): void
     {
         TinyAssert::throws(
-            static fn () => (new \Opencart\System\Library\Extension\Two\Core\ErrorMapper())->buyerMessageKey(400, null),
+            static fn () => (new \Opencart\System\Library\Extension\Two\Core\Availability(new \Opencart\System\Library\Extension\Two\Core\SettingsProvider(new MemoryStore()), (new \ReflectionClass(\Opencart\System\Library\Extension\Two\Core\RecordProvider::class))->newInstanceWithoutConstructor()))->withholdReason(['currency' => 'NOK', 'gross' => 1.0, 'net' => 1.0, 'buyer_country' => null]),
             NotImplemented::class,
             'a stub refuses to run rather than return a made-up value'
         );

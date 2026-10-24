@@ -14,6 +14,14 @@ interface Logger
     public function error(string $message, array $context = []): void;
 
     /**
+     * Written whatever the debug setting: an operational fact the merchant
+     * should be able to find, such as delegated shop-match checks.
+     *
+     * @param array<string, mixed> $context
+     */
+    public function info(string $message, array $context = []): void;
+
+    /**
      * Written only when the merchant has debug logging on.
      *
      * @param array<string, mixed> $context

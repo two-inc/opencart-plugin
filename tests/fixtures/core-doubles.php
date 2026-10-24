@@ -62,9 +62,20 @@ final class RecordingLogger implements Logger
         $this->lines[] = ['level' => 'error', 'message' => $message, 'context' => $context];
     }
 
+    public function info(string $message, array $context = []): void
+    {
+        $this->lines[] = ['level' => 'info', 'message' => $message, 'context' => $context];
+    }
+
     public function debug(string $message, array $context = []): void
     {
         $this->lines[] = ['level' => 'debug', 'message' => $message, 'context' => $context];
+    }
+
+    /** @return list<string> the messages logged at one level */
+    public function at(string $level): array
+    {
+        return array_values(array_map(static fn (array $line): string => $line['message'], array_filter($this->lines, static fn (array $line): bool => $line['level'] === $level)));
     }
 
     /** Everything logged, as one string, for "never logged" checks. */
