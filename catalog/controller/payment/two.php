@@ -39,7 +39,10 @@ class Two extends \Opencart\System\Engine\Controller
     private const ROUTE = 'extension/two/payment/two';
     private const TOKEN_PATTERN = '~^[0-9a-f]{48}\z~';
     /** How long a callback waits for another hit on the same order to finish. */
-    private const LOCK_SECONDS = 20;
+    private const LOCK_SECONDS = 30;
+
+    /** The named lock this request holds, released before every redirect (Response::redirect exits, so a finally never runs). */
+    private ?string $lock = null;
 
     /** The tile under the payment step: company fields and the confirm button. */
     public function index(): string
@@ -145,14 +148,28 @@ class Two extends \Opencart\System\Engine\Controller
         $lock = 'two_order_' . substr(sha1(DB_DATABASE . DB_PREFIX), 0, 12) . '_' . $orderId;
         $held = (int) ($this->db->query("SELECT GET_LOCK('" . $lock . "', " . self::LOCK_SECONDS . ") AS `held`")->row['held'] ?? 0) === 1;
         if (!$held) {
-            $this->leave('cart', 'generic');
+            // Another hit on this order is still talking to Two and may yet place it.
+            $this->load->model('checkout/order');
+            $order = $this->model_checkout_order->getOrder($orderId);
+            $after = OrderFlow::afterLockTimeout($order && !$this->unplaced($order));
+            $this->leave($after['goto'], $after['notice']);
 
             return;
         }
+        $this->lock = $lock;
         try {
             $this->settle($kind, $orderId, $token);
         } finally {
-            $this->db->query("SELECT RELEASE_LOCK('" . $lock . "')");
+            // Only reached when settle() throws: every normal path releases in leave().
+            $this->releaseLock();
+        }
+    }
+
+    private function releaseLock(): void
+    {
+        if ($this->lock !== null) {
+            $this->db->query("SELECT RELEASE_LOCK('" . $this->lock . "')");
+            $this->lock = null;
         }
     }
 
@@ -267,14 +284,16 @@ class Two extends \Opencart\System\Engine\Controller
     /**
      * The success page, or the cart with a notice (where OpenCart shows it).
      *
-     * @param 'cancelled'|'changed'|'generic'|null $notice
+     * @param 'cancelled'|'changed'|'pending'|'generic'|null $notice
      */
     private function leave(string $goto, ?string $notice): void
     {
+        $this->releaseLock();
         if ($notice !== null) {
             $this->session->data['error'] = match ($notice) {
                 'cancelled' => $this->language->get('text_cancelled'),
                 'changed' => $this->language->get('text_cart_changed'),
+                'pending' => $this->language->get('text_pending'),
                 default => $this->buyerMessage([ErrorMapper::GENERIC]),
             };
         }

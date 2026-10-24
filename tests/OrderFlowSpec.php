@@ -30,6 +30,20 @@ final class OrderFlowSpec
         self::testNewToken();
         self::testAfterCallback();
         self::testOwns();
+        self::testAfterLockTimeout();
+    }
+
+    /** A hit that waited out the lock while another hit on the order was still talking to Two. */
+    private static function testAfterLockTimeout(): void
+    {
+        $cases = [
+            [true, 'success|', 'the other hit placed the order: the success page'],
+            [false, 'cart|pending', 'still unplaced: the neutral notice, never the failure sentence'],
+        ];
+        foreach ($cases as [$placed, $expected, $description]) {
+            $after = OrderFlow::afterLockTimeout($placed);
+            TinyAssert::same($expected, $after['goto'] . '|' . ($after['notice'] ?? ''), 'lock timeout: ' . $description);
+        }
     }
 
     private static function testCreate(): void

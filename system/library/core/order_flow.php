@@ -247,6 +247,19 @@ final class OrderFlow
         return ['place' => false, 'note' => true, 'goto' => 'cart', 'notice' => $notice];
     }
 
+    /**
+     * Where the buyer goes when another hit on the same order still holds it
+     * after the wait. That hit may yet place the order and mail the buyer, so
+     * the buyer never sees the failure sentence here: the success page when
+     * the order is placed by now, otherwise a neutral notice.
+     *
+     * @return array{goto: 'success'|'cart', notice: 'pending'|null}
+     */
+    public static function afterLockTimeout(bool $placed): array
+    {
+        return $placed ? ['goto' => 'success', 'notice' => null] : ['goto' => 'cart', 'notice' => 'pending'];
+    }
+
     public static function tokenHash(string $token): string
     {
         return hash('sha256', $token);
