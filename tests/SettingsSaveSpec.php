@@ -26,6 +26,51 @@ final class SettingsSaveSpec
     {
         self::testCredentials();
         self::testFields();
+        self::testOutage();
+    }
+
+    /**
+     * The stored key last verified, and Two is now down: the heartbeat says
+     * unreachable, but the save still knows the stored key is good. Each case
+     * is the last definitive answer, the heartbeat, the candidate's answer
+     * and the outcome.
+     */
+    private static function testOutage(): void
+    {
+        $down = HttpResponse::unreachable('timeout');
+        $cases = [
+            ['definitive' => 'ok', 'heartbeat' => 'unreachable', 'answer' => $down, 'outcome' => SettingsSave::KEPT_UNVERIFIED, 'key' => self::GOOD, 'description' => 'an outage heartbeat does not unprotect a key that verified'],
+            ['definitive' => 'ok', 'heartbeat' => 'service_error', 'answer' => new HttpResponse(503, ''), 'outcome' => SettingsSave::KEPT_UNVERIFIED, 'key' => self::GOOD, 'description' => 'nor does a 5xx heartbeat'],
+            ['definitive' => 'invalid_key', 'heartbeat' => 'unreachable', 'answer' => $down, 'outcome' => SettingsSave::SAVED_UNVERIFIED, 'key' => 'new-key', 'description' => 'a stored key last rejected is not protected'],
+            ['definitive' => null, 'heartbeat' => 'unreachable', 'answer' => $down, 'outcome' => SettingsSave::SAVED_UNVERIFIED, 'key' => 'new-key', 'description' => 'a stored key never judged is not protected'],
+        ];
+        foreach ($cases as $case) {
+            [$save, $store] = self::save(['api_key' => self::GOOD, 'environment' => 'sandbox'], $case['definitive'], [$case['answer']]);
+            $fingerprint = (new SettingsProvider($store))->credentialFingerprint();
+            $store->values[ApiKeyVerdict::CACHE_KEY] = (string) json_encode(['status' => $case['heartbeat'], 'code' => null, 'fingerprint' => $fingerprint, 'claim' => false, 'verified_on' => self::NOW, 'checked_on' => self::NOW]);
+            $result = $save->save(['api_key' => 'new-key', 'environment' => 'sandbox'], self::STATUSES);
+            TinyAssert::same([$case['outcome'], $case['key']], [$result['credentials'], $store->get('api_key')], 'outage: ' . $case['description']);
+        }
+
+        // The review's repro, end to end: the stored key verified 400 seconds ago, Two goes down, an admin
+        // render refreshes the heartbeat to unreachable, then a save submits a new key Two cannot judge.
+        $now = self::NOW - 400;
+        $clock = static function () use (&$now): int {
+            return $now;
+        };
+        $store = new MemoryStore(['api_key' => self::GOOD, 'environment' => 'sandbox']);
+        $settings = new SettingsProvider($store);
+        $environment = new Environment(false);
+        $logger = new RecordingLogger();
+        $client = new Client($environment, $settings, new CustomHeaders(), new ScriptedTransport([new HttpResponse(200, '{"id":"m1"}'), $down, $down]), $logger, '1.0.0');
+        $verdict = new ApiKeyVerdict($client, $settings, $clock);
+        $verdict->verify();
+        $now = self::NOW;
+        $verdict = new ApiKeyVerdict($client, $settings, $clock);
+        TinyAssert::same(ApiKeyVerdict::UNREACHABLE, $verdict->status(), 'repro: the render sees the outage');
+        $save = new SettingsSave($settings, $environment, $verdict, new RecordProvider($client, $settings, $verdict, $logger, $clock));
+        $result = $save->save(['api_key' => 'new-key', 'environment' => 'sandbox'], self::STATUSES);
+        TinyAssert::same([SettingsSave::KEPT_UNVERIFIED, self::GOOD], [$result['credentials'], $store->get('api_key')], 'repro: the good key survives an outage save');
     }
 
     private static function testCredentials(): void
@@ -35,7 +80,7 @@ final class SettingsSaveSpec
         $rejected = new HttpResponse(401, '');
         $down = HttpResponse::unreachable('timeout');
         $good = ['api_key' => self::GOOD, 'environment' => 'sandbox'];
-        // [stored, last verdict of the stored pair, submitted key, submitted environment, Two's answers, outcome, stored key and environment after, calls, description]
+        // [stored, last definitive verdict of the stored pair, submitted key, submitted environment, Two's answers, outcome, stored key and environment after, calls, description]
         $cases = [
             [[], null, 'new-key', 'sandbox', [$ok, $ok, $record], SettingsSave::SAVED, ['new-key', 'sandbox'], 3, 'a first key Two accepts is stored, and the record fetched'],
             [$good, 'ok', 'new-key', 'production', [$ok, $ok, $record], SettingsSave::SAVED, ['new-key', 'production'], 3, 'a new pair Two accepts replaces a good one'],
@@ -109,7 +154,7 @@ final class SettingsSaveSpec
         $store = new MemoryStore($stored);
         $settings = new SettingsProvider($store);
         if ($last !== null) {
-            $store->values[ApiKeyVerdict::CACHE_KEY] = (string) json_encode(['status' => $last, 'code' => 200, 'fingerprint' => $settings->credentialFingerprint(), 'claim' => false, 'verified_on' => self::NOW - 86_400, 'checked_on' => self::NOW - 86_400]);
+            $store->values[ApiKeyVerdict::DEFINITIVE_KEY] = (string) json_encode(['fingerprint' => $settings->credentialFingerprint(), 'status' => $last, 'verified_on' => self::NOW - 86_400]);
         }
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();

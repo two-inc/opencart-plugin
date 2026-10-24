@@ -25,7 +25,7 @@ final class ApiKeyVerdictSpec
         self::testCandidates();
     }
 
-    /** check() asks about typed credentials and caches nothing; lastStatus() reads the stored pair's verdict at any age. */
+    /** check() asks about typed credentials and caches nothing; lastDefinitiveStatus() keeps the last ok or rejection through outages. */
     private static function testCandidates(): void
     {
         $checks = [
@@ -42,18 +42,28 @@ final class ApiKeyVerdictSpec
             TinyAssert::same(null, $store->get(ApiKeyVerdict::CACHE_KEY), 'check: ' . $case['description'] . ' (nothing cached)');
         }
 
-        $fingerprint = (new SettingsProvider(new MemoryStore(['api_key' => 'k'])))->credentialFingerprint();
-        $slot = static fn (string $status, string $print, bool $claim = false): string => (string) json_encode(['status' => $status, 'code' => null, 'fingerprint' => $print, 'claim' => $claim, 'verified_on' => 0, 'checked_on' => 0]);
-        $lasts = [
-            ['slot' => null, 'expected' => null, 'description' => 'no verdict yet'],
-            ['slot' => $slot('ok', $fingerprint), 'expected' => ApiKeyVerdict::OK, 'description' => 'an ok long past its TTL still says the key was good'],
-            ['slot' => $slot('invalid_key', $fingerprint), 'expected' => ApiKeyVerdict::INVALID, 'description' => 'a rejection'],
-            ['slot' => $slot('ok', 'other'), 'expected' => null, 'description' => 'a verdict for other credentials says nothing'],
-            ['slot' => $slot('verifying', $fingerprint, true), 'expected' => null, 'description' => 'a claim with nothing carried says nothing'],
+        $ok = new HttpResponse(200, '{"id":"m"}');
+        $rejected = new HttpResponse(401, '');
+        $down = HttpResponse::unreachable('timeout');
+        $sequences = [
+            ['answers' => [], 'rekey' => false, 'expected' => null, 'description' => 'never verified'],
+            ['answers' => [$ok], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'an ok'],
+            ['answers' => [$ok, $down], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'an outage after an ok keeps the ok'],
+            ['answers' => [$ok, new HttpResponse(503, ''), new HttpResponse(200, '<html>')], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'a 5xx or a non-merchant 200 after an ok keeps the ok'],
+            ['answers' => [$ok, $rejected], 'rekey' => false, 'expected' => ApiKeyVerdict::INVALID, 'description' => 'a rejection after an ok replaces it'],
+            ['answers' => [$rejected, $down, $ok], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'an ok after a rejection replaces it'],
+            ['answers' => [$down], 'rekey' => false, 'expected' => null, 'description' => 'an outage alone says nothing'],
+            ['answers' => [$ok], 'rekey' => true, 'expected' => null, 'description' => 'an ok for other credentials says nothing'],
         ];
-        foreach ($lasts as $case) {
-            [$verdict] = self::verdict($case['slot'] === null ? ['api_key' => 'k'] : ['api_key' => 'k', ApiKeyVerdict::CACHE_KEY => $case['slot']], []);
-            TinyAssert::same($case['expected'], $verdict->lastStatus(), 'lastStatus: ' . $case['description']);
+        foreach ($sequences as $case) {
+            [$verdict, , $store] = self::verdict(['api_key' => 'k'], $case['answers']);
+            foreach ($case['answers'] as $answer) {
+                $verdict->verify();
+            }
+            if ($case['rekey']) {
+                $store->values['api_key'] = 'other';
+            }
+            TinyAssert::same($case['expected'], $verdict->lastDefinitiveStatus(), 'lastDefinitiveStatus: ' . $case['description']);
         }
     }
 

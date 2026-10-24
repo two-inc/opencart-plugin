@@ -38,6 +38,8 @@ final class ApiKeyVerdict
     public const VERIFYING = 'verifying';
 
     public const CACHE_KEY = 'api_key_verdict';
+    /** The last definitive answer (ok or rejected), kept apart from the heartbeat, which an outage overwrites. */
+    public const DEFINITIVE_KEY = 'api_key_definitive';
     public const VERIFY_PATH = '/v1/merchant/verify_api_key';
 
     public const TTL_OK = 300;
@@ -78,6 +80,13 @@ final class ApiKeyVerdict
         $result = self::ask($this->client, $timeoutSeconds);
 
         $this->write($fingerprint, $result['status'], $result['code'], false, null);
+        if ($result['status'] === self::OK || $result['status'] === self::INVALID) {
+            $this->settings->store()->setMany([self::DEFINITIVE_KEY => (string) json_encode([
+                'fingerprint' => $fingerprint,
+                'status' => $result['status'],
+                'verified_on' => ($this->clock)(),
+            ])]);
+        }
         if ($fingerprint === $this->settings->credentialFingerprint()) {
             $this->memo = ['status' => $result['status'], 'code' => $result['code']];
         }
@@ -102,18 +111,20 @@ final class ApiKeyVerdict
     }
 
     /**
-     * The last verdict reached for the stored credentials, however old, or
-     * null when none was: whether the stored key is known good, which a save
-     * must not overwrite with a key it could not verify.
+     * The last definitive answer Two gave about the stored credentials (ok
+     * or rejected), however old, or null when it never gave one. Outages,
+     * 5xx answers and claims never change it, so it says whether the stored
+     * key is known good even while Two is down: a save must not overwrite a
+     * known-good key with one Two could not judge.
      */
-    public function lastStatus(): ?string
+    public function lastDefinitiveStatus(): ?string
     {
-        $stored = $this->read();
-        if ($stored === null || $stored['fingerprint'] !== $this->settings->credentialFingerprint() || $stored['status'] === self::VERIFYING) {
+        $slot = json_decode((string) $this->settings->store()->get(self::DEFINITIVE_KEY), true);
+        if (!is_array($slot) || ($slot['fingerprint'] ?? null) !== $this->settings->credentialFingerprint()) {
             return null;
         }
 
-        return $stored['status'];
+        return in_array($slot['status'] ?? null, [self::OK, self::INVALID], true) ? $slot['status'] : null;
     }
 
     /**

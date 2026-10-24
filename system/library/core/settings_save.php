@@ -14,7 +14,8 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * only when it is well formed and:
  * - Two accepts it, or
  * - Two could not judge it (no answer, a 5xx) and the stored pair is not
- *   known good. A rejected key (401 or 403) is never stored, and a key Two
+ *   known good: its last definitive answer was not ok. The heartbeat is not
+ *   asked, since an outage overwrites it. A rejected key (401 or 403) is never stored, and a key Two
  *   could not judge never replaces one that last verified.
  *
  * An empty key field means "keep the stored key", so the key never has to be
@@ -159,7 +160,7 @@ final class SettingsSave
         if ($checked['status'] === ApiKeyVerdict::INVALID) {
             return [self::KEPT_REJECTED, [], $answer];
         }
-        if ($storedKey !== '' && $this->verdict->lastStatus() === ApiKeyVerdict::OK) {
+        if ($storedKey !== '' && $this->verdict->lastDefinitiveStatus() === ApiKeyVerdict::OK) {
             return [self::KEPT_UNVERIFIED, [], $answer];
         }
 
