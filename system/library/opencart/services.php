@@ -1,0 +1,58 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Opencart\System\Library\Extension\Two\Opencart;
+
+use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
+use Opencart\System\Library\Extension\Two\Core\Client;
+use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
+use Opencart\System\Library\Extension\Two\Core\Environment;
+use Opencart\System\Library\Extension\Two\Core\RecordProvider;
+use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
+
+/**
+ * Wires the core for one OpenCart request: the shop's settings table, its
+ * error log, cURL, the plugin version and the TWO_INTERNAL_ENVIRONMENTS flag.
+ * The only place the adapter builds core objects, so every controller,
+ * model and cron entry gets the same graph.
+ */
+final class Services
+{
+    /** The scheduled refresh's row in OpenCart's cron table. */
+    public const CRON_CODE = 'two_record_refresh';
+    public const CRON_ACTION = 'extension/two/cron/two';
+    public const CRON_CYCLE = 'day';
+    public const CRON_DESCRIPTION = 'Refreshes the cached Two merchant record.';
+
+    public readonly SettingsProvider $settings;
+    public readonly Environment $environment;
+    public readonly Client $client;
+    public readonly ApiKeyVerdict $verdict;
+    public readonly RecordProvider $records;
+
+    public function __construct(\Opencart\System\Library\DB $db, \Opencart\System\Library\Log $log, int $storeId = 0)
+    {
+        $this->settings = new SettingsProvider(new DbSettingsStore($db, $storeId));
+        $this->environment = new Environment(self::internalEnvironmentsEnabled());
+        $logger = new LogLogger($log, $this->settings->debugLogging());
+        $this->client = new Client($this->environment, $this->settings, new CustomHeaders(), new CurlTransport(), $logger, self::pluginVersion());
+        $this->verdict = new ApiKeyVerdict($this->client, $this->settings);
+        $this->records = new RecordProvider($this->client, $this->settings, $this->verdict, $logger);
+    }
+
+    public static function internalEnvironmentsEnabled(): bool
+    {
+        $raw = getenv('TWO_INTERNAL_ENVIRONMENTS');
+
+        return Environment::flagEnabled($raw === false ? null : $raw);
+    }
+
+    /** The version in install.json, the single source bumpver writes. */
+    public static function pluginVersion(): string
+    {
+        $manifest = json_decode((string) file_get_contents(dirname(__DIR__, 3) . '/install.json'), true);
+
+        return is_array($manifest) && is_string($manifest['version'] ?? null) ? $manifest['version'] : '';
+    }
+}

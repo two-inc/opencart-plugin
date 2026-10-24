@@ -28,6 +28,7 @@ declare(strict_types=1);
 
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
+use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 // The staging shops deploy the whole repo under the web root, so refuse to
 // run from a web request.
@@ -134,7 +135,7 @@ $defaults = ['sort_order' => '0'] + SettingsProvider::DEFAULTS;
 $given = ['status' => '1'];
 $environment = (string) getenv('TWO_ENVIRONMENT');
 if ($environment !== '') {
-    $known = [Environment::PRODUCTION, Environment::SANDBOX, Environment::STAGING];
+    $known = Environment::ALL;
     if (!in_array($environment, $known, true)) {
         fail('unknown TWO_ENVIRONMENT "' . $environment . '" (expected one of: ' . implode(', ', $known) . ')');
     }
@@ -156,6 +157,12 @@ foreach ($given + $defaults as $key => $value) {
         continue;
     }
     say('set ' . $settingKey . ($key === 'api_key' ? '' : ' = ' . $value));
+}
+
+// 5. The daily merchant-record refresh in OpenCart's cron table, as install() registers it.
+if (query($db, "SELECT `cron_id` FROM `{$p}cron` WHERE `code` = ?", [Services::CRON_CODE]) === []) {
+    query($db, "INSERT INTO `{$p}cron` SET `code` = ?, `description` = ?, `cycle` = ?, `action` = ?, `status` = 1, `date_added` = NOW(), `date_modified` = NOW()", [Services::CRON_CODE, Services::CRON_DESCRIPTION, Services::CRON_CYCLE, Services::CRON_ACTION]);
+    say('registered cron ' . Services::CRON_CODE);
 }
 
 say('extension ' . TWO_CODE . ' ' . $manifest['version'] . ' installed and enabled');

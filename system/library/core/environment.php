@@ -8,9 +8,12 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * Two environment selection (Build Guide section 3.2): production, sandbox,
  * and staging only for internal Two shops. Explicit host maps, no hostname
  * logic. The adapter reads the TWO_INTERNAL_ENVIRONMENTS flag from the process
- * and passes it in, so this class never touches the environment itself.
+ * and passes it through flagEnabled(), so this class never touches the
+ * environment itself.
  *
- * Behaviour lands in P1, driven by the shared environment-cases.json table.
+ * Every rule here is pinned by the shared tests/fixtures/environment-cases.json
+ * table, byte-identical in the sibling plugins. A stored value of null means
+ * nothing is stored yet (a fresh install), which reads as the default.
  */
 final class Environment
 {
@@ -19,42 +22,94 @@ final class Environment
     public const STAGING = 'staging';
     public const DEFAULT = self::SANDBOX;
 
+    /** Every environment, in the order the admin offers them. */
+    public const ALL = [self::PRODUCTION, self::SANDBOX, self::STAGING];
+
+    private const API_HOSTS = [
+        self::PRODUCTION => 'https://api.two.inc',
+        self::SANDBOX => 'https://api.sandbox.two.inc',
+        self::STAGING => 'https://api.staging.two.inc',
+    ];
+
+    private const CHECKOUT_HOSTS = [
+        self::PRODUCTION => 'https://checkout.two.inc',
+        self::SANDBOX => 'https://checkout.sandbox.two.inc',
+        self::STAGING => 'https://checkout.staging.two.inc',
+    ];
+
     public function __construct(private readonly bool $internalEnvironmentsEnabled)
     {
     }
 
     /**
-     * The environments the admin offers, in display order, given what is stored.
+     * The TWO_INTERNAL_ENVIRONMENTS rule: only exactly "1" enables. Not a
+     * security gate, since a staging key is needed to use staging anyway.
+     */
+    public static function flagEnabled(?string $raw): bool
+    {
+        return $raw === '1';
+    }
+
+    /**
+     * The canonical environment for a stored value, or null when it is not
+     * one: trimmed, lower-cased, "prod" read as production.
+     */
+    public static function recognise(?string $stored): ?string
+    {
+        $value = strtolower(trim((string) ($stored ?? self::DEFAULT)));
+        $value = $value === 'prod' ? self::PRODUCTION : $value;
+
+        return in_array($value, self::ALL, true) ? $value : null;
+    }
+
+    /**
+     * The environments the admin offers, in display order: staging only on an
+     * internal shop or when it is already stored, so it is never hidden.
      *
      * @return list<string>
      */
-    public function options(string $stored): array
+    public function options(?string $stored): array
     {
-        throw NotImplemented::inPhase('Environment::options', 'P1');
+        if ($this->internalEnvironmentsEnabled || self::recognise($stored) === self::STAGING) {
+            return self::ALL;
+        }
+
+        return [self::PRODUCTION, self::SANDBOX];
     }
 
-    /** The environment actually used for a stored value. */
-    public function resolve(string $stored): string
+    /** Whether a submitted value may replace the stored one. */
+    public function acceptsSave(string $submitted, ?string $stored): bool
     {
-        throw NotImplemented::inPhase('Environment::resolve', 'P1');
+        return in_array($submitted, $this->options($stored), true);
     }
 
-    /** API base URL, without a trailing slash. */
-    public function apiBaseUrl(string $environment): string
+    /** The environment actually used: anything unrecognised is sandbox, never production. */
+    public function resolve(?string $stored): string
     {
-        throw NotImplemented::inPhase('Environment::apiBaseUrl', 'P1');
+        return self::recognise($stored) ?? self::SANDBOX;
     }
 
-    /** Hosted checkout base URL, without a trailing slash. */
-    public function checkoutBaseUrl(string $environment): string
+    /** API base URL, without a trailing slash. Any value resolves first. */
+    public function apiBaseUrl(?string $environment): string
     {
-        throw NotImplemented::inPhase('Environment::checkoutBaseUrl', 'P1');
+        return self::API_HOSTS[$this->resolve($environment)];
     }
 
-    /** False when the stored value cannot be honoured, for the health row. */
-    public function isHealthy(string $stored): bool
+    /** Hosted checkout base URL, without a trailing slash. Any value resolves first. */
+    public function checkoutBaseUrl(?string $environment): string
     {
-        throw NotImplemented::inPhase('Environment::isHealthy', 'P1');
+        return self::CHECKOUT_HOSTS[$this->resolve($environment)];
+    }
+
+    /**
+     * False when the stored value cannot be honoured as stored, for the health
+     * row: unrecognised, or staging on a shop without the flag.
+     */
+    public function isHealthy(?string $stored): bool
+    {
+        $environment = self::recognise($stored);
+
+        return $environment !== null && ($environment !== self::STAGING || $this->internalEnvironmentsEnabled);
     }
 
     public function internalEnvironmentsEnabled(): bool
