@@ -14,6 +14,7 @@ $_['button_confirm'] = 'Confirm order';
 $_['text_returning'] = 'Returning to the shop';
 $_['text_continue'] = 'Continue';
 $_['text_cancelled'] = 'Your order is cancelled.';
+$_['text_cart_changed'] = 'Your cart changed during payment verification. Please review your cart and try again.';
 $_['text_history_prefix'] = 'Two: ';
 
 $_['error_order'] = 'Your order could not be found. Please go back to checkout and try again.';

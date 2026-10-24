@@ -47,6 +47,8 @@ final class OrderFlowSpec
             ['responses' => [$created], 'order' => ['total' => 300], 'handlers' => ['m' => static fn (array $p): array => $p], 'ok' => true, 'buyer' => null, 'calls' => ['POST /v1/order'], 'state' => 'UNVERIFIED', 'description' => 'a merchant handler owns the shop-match checks'],
             ['responses' => [], 'order' => [], 'handlers' => $throws, 'ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'calls' => [], 'state' => null, 'description' => 'a faulting handler: nothing sent'],
             ['responses' => [], 'order' => ['currency_value' => 0], 'handlers' => [], 'ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'calls' => [], 'state' => null, 'description' => 'an order that cannot be built: nothing sent'],
+            ['responses' => [], 'order' => ['company' => ['company_name' => str_repeat('A', 256), 'organization_number' => '123456789', 'country_code' => 'NO']], 'handlers' => [], 'ok' => false, 'buyer' => ['error_two_field_company_name'], 'calls' => [], 'state' => null, 'description' => 'a company name longer than the table holds: refused, never truncated'],
+            ['responses' => [], 'order' => ['company' => ['company_name' => 'Acme AS', 'organization_number' => str_repeat('9', 65), 'country_code' => 'NO']], 'handlers' => [], 'ok' => false, 'buyer' => ['error_two_field_organization_number'], 'calls' => [], 'state' => null, 'description' => 'an organisation number longer than the table holds: refused'],
             ['responses' => [$created], 'order' => [], 'handlers' => [], 'lossy' => true, 'ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'calls' => [], 'state' => '', 'description' => 'a table that cannot hold the token: nothing sent'],
         ];
         foreach ($cases as $case) {
@@ -83,9 +85,9 @@ final class OrderFlowSpec
             ['row' => true, 'token' => '', 'responses' => [], 'outcome' => OrderFlow::UNAUTHORISED, 'calls' => [], 'state' => '', 'description' => 'no token: unauthorised'],
             ['row' => false, 'token' => self::TOKEN, 'responses' => [], 'outcome' => OrderFlow::UNAUTHORISED, 'calls' => [], 'state' => null, 'description' => 'no record for the order: unauthorised'],
             ['row' => 'no-id', 'token' => self::TOKEN, 'responses' => [], 'outcome' => OrderFlow::REFUSED, 'calls' => [], 'state' => '', 'description' => 'no Two order was created: nothing to confirm'],
-            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [3, ['total' => 375, 'tax_total' => 75]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the cart grew after create: not confirmed, the Two order cancelled'],
-            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [1, ['total' => 125, 'tax_total' => 25]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the cart shrank after create: not confirmed'],
-            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [2, ['billing_address' => ['city' => 'Bergen'] + self::order()['billing_address']]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the address changed after create: not confirmed'],
+            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [3, ['total' => 375, 'tax_total' => 75]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::CHANGED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the cart grew after create: not confirmed, the Two order cancelled'],
+            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [1, ['total' => 125, 'tax_total' => 25]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::CHANGED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the cart shrank after create: not confirmed'],
+            ['row' => true, 'token' => self::TOKEN, 'rebuild' => [2, ['billing_address' => ['city' => 'Bergen'] + self::order()['billing_address']]], 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::CHANGED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the address changed after create: not confirmed'],
             ['row' => true, 'token' => self::TOKEN, 'rebuild' => null, 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderFlow::REFUSED, 'calls' => $cancelPaths, 'state' => 'CANCELLED', 'description' => 'the shop order is gone: not confirmed'],
         ];
         self::runCallbackCases('confirm', $cases);
@@ -137,6 +139,7 @@ final class OrderFlowSpec
             [$c, OrderFlow::REFUSED, true, 'none|success|', 'double hit, the second confirm failed: nothing written over the placed order'],
             [$c, OrderFlow::REFUSED, false, 'note|cart|generic', 'refused: noted on the unplaced order'],
             [$c, OrderFlow::CANCELLED, false, 'note|cart|cancelled', 'cancelled at Two on return'],
+            [$c, OrderFlow::CHANGED, false, 'note|cart|changed', 'the cart changed: noted, the buyer told to review the cart'],
             [$c, OrderFlow::UNAUTHORISED, true, 'none|cart|generic', 'unauthorised, even on a placed order'],
             [$x, OrderFlow::CANCELLED, false, 'note|cart|cancelled', 'cancel: noted, back to the cart'],
             [$x, OrderFlow::REFUSED, false, 'note|cart|generic', 'cancel refused: noted'],

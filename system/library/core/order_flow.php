@@ -29,6 +29,8 @@ final class OrderFlow
     public const CONFIRMED = 'confirmed';
     public const CANCELLED = 'cancelled';
     public const REFUSED = 'refused';
+    /** Refused because the shop order changed after the Two order was created. */
+    public const CHANGED = 'changed';
     public const UNAUTHORISED = 'unauthorised';
 
     public const CALLBACK_CONFIRM = 'confirmation';
@@ -71,6 +73,15 @@ final class OrderFlow
                 return ['ok' => false, 'buyer' => [ErrorMapper::COMPANY_REQUIRED], 'reason' => 'No company was entered.'];
             }
         }
+        $tooLong = [];
+        foreach (OrderRecords::MAX_LENGTHS as $field => $max) {
+            if (mb_strlen(trim((string) $company[$field])) > $max) {
+                $tooLong[] = $field === 'company_name' ? ErrorMapper::FIELDS['buyer.company.company_name'] : ($field === 'organization_number' ? ErrorMapper::FIELDS['buyer.company.organization_number'] : ErrorMapper::FIELDS['billing_address.country']);
+            }
+        }
+        if ($tooLong !== []) {
+            return ['ok' => false, 'buyer' => $tooLong, 'reason' => 'A company field is longer than the plugin stores.'];
+        }
 
         try {
             $payload = $this->payload($order, $lines, $totals, $context, 'checkout');
@@ -84,14 +95,16 @@ final class OrderFlow
             'two_order_id' => '',
             'two_order_state' => '',
             'two_order_status' => '',
-            'company_name' => (string) $company['company_name'],
-            'organization_number' => (string) $company['organization_number'],
-            'country_code' => (string) $company['country_code'],
+            'company_name' => trim((string) $company['company_name']),
+            'organization_number' => trim((string) $company['organization_number']),
+            'country_code' => trim((string) $company['country_code']),
         ];
         $this->records->put($orderId, $stored);
         $record = $this->records->get($orderId) ?? [];
-        if (($record['token_hash'] ?? '') !== $stored['token_hash'] || ($record['payload_hash'] ?? '') !== $stored['payload_hash']) {
-            return $this->refused($orderId, 'Two order not created: the two_order table could not store the callback token. Run the extension install again.');
+        foreach ($stored as $field => $value) {
+            if (($record[$field] ?? null) !== $value) {
+                return $this->refused($orderId, 'Two order not created: the two_order table did not store ' . $field . ' as given. Run the extension install again.');
+            }
         }
 
         $response = $this->client->request('POST', '/v1/order', $payload);
@@ -139,7 +152,7 @@ final class OrderFlow
             $this->sendCancel($twoOrderId, 'order_changed', $orderId);
             $this->readState($orderId, $twoOrderId);
 
-            return self::outcome(self::REFUSED, 'Two order ' . $twoOrderId . ' not confirmed and cancelled: ' . $changed, $twoOrderId);
+            return self::outcome($changed[0], 'Two order ' . $twoOrderId . ' not confirmed and cancelled: ' . $changed[1], $twoOrderId);
         }
 
         $state = $this->readState($orderId, $twoOrderId);
@@ -208,7 +221,7 @@ final class OrderFlow
      * order the first hit placed never writes over it): place the order,
      * note the reason on the unplaced order, and where the buyer goes.
      *
-     * @return array{place: bool, note: bool, goto: 'success'|'cart', notice: 'cancelled'|'generic'|null}
+     * @return array{place: bool, note: bool, goto: 'success'|'cart', notice: 'cancelled'|'changed'|'generic'|null}
      */
     public static function afterCallback(string $kind, string $outcome, bool $placed): array
     {
@@ -225,7 +238,13 @@ final class OrderFlow
             return ['place' => true, 'note' => false, 'goto' => 'success', 'notice' => null];
         }
 
-        return ['place' => false, 'note' => true, 'goto' => 'cart', 'notice' => $outcome === self::CANCELLED ? 'cancelled' : 'generic'];
+        $notice = match ($outcome) {
+            self::CANCELLED => 'cancelled',
+            self::CHANGED => 'changed',
+            default => 'generic',
+        };
+
+        return ['place' => false, 'note' => true, 'goto' => 'cart', 'notice' => $notice];
     }
 
     public static function tokenHash(string $token): string
@@ -265,27 +284,29 @@ final class OrderFlow
 
     /**
      * Why the shop's stored order no longer rebuilds the payload Two holds,
-     * or null when it still does.
+     * as the outcome (CHANGED when it rebuilds to a different payload) and
+     * the reason, or null when it still does.
      *
      * @param array<string, string> $record
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
+     * @return array{0: string, 1: string}|null
      */
-    private function changedSince(array $record, \Closure $rebuild): ?string
+    private function changedSince(array $record, \Closure $rebuild): ?array
     {
         if (($record['payload_hash'] ?? '') === '') {
-            return 'no payload hash was stored at create.';
+            return [self::REFUSED, 'no payload hash was stored at create.'];
         }
         $input = $rebuild($record);
         if ($input === null) {
-            return 'the shop order can no longer be read.';
+            return [self::REFUSED, 'the shop order can no longer be read.'];
         }
         try {
             $payload = $this->payload($input['order'], $input['lines'], $input['totals'], $input['context'] ?? [], 'snapshot_hash');
         } catch (OrderRefused $refused) {
-            return 'the shop order no longer builds: ' . $refused->detail;
+            return [self::REFUSED, 'the shop order no longer builds: ' . $refused->detail];
         }
 
-        return hash_equals($record['payload_hash'], self::payloadHash($payload)) ? null : 'the shop order changed after the Two order was created (cart, amounts or addresses).';
+        return hash_equals($record['payload_hash'], self::payloadHash($payload)) ? null : [self::CHANGED, 'the shop order changed after the Two order was created (cart, amounts or addresses).'];
     }
 
     /**

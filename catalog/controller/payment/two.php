@@ -38,6 +38,8 @@ class Two extends \Opencart\System\Engine\Controller
 {
     private const ROUTE = 'extension/two/payment/two';
     private const TOKEN_PATTERN = '~^[0-9a-f]{48}\z~';
+    /** How long a callback waits for another hit on the same order to finish. */
+    private const LOCK_SECONDS = 20;
 
     /** The tile under the payment step: company fields and the confirm button. */
     public function index(): string
@@ -136,6 +138,26 @@ class Two extends \Opencart\System\Engine\Controller
         if ($this->bounce($kind, $orderId, $token)) {
             return;
         }
+        // One callback per order at a time, so the status read before a write
+        // cannot go stale under a concurrent hit (the bounce page's link and its
+        // refresh). A guarded UPDATE cannot do this: OpenCart's addHistory must
+        // see the old status itself, since the order mail and stock keep off it.
+        $lock = 'two_order_' . substr(sha1(DB_DATABASE . DB_PREFIX), 0, 12) . '_' . $orderId;
+        $held = (int) ($this->db->query("SELECT GET_LOCK('" . $lock . "', " . self::LOCK_SECONDS . ") AS `held`")->row['held'] ?? 0) === 1;
+        if (!$held) {
+            $this->leave('cart', 'generic');
+
+            return;
+        }
+        try {
+            $this->settle($kind, $orderId, $token);
+        } finally {
+            $this->db->query("SELECT RELEASE_LOCK('" . $lock . "')");
+        }
+    }
+
+    private function settle(string $kind, int $orderId, string $token): void
+    {
         $this->load->model('checkout/order');
         $order = $this->model_checkout_order->getOrder($orderId);
         if (!$order) {
@@ -176,7 +198,7 @@ class Two extends \Opencart\System\Engine\Controller
         if ($result['outcome'] === OrderFlow::UNAUTHORISED) {
             $this->log->write('Two error: ' . $kind . ' callback for order ' . $orderId . ': ' . $result['reason']);
         }
-        // Read again: a concurrent hit may have placed the order while Two answered.
+        // Read again before any write, under the lock.
         $order = $this->model_checkout_order->getOrder($orderId);
         $after = OrderFlow::afterCallback($kind, $result['outcome'], $order && !$this->unplaced($order));
         if ($after['place']) {
@@ -245,12 +267,16 @@ class Two extends \Opencart\System\Engine\Controller
     /**
      * The success page, or the cart with a notice (where OpenCart shows it).
      *
-     * @param 'cancelled'|'generic'|null $notice
+     * @param 'cancelled'|'changed'|'generic'|null $notice
      */
     private function leave(string $goto, ?string $notice): void
     {
         if ($notice !== null) {
-            $this->session->data['error'] = $notice === 'cancelled' ? $this->language->get('text_cancelled') : $this->buyerMessage([ErrorMapper::GENERIC]);
+            $this->session->data['error'] = match ($notice) {
+                'cancelled' => $this->language->get('text_cancelled'),
+                'changed' => $this->language->get('text_cart_changed'),
+                default => $this->buyerMessage([ErrorMapper::GENERIC]),
+            };
         }
         $route = $goto === 'success' ? 'checkout/success' : 'checkout/cart';
         $this->response->redirect($this->url->link($route, 'language=' . $this->config->get('config_language'), true));

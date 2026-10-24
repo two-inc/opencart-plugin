@@ -14,6 +14,9 @@ interface OrderRecords
 {
     public const FIELDS = ['two_order_id', 'two_order_state', 'two_order_status', 'token_hash', 'payload_hash', 'company_name', 'organization_number', 'country_code'];
 
+    /** Column widths of the buyer's fields: longer values are refused at entry, never truncated. */
+    public const MAX_LENGTHS = ['company_name' => 255, 'organization_number' => 64, 'country_code' => 2];
+
     /**
      * The row for a shop order, or null when the plugin has none.
      *
