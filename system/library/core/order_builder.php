@@ -26,7 +26,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   charged. Tax is never invented;
  * - discount totals (coupon, reward points) are pre-tax: the shop takes
  *   their tax off its tax rows, so their tax is what the stored tax total
- *   leaves once every other line is counted. With taxed lines at more than
+ *   leaves once every other line is counted. A discount cannot add tax,
+ *   so a remainder above zero means another line's tax is wrong and the
+ *   order is not built. With taxed lines at more than
  *   one rate that remainder cannot be given one rate, so the order is not
  *   built: the plugin never apportions it (see docs/divergences.md);
  * - a line whose tax class holds a fixed-amount rate is not built either:
@@ -250,10 +252,15 @@ final class OrderBuilder
                 $rates[(string) $item['tax_rate']] = (float) $item['tax_rate'];
             }
         }
+        if ($tax > 0) {
+            throw OrderRefused::because('discount_tax_positive', 'The stored tax total is ' . Postprocessing::money($tax) . ' more than the lines carry, which a discount cannot explain: a line\'s tax does not match what the shop charged.');
+        }
         if ($tax === 0) {
             $rate = 0.0;
         } elseif (count($rates) === 1) {
             $rate = (float) reset($rates);
+        } elseif ($rates === []) {
+            throw OrderRefused::because('discount_tax_unexplained', 'The stored tax total is ' . Postprocessing::money(-$tax) . ' less than the lines carry, but no line carries tax for the discount to reduce.');
         } else {
             throw OrderRefused::because('discount_tax_ambiguous', 'The discount reduced tax on lines at more than one rate (' . implode(', ', array_keys($rates)) . '), and the shop does not store how much at each.');
         }
