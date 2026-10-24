@@ -9,6 +9,12 @@ declare(strict_types=1);
  * failure. Set TESTS_TRACE=1 for stack traces.
  */
 
+// CLI only: the staging shops serve the whole repo under the web root.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
 require __DIR__ . '/bootstrap.php';
 
 $specs = glob(__DIR__ . '/*Spec.php') ?: [];

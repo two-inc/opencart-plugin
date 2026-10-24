@@ -9,6 +9,12 @@ declare(strict_types=1);
  * system/library/, lower-cased, with CamelCase split by underscores. A class
  * that loads here therefore loads in the shop too.
  */
+// CLI only: the staging shops serve the whole repo under the web root.
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
 spl_autoload_register(static function (string $class): void {
     $prefix = 'Opencart\\System\\Library\\Extension\\Two\\';
 
