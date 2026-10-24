@@ -74,6 +74,11 @@ contains "save reports the other fields saved" "$saved" 'The other settings were
 [ "$(setting sort_order)" = 5 ] || fail "a refused key stopped the other fields saving"
 ok "refused key kept the stored key, other fields saved"
 store api_key ''
+# OpenCart escapes every posted value; the core stores the title as typed.
+admin extension/two/payment/two.save -X POST --data-urlencode 'payment_two_title[1]=Pay & go <now>' > /dev/null
+[ "$(setting title)" = '{"1":"Pay & go <now>"}' ] || fail "the title was not stored as typed (got '$(setting title)')"
+ok "title stored as typed"
+contains "a bad environment is named on its field" "$(admin extension/two/payment/two.save -X POST -d payment_two_environment=bogus)" '"environment":"Please select a valid environment."'
 
 # Extensions > Payments: uninstall, then install (runs install(), which loads the core in the admin).
 contains "payments uninstall" "$(admin 'extension/payment.uninstall&extension=two&code=two')" '"success"'

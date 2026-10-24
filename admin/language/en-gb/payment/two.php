@@ -23,7 +23,13 @@ $_['text_key_kept'] = 'The previously saved key and environment were kept.';
 $_['text_merchant_id'] = 'Merchant ID';
 $_['text_merchant_short_name'] = 'Merchant short name';
 $_['text_record_fetched_at'] = 'Merchant profile fetched';
-$_['text_status_mapping_intro'] = 'Map %s payment states to OpenCart order statuses.';
+$_['text_status_mapping_intro'] = 'Map %s payment states to OpenCart order statuses for workflow integration.';
+$_['text_default_mappings'] = 'Default mappings:';
+$_['text_default_fulfil'] = '%s: Order Fulfilled → Shipped';
+$_['text_default_cancel'] = '%s: Order Cancelled → Canceled';
+$_['text_default_refund'] = '%s: Order Refunded → Refunded';
+$_['text_currently_active'] = 'Currently active:';
+$_['text_none_selected'] = 'None selected';
 
 // Tab
 $_['tab_general'] = 'General';

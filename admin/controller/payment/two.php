@@ -98,10 +98,13 @@ class Two extends \Opencart\System\Engine\Controller
         $this->load->model('localisation/order_status');
         $data['order_statuses'] = $this->model_localisation_order_status->getOrderStatuses();
         $data['fulfil_status_ids'] = $settings->fulfilStatusIds();
+        // Status names come from OpenCart's own table, stored escaped as OpenCart stores every admin value.
+        $active = array_column(array_filter($data['order_statuses'], static fn (array $status): bool => in_array((int) $status['order_status_id'], $data['fulfil_status_ids'], true)), 'name');
+        $data['fulfil_active'] = implode(', ', $active);
         $data['cancel_status_id'] = $settings->cancelStatusId();
         $data['refund_status_id'] = $settings->refundStatusId();
 
-        foreach (['help_environment', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro'] as $key) {
+        foreach (['help_environment', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro', 'text_default_fulfil', 'text_default_cancel', 'text_default_refund'] as $key) {
             $data[$key] = sprintf($this->language->get($key), $brand);
         }
         $data['brand_name'] = $brand;
@@ -152,7 +155,7 @@ class Two extends \Opencart\System\Engine\Controller
         }
         $key = $this->credentialsMessage($result);
         if ($key !== null && $key['refused']) {
-            $json['error']['api_key'] = $key['text'];
+            $json['error'][$key['field']] = $key['text'];
         }
         if (isset($json['error'])) {
             $json['error']['warning'] = $this->language->get('error_partial');
@@ -177,8 +180,8 @@ class Two extends \Opencart\System\Engine\Controller
             return;
         }
         $services = new Services($this->db, $this->log);
-        $typed = trim(is_scalar($this->request->post['api_key'] ?? null) ? (string) $this->request->post['api_key'] : '');
-        $environment = is_scalar($this->request->post['environment'] ?? null) ? (string) $this->request->post['environment'] : '';
+        $typed = trim(self::raw($this->request->post['api_key'] ?? null));
+        $environment = self::raw($this->request->post['environment'] ?? null);
         $key = $typed === '' ? $services->settings->apiKey() : $typed;
 
         if (!$services->environment->acceptsSave($environment, $services->settings->environment())) {
@@ -244,7 +247,9 @@ class Two extends \Opencart\System\Engine\Controller
 
     /**
      * The posted core fields, as plain values. A field the form did not post
-     * is left out, so SettingsSave leaves it alone.
+     * is left out, so SettingsSave leaves it alone. OpenCart HTML-escapes
+     * every posted value; the core holds values as typed, so they are
+     * decoded here and escaped again when rendered.
      *
      * @param array<string, mixed> $post
      * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string}
@@ -255,7 +260,7 @@ class Two extends \Opencart\System\Engine\Controller
         $submitted = [];
         foreach (['api_key', 'environment', 'cancel_status_id', 'refund_status_id'] as $key) {
             if (is_scalar($field($key))) {
-                $submitted[$key] = (string) $field($key);
+                $submitted[$key] = self::raw($field($key));
             }
         }
         if (is_array($field('title'))) {
@@ -264,15 +269,21 @@ class Two extends \Opencart\System\Engine\Controller
             $titles = [];
             foreach ($this->model_localisation_language->getLanguages() as $language) {
                 $title = $field('title')[$language['language_id']] ?? '';
-                $titles[(int) $language['language_id']] = is_scalar($title) ? (string) $title : '';
+                $titles[(int) $language['language_id']] = self::raw($title);
             }
             $submitted['title'] = $titles;
         }
         if (is_array($field('fulfil_status_ids'))) {
-            $submitted['fulfil_status_ids'] = array_values(array_map(static fn (mixed $id): string => is_scalar($id) ? (string) $id : '', $field('fulfil_status_ids')));
+            $submitted['fulfil_status_ids'] = array_values(array_map(static fn (mixed $id): string => self::raw($id), $field('fulfil_status_ids')));
         }
 
         return $submitted;
+    }
+
+    /** A posted value as typed: Request::clean ran htmlspecialchars (ENT_COMPAT) on it, which this undoes exactly. */
+    private static function raw(mixed $value): string
+    {
+        return is_scalar($value) ? htmlspecialchars_decode((string) $value, ENT_COMPAT) : '';
     }
 
     /** @return list<int> */
@@ -302,11 +313,11 @@ class Two extends \Opencart\System\Engine\Controller
     }
 
     /**
-     * What the save says about the credentials: refused (shown on the key
-     * field) or a note on the success line. Null when they were not posted.
+     * What the save says about the credentials: refused (shown on the field
+     * at fault) or a note on the success line. Null when they were not posted.
      *
      * @param array{credentials: string|null, status: string|null, code: int|null} $result
-     * @return array{refused: bool, text: string}|null
+     * @return array{refused: bool, field: string, text: string}|null
      */
     private function credentialsMessage(array $result): ?array
     {
@@ -314,10 +325,11 @@ class Two extends \Opencart\System\Engine\Controller
 
         return match ($result['credentials']) {
             null => null,
-            SettingsSave::SAVED, SettingsSave::SAVED_UNVERIFIED, SettingsSave::UNCHANGED => ['refused' => false, 'text' => $verdict],
-            SettingsSave::MISSING => ['refused' => true, 'text' => $this->language->get('error_key_missing')],
-            SettingsSave::KEPT_REJECTED, SettingsSave::KEPT_UNVERIFIED => ['refused' => true, 'text' => trim($verdict . ' ' . $this->language->get('text_key_kept'))],
-            default => ['refused' => true, 'text' => $this->language->get('error_' . $result['credentials'])],
+            SettingsSave::SAVED, SettingsSave::SAVED_UNVERIFIED, SettingsSave::UNCHANGED => ['refused' => false, 'field' => 'api_key', 'text' => $verdict],
+            SettingsSave::MISSING => ['refused' => true, 'field' => 'api_key', 'text' => $this->language->get('error_key_missing')],
+            SettingsSave::KEPT_REJECTED, SettingsSave::KEPT_UNVERIFIED => ['refused' => true, 'field' => 'api_key', 'text' => trim($verdict . ' ' . $this->language->get('text_key_kept'))],
+            SettingsSave::KEPT_ENVIRONMENT => ['refused' => true, 'field' => 'environment', 'text' => $this->language->get('error_kept_environment')],
+            default => ['refused' => true, 'field' => 'api_key', 'text' => $this->language->get('error_' . $result['credentials'])],
         };
     }
 

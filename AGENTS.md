@@ -54,6 +54,8 @@ The settings page has PrestaShop's five tabs. P2 fills only what the core flow n
 - The API key is never sent back to the browser. An empty key field means "keep the stored key".
 - Reading the merchant record refreshes it when due (`RecordProvider::refreshIfDue`), so a shop with no crontab still gets one.
 
+Where OpenCart deliberately differs from PrestaShop, the row goes in `docs/divergences.md` until it is filed in the Build Guide's register.
+
 Later-phase items, not built yet:
 - The Diagnostics tab: SSL bypass, debug logging, refresh merchant profile, scheduled refresh URL.
 - The error log view (last 100 lines).
