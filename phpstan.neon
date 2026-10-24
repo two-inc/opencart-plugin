@@ -17,6 +17,7 @@ parameters:
         - .cache/opencart/system/engine
         - .cache/opencart/system/library
         - .cache/opencart/admin/model
+        - .cache/opencart/catalog/model
     ignoreErrors:
         # Core stubs take their collaborators now and read them once the
         # owning phase fills the method in.

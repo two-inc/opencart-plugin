@@ -2,7 +2,8 @@
 # Install smoke against the running docker shop (`make install` first, then
 # `make smoke`). Catches what the offline suite cannot: a wrong admin
 # namespace, route, template or language path, a broken install() or
-# configure.php, and any PHP error OpenCart logs while serving them.
+# configure.php, an unguarded callback, and any PHP error OpenCart logs
+# while serving them. Placing a whole order against a Two API stub is P9.
 set -euo pipefail
 
 base="http://localhost:${PORT:-1238}"
@@ -103,6 +104,29 @@ configure > /dev/null
 ok "configure.php registers the record refresh cron"
 if configure -e TWO_ENVIRONMENT=bogus > /dev/null 2>&1; then fail "configure.php accepted TWO_ENVIRONMENT=bogus"; fi
 ok "configure.php refuses an unknown environment"
+
+# The order table: install() and configure.php create it, InnoDB.
+table() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'opencart' AND TABLE_NAME = 'oc_two_order'"; }
+[ "$(table)" = InnoDB ] || fail "the two_order table is missing or not InnoDB (got '$(table)')"
+ok "two_order table (InnoDB)"
+
+# Storefront: the tile template and language load, and the callbacks from Two are guarded.
+[ "$(status 'index.php?route=extension/two/payment/two&language=en-gb')" = 200 ] || fail "the tile did not render"
+ok "tile renders"
+contains "placing an order with no order in the session is refused" "$(curl -s -X POST "$base/index.php?route=extension/two/payment/two.confirm&language=en-gb")" '"error"'
+cb="index.php?route=extension/two/payment/two.confirmation&language=en-gb&order_id=1"
+[ "$(status "${cb}&token=not-a-token")" = 302 ] || fail "a malformed callback token was not sent back to the cart"
+ok "a malformed callback token is refused"
+token=$(printf 'a%.0s' $(seq 48))
+bounce=$(curl -s -D - "$base/${cb}&token=${token}")
+contains "a callback without the session cookie bounces" "$bounce" 'two_bounce=1'
+if grep -qi '^set-cookie: OCSESSID' <<<"$bounce"; then fail "the bounce replaced the session cookie"; fi
+ok "the bounce leaves the session cookie alone"
+grep -o 'url=[^"]*' <<<"$bounce" | grep -q "^url=${base}/" || fail "the bounce target is not the shop itself"
+ok "the bounce stays on the shop"
+location=$(curl -s -o /dev/null -w '%{redirect_url}' "$base/${cb}&token=${token}&two_bounce=1")
+grep -q 'checkout/cart' <<<"$location" || fail "a callback for an unknown order did not go back to the cart (got '${location}')"
+ok "a callback for an unknown order goes back to the cart"
 
 # The Installer's Uninstall deletes extension/two; the checkout mount must not allow it.
 if docker exec "$app" touch /var/www/html/extension/two/.smoke-probe 2> /dev/null; then fail "extension/two is writable from the shop"; fi

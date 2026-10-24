@@ -115,6 +115,9 @@ final class OrderFlow
             return self::outcome(self::UNAUTHORISED, 'The confirmation callback carried no valid token for this order.', '');
         }
         $twoOrderId = $record['two_order_id'];
+        if ($twoOrderId === '') {
+            return self::outcome(self::REFUSED, 'No Two order was created for this order, so there is nothing to confirm.', '');
+        }
         $state = $this->readState($orderId, $twoOrderId);
         if ($state === null) {
             return self::outcome(self::REFUSED, 'Two could not be asked for the state of order ' . $twoOrderId . '.', $twoOrderId);

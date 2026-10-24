@@ -84,3 +84,50 @@ final class RecordingLogger implements Logger
         return (string) json_encode($this->lines);
     }
 }
+
+/** The OrderRecords port over an array, presence-conditional like the table. */
+final class MemoryRecords implements \Opencart\System\Library\Extension\Two\Core\OrderRecords
+{
+    /** @param array<int, array<string, string>> $rows */
+    public function __construct(public array $rows = [])
+    {
+    }
+
+    public function get(int $orderId): ?array
+    {
+        return $this->rows[$orderId] ?? null;
+    }
+
+    public function put(int $orderId, array $fields): void
+    {
+        $this->rows[$orderId] = $fields + ($this->rows[$orderId] ?? []);
+    }
+}
+
+/** The PostprocessingSubscribers port running closures, recording the context each saw. */
+final class ScriptedSubscribers implements \Opencart\System\Library\Extension\Two\Core\PostprocessingSubscribers
+{
+    /** @var list<array<string, mixed>> */
+    public array $contexts = [];
+
+    /** @param array<string, \Closure(array<string, mixed>, array<string, mixed>): mixed> $handlers by name */
+    public function __construct(private readonly array $handlers = [])
+    {
+    }
+
+    public function names(): array
+    {
+        return array_keys($this->handlers);
+    }
+
+    public function dispatch(array $payload, array $context): mixed
+    {
+        $this->contexts[] = $context;
+        $result = $payload;
+        foreach ($this->handlers as $handler) {
+            $result = $handler($result, $context);
+        }
+
+        return $result;
+    }
+}

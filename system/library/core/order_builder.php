@@ -18,12 +18,19 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * - product lines carry the stored line net, the stored unit tax and the
  *   rate the shop's tax class applies at the order's addresses;
  * - charge totals (shipping, handling, the low-order fee) carry the tax and
- *   rate the shop's own tax engine gives their tax class;
+ *   rate the shop's own tax engine gives their stored tax class at the
+ *   order's addresses. OpenCart keeps no per-line tax for them, only the
+ *   order's tax rows, so the adapter reproduces the merchant's own
+ *   computation, and the default handler's shop-match check refuses the
+ *   order unless the lines add up to the tax and total the shop actually
+ *   charged. Tax is never invented;
  * - discount totals (coupon, reward points) are pre-tax: the shop takes
  *   their tax off its tax rows, so their tax is what the stored tax total
  *   leaves once every other line is counted. With taxed lines at more than
  *   one rate that remainder cannot be given one rate, so the order is not
- *   built (deferred, see docs/divergences.md);
+ *   built: the plugin never apportions it (see docs/divergences.md);
+ * - a line whose tax class holds a fixed-amount rate is not built either:
+ *   a Two line carries one percentage rate, and Two refuses the rest;
  * - post-tax totals (store credit, vouchers) reduce what the buyer owes and
  *   carry no tax.
  *
@@ -50,8 +57,8 @@ final class OrderBuilder
      *     billing_address: array<string, string>, shipping_address?: array<string, string>|null,
      *     merchant_urls: array<string, string>
      * } $order
-     * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, type: string}> $lines
-     * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null}> $totals
+     * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string}> $lines
+     * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool}> $totals
      * @return array<string, mixed>
      *
      * @throws OrderRefused when the order cannot be built from what the shop stored
@@ -176,7 +183,7 @@ final class OrderBuilder
     }
 
     /**
-     * @param array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, type: string} $line
+     * @param array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string} $line
      * @return array<string, mixed>
      */
     private static function productLine(array $line, float $fx): array
@@ -187,6 +194,7 @@ final class OrderBuilder
         if ($quantity <= 0 || $net < 0 || $tax < 0) {
             throw OrderRefused::because('negative_line', 'The line "' . $line['name'] . '" has a negative or empty quantity or amount.');
         }
+        self::refuseFixedTax($line['fixed_tax'] ?? false, $line['name']);
         $rate = $line['rate'];
         if ($rate === null) {
             if ($tax !== 0) {
@@ -199,13 +207,14 @@ final class OrderBuilder
     }
 
     /**
-     * @param array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null} $total
+     * @param array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool} $total
      * @return array<string, mixed>
      */
     private static function chargeLine(array $total, string $type, float $fx): array
     {
         $net = self::cents($total['value'], $fx);
         $tax = self::cents($total['tax'] ?? 0, $fx);
+        self::refuseFixedTax($total['fixed_tax'] ?? false, $total['title']);
         $rate = $total['rate'] ?? null;
         if ($rate === null) {
             if ($tax !== 0) {
@@ -275,6 +284,13 @@ final class OrderBuilder
             'image_url' => '',
             'product_page_url' => '',
         ];
+    }
+
+    private static function refuseFixedTax(bool $fixed, string $name): void
+    {
+        if ($fixed) {
+            throw OrderRefused::because('fixed_amount_tax', 'fixed-amount tax rate on "' . $name . '": a Two line carries one percentage rate.');
+        }
     }
 
     /** A stored base-currency amount in the order currency, in cents. */
