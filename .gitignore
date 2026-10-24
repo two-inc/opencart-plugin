@@ -5,8 +5,9 @@
 .cache/
 dist/
 
-# Agent worktrees
+# Agent worktrees, and local planning notes (never committed: public repo)
 .worktrees/
+.plan/
 
 # Editors and OS
 .idea/

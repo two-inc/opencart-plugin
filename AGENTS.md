@@ -9,9 +9,10 @@ The repo root is the extension directory: a shop serves it as `extension/two/`.
 | Path | What lives there |
 |---|---|
 | `install.json` | OpenCart 4 extension manifest. Holds the one version string |
+| `system/library/opencart/` | OpenCart 4 implementations of the core's ports (for example `DbSettingsStore`, which upserts) |
 | `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, plus the ports they need (`SettingsStore`, `Transport`, `Logger`) |
 | `admin/`, `catalog/` | Thin OpenCart 4 adapters: controllers, models, language files, templates |
-| `dev/` | `configure.php` (installs and enables the extension), the docker image, CI scripts, packaging |
+| `dev/` | `configure.php` (installs and enables the extension), the docker image, CI scripts (`ci/smoke.sh`), packaging |
 | `tests/` | Offline PHP suite: `tests/*Spec.php`, run by `tests/run.php` |
 
 ## The core boundary
@@ -28,19 +29,22 @@ Stubs throw `NotImplemented::inPhase(...)` naming the phase that implements them
 |---|---|
 | `make test` | Offline suite |
 | `make lint` | `php -l` over every tracked PHP file |
-| `make phpstan` | PHPStan level 6 against the OpenCart 4.1.0.0 sources (pinned, checksum-verified) |
+| `make phpstan` | PHPStan level 6 against the OpenCart 4.1.0.0 sources (pinned, checksum-verified), then the core alone with no OpenCart symbols |
 | `make install` | Fresh docker shop (MariaDB plus OpenCart 4.1.0.4 from the upstream zip, installed with `cli_install.php`), extension installed and enabled |
 | `make configure` | Re-run `dev/configure.php` in the running shop |
+| `make smoke` | Install smoke against the running shop: admin page, save, install, `configure.php`, empty error log |
 | `make archive` | `dist/two.ocmod.zip` from HEAD |
 | `make patch` / `minor` / `major` | bumpver, commits, no tag or push |
 
 Settings come from `.env` only (see `.env.example`). `TWO_INTERNAL_ENVIRONMENTS` passes through to the shop.
 
-CI (`.github/workflows/tests.yml`) runs lint and the suite on PHP 8.1 and 8.4, PHPStan, and the package build. All are gates.
+CI (`.github/workflows/tests.yml`) runs lint and the suite on PHP 8.1 and 8.4, PHPStan, the install smoke and the package build. All are gates. Jest is deferred to P6: there is no JavaScript until the checkout capture lands.
+
+The docker shop mounts the repo read-only, because OpenCart's Installer > Uninstall deletes everything under `extension/two`.
 
 ## Staging shops
 
-The staging shops deploy this repo to `extension/two` on every new commit and then run `php <checkout>/dev/configure.php`. So `install.json` must stay at the repo root, and `configure.php` must stay idempotent and safe to run on every commit.
+The staging shops deploy this repo to `extension/two` on every new commit and then run `php <checkout>/dev/configure.php`. So `install.json` must stay at the repo root, and `configure.php` must stay idempotent and safe to run on every commit. The shops also serve the whole repo, so every CLI entry point refuses web requests (`PHP_SAPI` guard) and the root `.htaccess` refuses everything except the runtime paths. The package ships only `install.json`, `admin/`, `catalog/` and `system/`.
 
 ## Conventions
 
