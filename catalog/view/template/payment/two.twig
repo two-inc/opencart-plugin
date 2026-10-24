@@ -1,0 +1,54 @@
+{# OpenCart 4.1 renders Twig with autoescape off: every value is escaped here. #}
+<form id="form-two" class="mb-3">
+  <p>{{ text_company_intro|e }}</p>
+  <div class="mb-3">
+    <label for="input-two-company-name" class="form-label">{{ entry_company_name|e }}</label>
+    <input type="text" name="two_company_name" id="input-two-company-name" value="{{ company_name|e }}" class="form-control" autocomplete="organization" required>
+  </div>
+  <div class="mb-3">
+    <label for="input-two-organization-number" class="form-label">{{ entry_organization_number|e }}</label>
+    <input type="text" name="two_organization_number" id="input-two-organization-number" value="" class="form-control" required>
+  </div>
+  <div class="mb-3">
+    <label for="input-two-country" class="form-label">{{ entry_country|e }}</label>
+    <select name="two_country" id="input-two-country" class="form-select" required>
+      {% for item in countries %}
+        <option value="{{ item.code|e }}"{% if item.code == country %} selected{% endif %}>{{ item.name|e }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+<div class="text-end">
+  <button type="button" id="button-two-confirm" class="btn btn-primary">{{ button_confirm|e }}</button>
+</div>
+<script type="text/javascript"><!--
+$('#button-two-confirm').on('click', function() {
+    var element = this;
+
+    $.ajax({
+        url: 'index.php?route=extension/two/payment/two.confirm&language={{ language|e('url') }}',
+        type: 'post',
+        data: $('#form-two').serialize(),
+        dataType: 'json',
+        beforeSend: function() {
+            $(element).button('loading');
+        },
+        complete: function() {
+            $(element).button('reset');
+        },
+        success: function(json) {
+            if (json['error']) {
+                // The controller escapes the notice.
+                $('#alert').prepend('<div class="alert alert-danger alert-dismissible"><i class="fa-solid fa-circle-exclamation"></i> ' + json['error'] + ' <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>');
+            }
+
+            if (json['redirect']) {
+                location = json['redirect'];
+            }
+        },
+        error: function(xhr, ajaxOptions, thrownError) {
+            console.log(thrownError + "\r\n" + xhr.statusText + "\r\n" + xhr.responseText);
+        }
+    });
+});
+//--></script>

@@ -8,6 +8,10 @@ use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
 use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
+use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
+use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
+use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\RecordProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
@@ -32,16 +36,30 @@ final class Services
     public readonly ApiKeyVerdict $verdict;
     public readonly RecordProvider $records;
     public readonly SettingsSave $save;
+    public readonly DbOrderRecords $orders;
+    private readonly LogLogger $logger;
 
-    public function __construct(\Opencart\System\Library\DB $db, \Opencart\System\Library\Log $log, int $storeId = 0)
+    public function __construct(private readonly \Opencart\System\Library\DB $db, \Opencart\System\Library\Log $log, int $storeId = 0)
     {
         $this->settings = new SettingsProvider(new DbSettingsStore($db, $storeId));
         $this->environment = new Environment(self::internalEnvironmentsEnabled());
-        $logger = new LogLogger($log, $this->settings->debugLogging());
+        $logger = $this->logger = new LogLogger($log, $this->settings->debugLogging());
         $this->client = new Client($this->environment, $this->settings, new CustomHeaders(), new CurlTransport(), $logger, self::pluginVersion());
         $this->verdict = new ApiKeyVerdict($this->client, $this->settings);
         $this->records = new RecordProvider($this->client, $this->settings, $this->verdict, $logger);
         $this->save = new SettingsSave($this->settings, $this->environment, $this->verdict, $this->records);
+        $this->orders = new DbOrderRecords($db);
+    }
+
+    /**
+     * The hosted checkout flow. Every order request it sends passes through
+     * the shop's order postprocessing event first.
+     */
+    public function orderFlow(\Opencart\System\Engine\Event $event): OrderFlow
+    {
+        $postprocessing = new Postprocessing(new EventSubscribers($this->db, $event), $this->logger);
+
+        return new OrderFlow($this->client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
     }
 
     public static function internalEnvironmentsEnabled(): bool

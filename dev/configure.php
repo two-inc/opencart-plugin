@@ -15,7 +15,8 @@ declare(strict_types=1);
  * It does what Extensions > Installer and Extensions > Payments > Install do,
  * straight against the database, because neither step has a CLI entry point:
  * the extension_install and extension rows, the admin permissions for the
- * extension's route, and the payment_two settings (status forced on).
+ * extension's route, the payment_two settings (status forced on), the
+ * record refresh cron and the two_order table.
  *
  * Environment:
  *   OPENCART_DIR     shop root holding config.php (default /var/www/html)
@@ -28,6 +29,7 @@ declare(strict_types=1);
 
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
+use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 // The staging shops deploy the whole repo under the web root, so refuse to
@@ -173,6 +175,12 @@ foreach ($given + $defaults as $key => $value) {
 if (query($db, "SELECT `cron_id` FROM `{$p}cron` WHERE `code` = ?", [Services::CRON_CODE]) === []) {
     query($db, "INSERT INTO `{$p}cron` SET `code` = ?, `description` = ?, `cycle` = ?, `action` = ?, `status` = 1, `date_added` = NOW(), `date_modified` = NOW()", [Services::CRON_CODE, Services::CRON_DESCRIPTION, Services::CRON_CYCLE, Services::CRON_ACTION]);
     say('registered cron ' . Services::CRON_CODE);
+}
+
+// 6. The order-scoped table, as install() creates it.
+$renamed = DbOrderRecords::install(static fn (string $sql): array => query($db, $sql), $p);
+if ($renamed !== null) {
+    say('renamed the old ' . $p . DbOrderRecords::TABLE . ' table to ' . $renamed);
 }
 
 say('extension ' . TWO_CODE . ' ' . $manifest['version'] . ' installed and enabled');

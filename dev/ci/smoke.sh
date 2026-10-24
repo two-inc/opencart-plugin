@@ -2,7 +2,8 @@
 # Install smoke against the running docker shop (`make install` first, then
 # `make smoke`). Catches what the offline suite cannot: a wrong admin
 # namespace, route, template or language path, a broken install() or
-# configure.php, and any PHP error OpenCart logs while serving them.
+# configure.php, an unguarded callback, and any PHP error OpenCart logs
+# while serving them. Placing a whole order against a Two API stub is P9.
 set -euo pipefail
 
 base="http://localhost:${PORT:-1238}"
@@ -103,6 +104,47 @@ configure > /dev/null
 ok "configure.php registers the record refresh cron"
 if configure -e TWO_ENVIRONMENT=bogus > /dev/null 2>&1; then fail "configure.php accepted TWO_ENVIRONMENT=bogus"; fi
 ok "configure.php refuses an unknown environment"
+
+# The order table: install() and configure.php create it, InnoDB.
+table() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = 'opencart' AND TABLE_NAME = 'oc_two_order'"; }
+[ "$(table)" = InnoDB ] || fail "the two_order table is missing or not InnoDB (got '$(table)')"
+ok "two_order table (InnoDB)"
+sql() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "$1"; }
+legacy() { sql "SHOW TABLES LIKE 'oc\_two\_order\_legacy\_%'" | wc -l; }
+before=$(legacy)
+sql "DROP TABLE oc_two_order; CREATE TABLE oc_two_order (two_order_id INT NOT NULL, order_id INT NOT NULL, PRIMARY KEY (two_order_id)) ENGINE=MyISAM"
+configure > /dev/null
+[ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'token_hash'" | wc -l)" = 1 ] || fail "configure.php did not replace a legacy two_order table"
+[ "$(legacy)" = $((before + 1)) ] || fail "the legacy two_order table was not kept aside"
+ok "configure.php renames a legacy two_order table aside"
+
+# An order's tax rates come from its own customer group, never the request's session: the
+# probe runs OpenCart's tax engine as the plugin sets it up, with no session at all.
+# A Norway zone with one rate per customer group, on the Taxable Goods class (9).
+sql "REPLACE INTO oc_customer_group SET customer_group_id = 9001, approval = 0, sort_order = 9; REPLACE INTO oc_geo_zone SET geo_zone_id = 9001, name = 'Smoke NO', description = 'Smoke NO'; REPLACE INTO oc_zone_to_geo_zone SET zone_to_geo_zone_id = 9001, geo_zone_id = 9001, country_id = 160, zone_id = 0; REPLACE INTO oc_tax_rate SET tax_rate_id = 9001, geo_zone_id = 9001, name = 'Smoke 15', rate = 15, type = 'P'; REPLACE INTO oc_tax_rate SET tax_rate_id = 9002, geo_zone_id = 9001, name = 'Smoke 25', rate = 25, type = 'P'; DELETE FROM oc_tax_rate_to_customer_group WHERE tax_rate_id IN (9001, 9002); INSERT INTO oc_tax_rate_to_customer_group SET tax_rate_id = 9001, customer_group_id = 1; INSERT INTO oc_tax_rate_to_customer_group SET tax_rate_id = 9002, customer_group_id = 9001; REPLACE INTO oc_tax_rule SET tax_rule_id = 9001, tax_class_id = 9, tax_rate_id = 9001, based = 'shipping', priority = 1; REPLACE INTO oc_tax_rule SET tax_rule_id = 9002, tax_class_id = 9, tax_rate_id = 9002, based = 'shipping', priority = 1"
+probe() { docker exec -u www-data -e OPENCART_DIR=/var/www/html "$app" php /var/www/html/extension/two/dev/ci/order-tax-probe.php "{\"customer_group_id\":$1,\"shipping_country_id\":160,\"shipping_zone_id\":0,\"payment_country_id\":160,\"payment_zone_id\":0,\"store_id\":0}" 9; }
+[ "$(probe 9001)" = '{"rate":0.25,"fixed_tax":false}' ] || fail "an order from another customer group did not get its group's rate (got '$(probe 9001)')"
+ok "an order's own customer group gives its rate, with no session"
+[ "$(probe 1)" = '{"rate":0.15,"fixed_tax":false}' ] || fail "an order from the default group did not get its rate (got '$(probe 1)')"
+ok "the default group gives its own rate"
+
+# Storefront: the tile template and language load, and the callbacks from Two are guarded.
+[ "$(status 'index.php?route=extension/two/payment/two&language=en-gb')" = 200 ] || fail "the tile did not render"
+ok "tile renders"
+contains "placing an order with no order in the session is refused" "$(curl -s -X POST "$base/index.php?route=extension/two/payment/two.confirm&language=en-gb")" '"error"'
+cb="index.php?route=extension/two/payment/two.confirmation&language=en-gb&order_id=1"
+[ "$(status "${cb}&token=not-a-token")" = 302 ] || fail "a malformed callback token was not sent back to the cart"
+ok "a malformed callback token is refused"
+token=$(printf 'a%.0s' $(seq 48))
+bounce=$(curl -s -D - "$base/${cb}&token=${token}")
+contains "a callback without the session cookie bounces" "$bounce" 'two_bounce=1'
+if grep -qi '^set-cookie: OCSESSID' <<<"$bounce"; then fail "the bounce replaced the session cookie"; fi
+ok "the bounce leaves the session cookie alone"
+grep -o 'url=[^"]*' <<<"$bounce" | grep -q "^url=${base}/" || fail "the bounce target is not the shop itself"
+ok "the bounce stays on the shop"
+location=$(curl -s -o /dev/null -w '%{redirect_url}' "$base/${cb}&token=${token}&two_bounce=1")
+grep -q 'checkout/cart' <<<"$location" || fail "a callback for an unknown order did not go back to the cart (got '${location}')"
+ok "a callback for an unknown order goes back to the cart"
 
 # The Installer's Uninstall deletes extension/two; the checkout mount must not allow it.
 if docker exec "$app" touch /var/www/html/extension/two/.smoke-probe 2> /dev/null; then fail "extension/two is writable from the shop"; fi

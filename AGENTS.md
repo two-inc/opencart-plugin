@@ -9,8 +9,8 @@ The repo root is the extension directory: a shop serves it as `extension/two/`.
 | Path | What lives there |
 |---|---|
 | `install.json` | OpenCart 4 extension manifest. Holds the one version string |
-| `system/library/opencart/` | OpenCart 4 implementations of the core's ports (`DbSettingsStore`, which upserts; `CurlTransport`; `LogLogger`) and `Services`, the one place the core graph is built |
-| `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `SettingsSave` (the selective admin save), `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, `ApiKeyVerdict` (the key heartbeat), plus the ports they need (`SettingsStore`, `Transport`, `Logger`) and `SettingsOverlay` (read-only typed credentials for the live key check) |
+| `system/library/opencart/` | OpenCart 4 implementations of the core's ports (`DbSettingsStore`, which upserts; `CurlTransport`; `LogLogger`; `DbOrderRecords`, the `two_order` table; `EventSubscribers`, the order postprocessing event) and `Services`, the one place the core graph is built |
+| `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `SettingsSave` (the selective admin save), `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, `ApiKeyVerdict` (the key heartbeat), `OrderFlow` (create, confirm and cancel) and `OrderRefused`, plus the ports they need (`SettingsStore`, `Transport`, `Logger`, `OrderRecords`, `PostprocessingSubscribers`) and `SettingsOverlay` (read-only typed credentials for the live key check) |
 | `admin/`, `catalog/` | Thin OpenCart 4 adapters: controllers, models, language files, templates, and `admin/view/javascript/two_admin.js` (the live API key check). `catalog/controller/cron/two.php` is the daily merchant-record refresh, registered in OpenCart's cron table by install() and `configure.php` |
 | `dev/` | `configure.php` (installs and enables the extension), the docker image, CI scripts (`ci/smoke.sh`), packaging |
 | `tests/` | Offline PHP suite: `tests/*Spec.php`, run by `tests/run.php` |
@@ -56,10 +56,27 @@ The settings page has PrestaShop's five tabs. P2 fills only what the core flow n
 
 Where OpenCart deliberately differs from PrestaShop, the row goes in `docs/divergences.md` until it is filed in the Build Guide's register.
 
+## Checkout and order flow
+
+The buyer picks Two, enters the company in the tile (name, organisation number, country; company search is P6) and confirms. `catalog/controller/payment/two.php` maps the stored order through the model into `OrderFlow::create`, which builds the payload (`OrderBuilder`), runs the order postprocessing event (`Postprocessing`), creates the Two order and answers with Two's payment URL. The OpenCart order stays unplaced (status 0) until Two confirms it. Two then sends the buyer to `two.confirmation` (the order moves to the shop's default order status, then the success page) or `two.cancel` (the order stays unplaced with a history note, and the buyer is back at the cart with a notice).
+
+- Tax: the plugin reports the shop's stored nets, taxes and rates and never computes or adjusts a tax. Where OpenCart keeps no per-line tax (shipping and other charge totals) the shop's own tax engine gives it, and the default handler refuses the order unless the lines add up to what the shop charged. A discount's tax is what the stored tax total leaves; at mixed rates, or with a fixed-amount tax rate, the order is refused rather than guessed.
+- Every order request goes through `Postprocessing::apply` in `OrderFlow`; `tests/CallSiteAllowlistSpec.php` fails a request that bypasses it. The README carries the merchant contract.
+- Confirm checks the order against the Two order: create stores the sent payload's hash, and confirm rebuilds it from the stored order (hook included) and refuses, cancelling the Two order, on any difference. OpenCart rewrites an unplaced order on every checkout render, so the cart can change after create.
+- Rates come from OpenCart's own tax engine set up for the stored order (`OrderTax`: its customer group and addresses and its store's settings over the default store's), never from the request's session, so a callback without the cookie and the admin rebuild alike. The smoke checks a non-default group's rate through the real engine (`dev/ci/order-tax-probe.php`).
+- Callbacks for one order are serialised with a MySQL named lock, so the status read before `addHistory` cannot go stale. A guarded UPDATE would not do: `addHistory` keys the order mail and stock off the old status. The lock is released before every redirect (`Response::redirect` exits, so a finally would not run). A hit that waits out the lock (30 s) goes to the success page if the order is placed by then, otherwise to a neutral still-confirming notice, never the failure sentence.
+- Unplaced means status 0 or the shop's void status, which OpenCart 4.1.0.0 sets on every checkout edit. A second callback hit on a placed order writes nothing; the status is read again before any write (`OrderFlow::afterCallback`).
+- install() and `configure.php` rename a `two_order` table of another shape (the pre-rewrite extension's) aside before creating the table, and an order create is refused unless its token row was stored.
+- The callbacks are guarded by a per-order token (its hash in `two_order`). OpenCart's session cookie is SameSite=Strict by default, so a callback arriving without it bounces once through a same-site page rebuilt from the route and the validated id and token.
+- Refusals: the buyer gets `ErrorMapper`'s copy (section 6.4), the merchant's order history and the log get the reason.
+
 Later-phase items, not built yet:
 - The Diagnostics tab: SSL bypass, debug logging, refresh merchant profile, scheduled refresh URL.
 - The error log view (last 100 lines).
 - The custom request-header table, with halt-and-show on save (`CustomHeaders::validate` is built and tested) and a `send_from_browser` flag per row.
+- P9's E2E must include a 4.1.0.0 CI leg that places a whole order: the floor voids an unplaced order on every checkout edit, and the CI shop otherwise runs 4.1.0.4.
+- The availability chain at checkout (P6): the tile is offered whenever the extension is enabled with an API key.
+- A plugin status for confirmed orders (the shop's default order status is used) and the order lifecycle off the status maps (P5).
 - The rest of the PrestaShop field set: vendor name, subtitle, the checkout field toggles, payment terms, and the remaining status maps.
 
 ## Conventions

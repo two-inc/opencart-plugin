@@ -11,6 +11,8 @@ if (PHP_SAPI !== 'cli') {
 // Constants a shop's config.php defines at runtime, declared here so PHPStan
 // can type the code that reads them (dev/configure.php). Analysis only.
 define('DIR_EXTENSION', '/var/www/html/extension/');
+define('DIR_SYSTEM', '/var/www/html/system/');
+define('DB_DRIVER', 'mysqli');
 define('DB_HOSTNAME', 'localhost');
 define('DB_USERNAME', 'opencart');
 define('DB_PASSWORD', '');

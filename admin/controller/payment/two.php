@@ -8,6 +8,7 @@ use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
 use Opencart\System\Library\Extension\Two\Core\Brand;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
+use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
@@ -234,6 +235,13 @@ class Two extends \Opencart\System\Engine\Controller
         $this->load->model('setting/cron');
         $this->model_setting_cron->deleteCronByCode(Services::CRON_CODE);
         $this->model_setting_cron->addCron(Services::CRON_CODE, Services::CRON_DESCRIPTION, Services::CRON_CYCLE, Services::CRON_ACTION, true);
+
+        // The order-scoped table. Kept on uninstall: it holds the Two order ids of placed orders.
+        DbOrderRecords::install(function (string $sql): array {
+            $result = $this->db->query($sql);
+
+            return is_object($result) ? $result->rows : [];
+        }, DB_PREFIX);
     }
 
     public function uninstall(): void
