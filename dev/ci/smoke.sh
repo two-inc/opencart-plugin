@@ -17,6 +17,7 @@ status() { curl -s -o /dev/null -w '%{http_code}' "$base/$1"; }
 contains() { grep -qF -- "$3" <<<"$2" || fail "$1: no '$3' in: ${2:0:300}"; ok "$1"; }
 configure() { docker exec -u www-data -e OPENCART_DIR=/var/www/html "$@" "$app" php /var/www/html/extension/two/dev/configure.php; }
 setting() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT value FROM oc_setting WHERE store_id = 0 AND code = 'payment_two' AND \`key\` = 'payment_two_$1'"; }
+store() { docker exec "$db" mariadb -uroot -padmin opencart -e "UPDATE oc_setting SET value = '$2' WHERE store_id = 0 AND code = 'payment_two' AND \`key\` = 'payment_two_$1'"; }
 
 # Storefront, and what the shop serves from the extension directory.
 [ "$(status '')" = 200 ] || fail "storefront did not return 200"
@@ -41,6 +42,20 @@ admin() { local route="$1"; shift; curl -s -b "$jar" "$@" "$base/admin/index.php
 page=$(admin extension/two/payment/two)
 contains "settings page" "$page" 'Edit Two settings'
 contains "settings page version" "$page" "Version $(php -r 'echo json_decode(file_get_contents("install.json"), true)["version"];')"
+for tab in 'Checkout fields' 'Payment terms' 'Order management' 'Diagnostics' 'coming in a later release'; do contains "settings tab: ${tab}" "$page" "$tab"; done
+[ "$(status extension/two/admin/view/javascript/two_admin.js)" = 200 ] || fail "the admin script is not served"
+ok "admin script served"
+# The environment dropdown: production and sandbox always, staging only on an internal shop.
+contains "environment: production" "$page" '<option value="production"'
+contains "environment: sandbox" "$page" '<option value="sandbox"'
+contains "environment: the stored one is selected" "$page" "<option value=\"$(setting environment)\" selected"
+if [ "$(docker exec "$app" printenv TWO_INTERNAL_ENVIRONMENTS || true)" = 1 ]; then
+  contains "environment: staging on an internal shop" "$page" '<option value="staging"'
+elif grep -qF '<option value="staging"' <<<"$page"; then
+  fail "staging is offered on a shop without TWO_INTERNAL_ENVIRONMENTS=1"
+else
+  ok "environment: no staging without the flag"
+fi
 # The rendered heading, from our language file: a broken language path renders the key instead.
 contains "payments list heading" "$(admin extension/payment)" '<td>Two</td>'
 # Drop the sort_order row first: a save must insert a key that has no row (upgraded installs), not only update.
@@ -49,11 +64,30 @@ contains "save" "$(admin extension/two/payment/two.save -X POST -d payment_two_s
 [ "$(setting sort_order)" = 2 ] || fail "save did not insert the missing sort_order row"
 ok "save inserted a key that had no row"
 
+# Selective save: a malformed key is refused and the stored key kept, while the other fields save.
+# The key never reaches Two (it is refused before the wire), so this needs no network.
+store api_key smoke-good-key-1234
+saved=$(admin extension/two/payment/two.save -X POST -d payment_two_sort_order=5 -d payment_two_environment=sandbox --data-urlencode 'payment_two_api_key=bad key')
+contains "save refuses a malformed key" "$saved" 'not a valid API key'
+contains "save reports the other fields saved" "$saved" 'The other settings were saved.'
+[ "$(setting api_key)" = smoke-good-key-1234 ] || fail "a refused key overwrote the stored key (got '$(setting api_key)')"
+[ "$(setting sort_order)" = 5 ] || fail "a refused key stopped the other fields saving"
+ok "refused key kept the stored key, other fields saved"
+store api_key ''
+# OpenCart escapes every posted value; the core stores the title as typed.
+admin extension/two/payment/two.save -X POST --data-urlencode 'payment_two_title[1]=Pay & go <now>' > /dev/null
+[ "$(setting title)" = '{"1":"Pay & go <now>"}' ] || fail "the title was not stored as typed (got '$(setting title)')"
+ok "title stored as typed"
+contains "a bad environment is named on its field" "$(admin extension/two/payment/two.save -X POST -d payment_two_environment=bogus)" '"environment":"Please select a valid environment."'
+
 # Extensions > Payments: uninstall, then install (runs install(), which loads the core in the admin).
 contains "payments uninstall" "$(admin 'extension/payment.uninstall&extension=two&code=two')" '"success"'
 contains "payments install" "$(admin 'extension/payment.install&extension=two&code=two')" '"success"'
 [ "$(setting environment)" = sandbox ] || fail "install() did not seed the core defaults"
 ok "install() seeded the core defaults"
+shipped=$(docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT order_status_id FROM oc_order_status WHERE name = 'Shipped' ORDER BY language_id LIMIT 1")
+[ "$(setting fulfil_status_ids)" = "[${shipped}]" ] || fail "install() did not map fulfilment to Shipped (got '$(setting fulfil_status_ids)')"
+ok "install() mapped fulfilment to Shipped"
 cron() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(action, '|', cycle, '|', status) FROM oc_cron WHERE code = 'two_record_refresh'"; }
 [ "$(cron)" = 'extension/two/cron/two|day|1' ] || fail "install() did not register the record refresh cron (got '$(cron)')"
 ok "install() registered the record refresh cron"

@@ -22,7 +22,7 @@ final class CoreBoundarySpec
     private const CORE_TYPES = [
         'Client', 'Environment', 'RecordProvider', 'SettingsProvider', 'Availability', 'ApiKeyVerdict',
         'OrderBuilder', 'Postprocessing', 'ErrorMapper', 'CustomHeaders', 'Brand',
-        'SettingsStore', 'Transport', 'Logger', 'HttpResponse', 'NotImplemented',
+        'SettingsStore', 'SettingsOverlay', 'SettingsSave', 'Transport', 'Logger', 'HttpResponse', 'NotImplemented',
     ];
 
     /** @var list<array{pattern: string, samples: list<string>, description: string}> */

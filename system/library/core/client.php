@@ -23,6 +23,12 @@ final class Client
 
     private const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
     private const REDACTED = '[REDACTED]';
+    /**
+     * Shorter values are not scrubbed from log text: replacing a one or two
+     * character header value would mangle every debug line. Their header is
+     * still redacted by name.
+     */
+    public const MIN_SCRUB_LENGTH = 4;
     private const SECRET_HEADERS = ['x-api-key', 'authorization', 'proxy-authorization'];
 
     public function __construct(
@@ -80,6 +86,18 @@ final class Client
     }
 
     /**
+     * This client for other credentials (a key and environment the merchant
+     * has typed but not saved), every other setting as stored. Its settings
+     * are read-only, so nothing it learns is cached as the stored key's.
+     */
+    public function withCredentials(string $apiKey, string $environment): self
+    {
+        $settings = new SettingsProvider(new SettingsOverlay($this->settings->store(), ['api_key' => $apiKey, 'environment' => $environment]));
+
+        return new self($this->environment, $settings, $this->customHeaders, $this->transport, $this->logger, $this->pluginVersion);
+    }
+
+    /**
      * Custom headers first, then what the Client owns, so a reserved name can
      * never be overridden even if a row slipped past CustomHeaders.
      *
@@ -120,13 +138,12 @@ final class Client
         foreach ($headers as $name => $value) {
             $isSecret = in_array(strtolower($name), $redact, true);
             $logged[$name] = $isSecret ? self::REDACTED : $value;
-            if ($isSecret && $value !== '') {
+            if ($isSecret) {
                 $secrets[] = $value;
             }
         }
-        if ($this->settings->apiKey() !== '') {
-            $secrets[] = $this->settings->apiKey();
-        }
+        $secrets[] = $this->settings->apiKey();
+        $secrets = array_values(array_filter($secrets, static fn (string $secret): bool => strlen($secret) >= self::MIN_SCRUB_LENGTH));
         $line = 'Two API ' . $method . ' ' . $path;
         $context = [
             'request' => ['params' => $params, 'headers' => $logged, 'body' => $body, 'verify_tls' => $verifyTls],
@@ -143,7 +160,8 @@ final class Client
     }
 
     /**
-     * Every string in $data with each secret replaced by the redaction marker.
+     * Every string in $data with each secret (at least MIN_SCRUB_LENGTH long)
+     * replaced by the redaction marker.
      *
      * @template T of array
      * @param T            $data

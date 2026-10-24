@@ -10,7 +10,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * in the database can never reach the wire. Reserved names cover what the
  * Client itself sets.
  *
- * The read path lands in P1, the save path (halt and show) in P2.
+ * The save path halts and shows: validate() names every bad row and the
+ * adapter refuses the whole table, so a row the merchant saw saved is a row
+ * that is sent. The table UI lands in a later phase.
  */
 final class CustomHeaders
 {
@@ -25,6 +27,13 @@ final class CustomHeaders
         'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer',
         'transfer-encoding', 'upgrade', 'expect', 'authorization', 'cookie',
     ];
+
+    /** validate() error codes, in the order a row is checked. The adapter maps them to copy. */
+    public const NAME_INVALID = 'name_invalid';
+    public const NAME_RESERVED = 'name_reserved';
+    public const NAME_DUPLICATE = 'name_duplicate';
+    public const VALUE_MISSING = 'value_missing';
+    public const VALUE_INVALID = 'value_invalid';
 
     /** RFC 9110 field-name token. \z, because $ also matches before a trailing newline. */
     private const NAME = '/^[A-Za-z0-9!#$%&\'*+.^_`|~-]+\z/';
@@ -58,15 +67,42 @@ final class CustomHeaders
     }
 
     /**
-     * One error per rejected row, keyed by row index; empty when every row is
-     * valid. The save is refused as a whole when this is not empty.
+     * One error code per rejected row, keyed by row index; empty when every
+     * row is valid. The save is refused as a whole when this is not empty.
+     * Name and value are trimmed first, as on read, and a row with both blank
+     * is no row at all. A named row with no value, or a second row with the
+     * same name, is refused rather than stored, because the read path would
+     * silently drop it.
      *
      * @param list<array{name: string, value: string}> $rows
      * @return array<int, string>
      */
     public function validate(array $rows): array
     {
-        throw NotImplemented::inPhase('CustomHeaders::validate', 'P2');
+        $errors = [];
+        $seen = [];
+        foreach ($rows as $index => $row) {
+            $name = trim($row['name']);
+            $value = trim($row['value']);
+            if ($name === '' && $value === '') {
+                continue;
+            }
+            $lower = strtolower($name);
+            $error = match (true) {
+                preg_match(self::NAME, $name) !== 1 => self::NAME_INVALID,
+                in_array($lower, self::RESERVED, true) => self::NAME_RESERVED,
+                isset($seen[$lower]) => self::NAME_DUPLICATE,
+                $value === '' => self::VALUE_MISSING,
+                preg_match(self::VALUE, $value) !== 1 => self::VALUE_INVALID,
+                default => null,
+            };
+            $seen[$lower] = true;
+            if ($error !== null) {
+                $errors[$index] = $error;
+            }
+        }
+
+        return $errors;
     }
 
     private static function isSendable(string $name, string $value): bool

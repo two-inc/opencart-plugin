@@ -10,6 +10,7 @@ use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\RecordProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
+use Opencart\System\Library\Extension\Two\Core\SettingsSave;
 
 /**
  * Wires the core for one OpenCart request: the shop's settings table, its
@@ -30,6 +31,7 @@ final class Services
     public readonly Client $client;
     public readonly ApiKeyVerdict $verdict;
     public readonly RecordProvider $records;
+    public readonly SettingsSave $save;
 
     public function __construct(\Opencart\System\Library\DB $db, \Opencart\System\Library\Log $log, int $storeId = 0)
     {
@@ -39,6 +41,7 @@ final class Services
         $this->client = new Client($this->environment, $this->settings, new CustomHeaders(), new CurlTransport(), $logger, self::pluginVersion());
         $this->verdict = new ApiKeyVerdict($this->client, $this->settings);
         $this->records = new RecordProvider($this->client, $this->settings, $this->verdict, $logger);
+        $this->save = new SettingsSave($this->settings, $this->environment, $this->verdict, $this->records);
     }
 
     public static function internalEnvironmentsEnabled(): bool

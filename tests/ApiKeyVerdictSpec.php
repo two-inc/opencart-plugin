@@ -22,6 +22,49 @@ final class ApiKeyVerdictSpec
     {
         self::testCategories();
         self::testCache();
+        self::testCandidates();
+    }
+
+    /** check() asks about typed credentials and caches nothing; lastDefinitiveStatus() keeps the last ok or rejection through outages. */
+    private static function testCandidates(): void
+    {
+        $checks = [
+            ['key' => ' cand ', 'environment' => 'production', 'responses' => [new HttpResponse(200, '{"id":"m2"}')], 'status' => ApiKeyVerdict::OK, 'url' => 'https://api.two.inc' . ApiKeyVerdict::VERIFY_PATH, 'description' => 'a candidate Two accepts, in its own environment, trimmed'],
+            ['key' => 'cand', 'environment' => 'sandbox', 'responses' => [new HttpResponse(403, '')], 'status' => ApiKeyVerdict::INVALID, 'url' => 'https://api.sandbox.two.inc' . ApiKeyVerdict::VERIFY_PATH, 'description' => 'a candidate Two rejects'],
+            ['key' => '  ', 'environment' => 'sandbox', 'responses' => [], 'status' => ApiKeyVerdict::NOT_CONFIGURED, 'url' => null, 'description' => 'a blank candidate makes no call'],
+        ];
+        foreach ($checks as $case) {
+            [$verdict, $transport, $store] = self::verdict(['api_key' => 'stored'], $case['responses']);
+            $result = $verdict->check($case['key'], $case['environment']);
+            TinyAssert::same($case['status'], $result['status'], 'check: ' . $case['description']);
+            TinyAssert::same($case['url'], isset($transport->calls[0]) ? strstr($transport->calls[0]['url'], '?', true) : null, 'check: ' . $case['description'] . ' (endpoint)');
+            TinyAssert::same(isset($transport->calls[0]) ? trim($case['key']) : null, $transport->calls[0]['headers']['X-API-Key'] ?? null, 'check: ' . $case['description'] . ' (key sent)');
+            TinyAssert::same(null, $store->get(ApiKeyVerdict::CACHE_KEY), 'check: ' . $case['description'] . ' (nothing cached)');
+        }
+
+        $ok = new HttpResponse(200, '{"id":"m"}');
+        $rejected = new HttpResponse(401, '');
+        $down = HttpResponse::unreachable('timeout');
+        $sequences = [
+            ['answers' => [], 'rekey' => false, 'expected' => null, 'description' => 'never verified'],
+            ['answers' => [$ok], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'an ok'],
+            ['answers' => [$ok, $down], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'an outage after an ok keeps the ok'],
+            ['answers' => [$ok, new HttpResponse(503, ''), new HttpResponse(200, '<html>')], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'a 5xx or a non-merchant 200 after an ok keeps the ok'],
+            ['answers' => [$ok, $rejected], 'rekey' => false, 'expected' => ApiKeyVerdict::INVALID, 'description' => 'a rejection after an ok replaces it'],
+            ['answers' => [$rejected, $down, $ok], 'rekey' => false, 'expected' => ApiKeyVerdict::OK, 'description' => 'an ok after a rejection replaces it'],
+            ['answers' => [$down], 'rekey' => false, 'expected' => null, 'description' => 'an outage alone says nothing'],
+            ['answers' => [$ok], 'rekey' => true, 'expected' => null, 'description' => 'an ok for other credentials says nothing'],
+        ];
+        foreach ($sequences as $case) {
+            [$verdict, , $store] = self::verdict(['api_key' => 'k'], $case['answers']);
+            foreach ($case['answers'] as $answer) {
+                $verdict->verify();
+            }
+            if ($case['rekey']) {
+                $store->values['api_key'] = 'other';
+            }
+            TinyAssert::same($case['expected'], $verdict->lastDefinitiveStatus(), 'lastDefinitiveStatus: ' . $case['description']);
+        }
     }
 
     private static function testCategories(): void

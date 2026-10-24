@@ -46,6 +46,49 @@ final class RecordProviderSpec
         self::testRecordIsReadByTheKeysMerchant();
         self::testRecordIsBoundToCredentials();
         self::testScheduledRefresh();
+        self::testRefreshOnRead();
+    }
+
+    /**
+     * The read-time stand-in for a schedule that is not running. Each case is
+     * the cached record's age (null for none), the last attempt (its age and
+     * whether it was for these credentials), and what a read then does.
+     */
+    private static function testRefreshOnRead(): void
+    {
+        $ok = new HttpResponse(200, '{"id":"m1"}');
+        $record = new HttpResponse(200, (string) json_encode(self::NEW));
+        $stale = RecordProvider::STALE_AFTER;
+        $cases = [
+            ['key' => '', 'age' => null, 'attempt' => null, 'responses' => [], 'due' => false, 'timeout' => null, 'served' => null, 'description' => 'no key: nothing to fetch'],
+            ['key' => 'k', 'age' => null, 'attempt' => null, 'responses' => [$ok, $record], 'due' => true, 'timeout' => 10, 'served' => self::NEW, 'description' => 'a cold cache is fetched on read'],
+            ['key' => 'k', 'age' => null, 'attempt' => [299, true], 'responses' => [], 'due' => false, 'timeout' => null, 'served' => null, 'description' => 'a cold cache waits five minutes after an attempt'],
+            ['key' => 'k', 'age' => null, 'attempt' => [300, true], 'responses' => [$ok, $record], 'due' => true, 'timeout' => 10, 'served' => self::NEW, 'description' => 'a cold cache retries after five minutes'],
+            ['key' => 'k', 'age' => null, 'attempt' => [10, false], 'responses' => [$ok, $record], 'due' => true, 'timeout' => 10, 'served' => self::NEW, 'description' => 'an attempt for other credentials does not hold back these'],
+            ['key' => 'k', 'age' => null, 'attempt' => null, 'responses' => [new HttpResponse(503, '')], 'due' => true, 'timeout' => 10, 'served' => null, 'description' => 'a failed cold fetch serves nothing'],
+            ['key' => 'k', 'age' => $stale - 1, 'attempt' => null, 'responses' => [], 'due' => false, 'timeout' => null, 'served' => self::OLD, 'description' => 'a record under 26 hours old is served as it is'],
+            ['key' => 'k', 'age' => $stale, 'attempt' => null, 'responses' => [$ok, $record], 'due' => true, 'timeout' => 2, 'served' => self::NEW, 'description' => 'a record 26 hours old is refetched, with the short timeout'],
+            ['key' => 'k', 'age' => $stale * 3, 'attempt' => [3_599, true], 'responses' => [], 'due' => false, 'timeout' => null, 'served' => self::OLD, 'description' => 'a stale record waits an hour after an attempt'],
+            ['key' => 'k', 'age' => $stale * 3, 'attempt' => [3_600, true], 'responses' => [$ok, $record], 'due' => true, 'timeout' => 2, 'served' => self::NEW, 'description' => 'a stale record retries hourly'],
+            ['key' => 'k', 'age' => $stale, 'attempt' => null, 'responses' => [HttpResponse::unreachable('timeout')], 'due' => true, 'timeout' => 2, 'served' => self::OLD, 'description' => 'a failed stale refetch keeps the record'],
+        ];
+        foreach ($cases as $case) {
+            [$provider, $transport, $store, $logger] = self::provider(['api_key' => $case['key']], $case['responses'], $case['age'] === null ? null : self::OLD, $case['age'] ?? 0);
+            $settings = new SettingsProvider($store);
+            if ($case['attempt'] !== null) {
+                $fingerprint = $case['attempt'][1] ? $settings->credentialFingerprint() : 'other';
+                $store->values[RecordProvider::ATTEMPT_KEY] = (string) json_encode(['fingerprint' => $fingerprint, 'at' => self::NOW - $case['attempt'][0]]);
+            }
+            $label = 'read: ' . $case['description'];
+            TinyAssert::same($case['due'], $provider->refreshIfDue(), $label);
+            TinyAssert::same($case['timeout'], $transport->calls[0]['timeout'] ?? null, $label . ' (timeout)');
+            $calls = count($transport->calls);
+            // The attempt was stamped before the call, so the next read waits.
+            TinyAssert::same($case['served'], $provider->record(), $label . ' (served)');
+            TinyAssert::same($calls, count($transport->calls), $label . ' (a second read makes no call)');
+            $warned = str_contains($logger->dump(), 'refreshing on read');
+            TinyAssert::same($case['due'] && $case['age'] !== null, $warned, $label . ' (stale refetch logged)');
+        }
     }
 
     private static function testRecordIsReadByTheKeysMerchant(): void
@@ -84,20 +127,20 @@ final class RecordProviderSpec
      * @param array<string, string>     $stored
      * @param list<HttpResponse>        $responses
      * @param array<string, mixed>|null $cached
-     * @return array{0: RecordProvider, 1: ScriptedTransport, 2: MemoryStore}
+     * @return array{0: RecordProvider, 1: ScriptedTransport, 2: MemoryStore, 3: RecordingLogger}
      */
-    private static function provider(array $stored, array $responses, ?array $cached): array
+    private static function provider(array $stored, array $responses, ?array $cached, int $age = 3_600): array
     {
         $store = new MemoryStore($stored);
         $settings = new SettingsProvider($store);
         if ($cached !== null) {
-            $store->values[RecordProvider::CACHE_KEY] = (string) json_encode(['fingerprint' => $settings->credentialFingerprint(), 'fetched_at' => self::NOW - 86400 * 30, 'record' => $cached]);
+            $store->values[RecordProvider::CACHE_KEY] = (string) json_encode(['fingerprint' => $settings->credentialFingerprint(), 'fetched_at' => self::NOW - $age, 'record' => $cached]);
         }
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
         $client = new Client(new Environment(false), $settings, new CustomHeaders(), $transport, $logger, '1.0.0');
         $clock = static fn (): int => self::NOW;
 
-        return [new RecordProvider($client, $settings, new ApiKeyVerdict($client, $settings, $clock), $logger, $clock), $transport, $store];
+        return [new RecordProvider($client, $settings, new ApiKeyVerdict($client, $settings, $clock), $logger, $clock), $transport, $store, $logger];
     }
 }

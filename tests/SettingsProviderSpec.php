@@ -26,6 +26,14 @@ final class SettingsProviderSpec
         ['stored' => ['custom_headers' => 'not json'], 'getter' => 'customHeaderRows', 'expected' => [], 'description' => 'malformed JSON reads as no rows'],
         ['stored' => ['custom_headers' => '{"name":"X"}'], 'getter' => 'customHeaderRows', 'expected' => [], 'description' => 'an object, not a list of rows, reads as no rows'],
         ['stored' => ['custom_headers' => '[{"name":"X-A","value":"1"},{"name":"X-B"},"junk",{"name":["x"],"value":"v"}]'], 'getter' => 'customHeaderRows', 'expected' => [['name' => 'X-A', 'value' => '1']], 'description' => 'rows without a scalar name and value are skipped'],
+        ['stored' => [], 'getter' => 'fulfilStatusIds', 'expected' => [], 'description' => 'no fulfilment map stored'],
+        ['stored' => ['fulfil_status_ids' => '[3,"5",3,0,-1,"x",2.5]'], 'getter' => 'fulfilStatusIds', 'expected' => [3, 5], 'description' => 'the fulfilment map keeps positive ids once'],
+        ['stored' => ['fulfil_status_ids' => '3'], 'getter' => 'fulfilStatusIds', 'expected' => [], 'description' => 'a fulfilment map that is not a list reads as empty'],
+        ['stored' => [], 'getter' => 'cancelStatusId', 'expected' => null, 'description' => 'no cancel status stored'],
+        ['stored' => ['cancel_status_id' => '7'], 'getter' => 'cancelStatusId', 'expected' => 7, 'description' => 'the cancel status'],
+        ['stored' => ['cancel_status_id' => '0'], 'getter' => 'cancelStatusId', 'expected' => null, 'description' => 'a zero cancel status is none'],
+        ['stored' => ['refund_status_id' => ' 11 '], 'getter' => 'refundStatusId', 'expected' => 11, 'description' => 'the refund status, trimmed'],
+        ['stored' => ['refund_status_id' => 'x'], 'getter' => 'refundStatusId', 'expected' => null, 'description' => 'a malformed refund status is none'],
         ['stored' => ['custom_headers' => '[{"name":"X-N","value":42}]'], 'getter' => 'customHeaderRows', 'expected' => [['name' => 'X-N', 'value' => '42']], 'description' => 'a numeric value reads as a string'],
     ];
 
@@ -37,8 +45,23 @@ final class SettingsProviderSpec
         ['a' => ['api_key' => 'k1'], 'b' => ['api_key' => 'k2'], 'same' => false, 'description' => 'another key is other credentials'],
     ];
 
+    /** @var list<array{stored: string|null, language: int, expected: string, description: string}> */
+    private const TITLES = [
+        ['stored' => null, 'language' => 1, 'expected' => 'Business invoice', 'description' => 'no titles stored reads as the default'],
+        ['stored' => '{"1":" Pay by invoice ","2":"Faktura"}', 'language' => 2, 'expected' => 'Faktura', 'description' => 'the title for the language'],
+        ['stored' => '{"1":" Pay by invoice "}', 'language' => 1, 'expected' => 'Pay by invoice', 'description' => 'the title is trimmed'],
+        ['stored' => '{"1":"Pay by invoice"}', 'language' => 3, 'expected' => 'Business invoice', 'description' => 'a language added after the save reads as the default'],
+        ['stored' => '{"1":"  "}', 'language' => 1, 'expected' => 'Business invoice', 'description' => 'a blank title reads as the default'],
+        ['stored' => 'not json', 'language' => 1, 'expected' => 'Business invoice', 'description' => 'malformed titles read as the default'],
+    ];
+
     public static function runAll(): void
     {
+        foreach (self::TITLES as $case) {
+            $settings = new SettingsProvider(new MemoryStore($case['stored'] === null ? [] : ['title' => $case['stored']]));
+            TinyAssert::same($case['expected'], $settings->title($case['language']), 'title: ' . $case['description']);
+        }
+
         foreach (self::CASES as $case) {
             $settings = new SettingsProvider(new MemoryStore($case['stored']));
             TinyAssert::same($case['expected'], $settings->{$case['getter']}(), $case['description']);

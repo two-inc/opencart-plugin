@@ -38,6 +38,8 @@ final class ApiKeyVerdict
     public const VERIFYING = 'verifying';
 
     public const CACHE_KEY = 'api_key_verdict';
+    /** The last definitive answer (ok or rejected), kept apart from the heartbeat, which an outage overwrites. */
+    public const DEFINITIVE_KEY = 'api_key_definitive';
     public const VERIFY_PATH = '/v1/merchant/verify_api_key';
 
     public const TTL_OK = 300;
@@ -75,17 +77,54 @@ final class ApiKeyVerdict
             return ['status' => self::NOT_CONFIGURED, 'code' => null, 'merchant' => null];
         }
         $fingerprint = $this->settings->credentialFingerprint();
-        $response = $this->client->request('GET', self::VERIFY_PATH, null, $timeoutSeconds);
-        $merchant = $response->json();
-        $status = self::categorise($response, $merchant);
-        $code = $response->reachedTwo() ? $response->status : null;
+        $result = self::ask($this->client, $timeoutSeconds);
 
-        $this->write($fingerprint, $status, $code, false, null);
+        $this->write($fingerprint, $result['status'], $result['code'], false, null);
+        if ($result['status'] === self::OK || $result['status'] === self::INVALID) {
+            $this->settings->store()->setMany([self::DEFINITIVE_KEY => (string) json_encode([
+                'fingerprint' => $fingerprint,
+                'status' => $result['status'],
+                'verified_on' => ($this->clock)(),
+            ])]);
+        }
         if ($fingerprint === $this->settings->credentialFingerprint()) {
-            $this->memo = ['status' => $status, 'code' => $code];
+            $this->memo = ['status' => $result['status'], 'code' => $result['code']];
         }
 
-        return ['status' => $status, 'code' => $code, 'merchant' => $status === self::OK ? $merchant : null];
+        return $result;
+    }
+
+    /**
+     * A live check of credentials the merchant has typed but not saved: the
+     * admin's live check and the save-time gate. Nothing is cached, since the
+     * verdict describes a key this shop does not hold (yet).
+     *
+     * @return array{status: string, code: int|null, merchant: array<string, mixed>|null}
+     */
+    public function check(string $apiKey, string $environment, int $timeoutSeconds = self::LIVE_TIMEOUT_SECONDS): array
+    {
+        if (trim($apiKey) === '') {
+            return ['status' => self::NOT_CONFIGURED, 'code' => null, 'merchant' => null];
+        }
+
+        return self::ask($this->client->withCredentials(trim($apiKey), $environment), $timeoutSeconds);
+    }
+
+    /**
+     * The last definitive answer Two gave about the stored credentials (ok
+     * or rejected), however old, or null when it never gave one. Outages,
+     * 5xx answers and claims never change it, so it says whether the stored
+     * key is known good even while Two is down: a save must not overwrite a
+     * known-good key with one Two could not judge.
+     */
+    public function lastDefinitiveStatus(): ?string
+    {
+        $slot = json_decode((string) $this->settings->store()->get(self::DEFINITIVE_KEY), true);
+        if (!is_array($slot) || ($slot['fingerprint'] ?? null) !== $this->settings->credentialFingerprint()) {
+            return null;
+        }
+
+        return in_array($slot['status'] ?? null, [self::OK, self::INVALID], true) ? $slot['status'] : null;
     }
 
     /**
@@ -128,11 +167,6 @@ final class ApiKeyVerdict
         return $this->verify(self::LIVE_TIMEOUT_SECONDS)['status'];
     }
 
-    public function isVerified(bool $allowLiveCheck = true): bool
-    {
-        return $this->status($allowLiveCheck) === self::OK;
-    }
-
     /**
      * Whether the stored key is known to be unusable, as opposed to merely
      * unconfirmed: the question an order submit asks, cache-only. Reads past
@@ -157,6 +191,16 @@ final class ApiKeyVerdict
     public static function isDefinitive(string $status): bool
     {
         return $status === self::INVALID || $status === self::NOT_CONFIGURED;
+    }
+
+    /** @return array{status: string, code: int|null, merchant: array<string, mixed>|null} */
+    private static function ask(Client $client, int $timeoutSeconds): array
+    {
+        $response = $client->request('GET', self::VERIFY_PATH, null, $timeoutSeconds);
+        $merchant = $response->json();
+        $status = self::categorise($response, $merchant);
+
+        return ['status' => $status, 'code' => $response->reachedTwo() ? $response->status : null, 'merchant' => $status === self::OK ? $merchant : null];
     }
 
     /** @param array<string, mixed>|null $body */

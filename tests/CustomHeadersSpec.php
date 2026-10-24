@@ -8,6 +8,8 @@ use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
  * The read path of the merchant's custom headers: a stored row is re-checked
  * every time it is read, so a row edited in the database never reaches the
  * wire. Each case is a set of stored rows and the headers that may be sent.
+ * The save path (validate) is the second table: submitted rows and the error
+ * code per refused row.
  */
 final class CustomHeadersSpec
 {
@@ -36,11 +38,37 @@ final class CustomHeadersSpec
         ['rows' => [['name' => 'X-Bad', 'value' => "\n"], ['name' => 'X-Good', 'value' => 'ok']], 'expected' => ['X-Good' => 'ok'], 'description' => 'a bad row does not stop the good ones'],
     ];
 
+    /** @var list<array{rows: list<array{name: string, value: string}>, errors: array<int, string>, description: string}> */
+    private const VALIDATE = [
+        ['rows' => [], 'errors' => [], 'description' => 'no rows is valid'],
+        ['rows' => [['name' => 'X-Firewall-Token', 'value' => 'abc123']], 'errors' => [], 'description' => 'a valid row passes'],
+        ['rows' => [['name' => ' X-Trim ', 'value' => ' v ']], 'errors' => [], 'description' => 'name and value are trimmed before checking'],
+        ['rows' => [['name' => '', 'value' => ''], ['name' => ' ', 'value' => ' ']], 'errors' => [], 'description' => 'blank rows are skipped, not refused'],
+        ['rows' => [['name' => 'Bad Name', 'value' => 'v']], 'errors' => [0 => CustomHeaders::NAME_INVALID], 'description' => 'a name with a space is refused'],
+        ['rows' => [['name' => '', 'value' => 'v']], 'errors' => [0 => CustomHeaders::NAME_INVALID], 'description' => 'a value with no name is refused'],
+        ['rows' => [['name' => "X-A\nX-B", 'value' => 'v']], 'errors' => [0 => CustomHeaders::NAME_INVALID], 'description' => 'a newline inside the name is refused'],
+        ['rows' => [['name' => 'X-API-Key', 'value' => 'override']], 'errors' => [0 => CustomHeaders::NAME_RESERVED], 'description' => 'a reserved name is refused'],
+        ['rows' => [['name' => 'cookie', 'value' => 'a=b']], 'errors' => [0 => CustomHeaders::NAME_RESERVED], 'description' => 'reserved names match case-insensitively'],
+        ['rows' => [['name' => 'X-Dup', 'value' => '1'], ['name' => 'x-dup', 'value' => '2']], 'errors' => [1 => CustomHeaders::NAME_DUPLICATE], 'description' => 'the second row with a name is refused, since read would drop it'],
+        ['rows' => [['name' => 'X-Empty', 'value' => '  ']], 'errors' => [0 => CustomHeaders::VALUE_MISSING], 'description' => 'a named row with no value is refused, since read would drop it'],
+        ['rows' => [['name' => 'X-Inject', 'value' => "a\r\nX-API-Key: stolen"]], 'errors' => [0 => CustomHeaders::VALUE_INVALID], 'description' => 'CR LF in the value is refused'],
+        ['rows' => [['name' => 'X-Utf8', 'value' => 'caf' . "\u{e9}"]], 'errors' => [0 => CustomHeaders::VALUE_INVALID], 'description' => 'a non-ASCII value is refused'],
+        ['rows' => [['name' => 'X-Ok', 'value' => '1'], ['name' => 'Host', 'value' => 'h'], ['name' => 'X-Nul', 'value' => "a\0b"]], 'errors' => [1 => CustomHeaders::NAME_RESERVED, 2 => CustomHeaders::VALUE_INVALID], 'description' => 'every bad row is named, keyed by its index'],
+    ];
+
     public static function runAll(): void
     {
         $headers = new CustomHeaders();
         foreach (self::CASES as $case) {
             TinyAssert::same($case['expected'], $headers->forRequest($case['rows']), $case['description']);
+        }
+        foreach (self::VALIDATE as $case) {
+            TinyAssert::same($case['errors'], $headers->validate($case['rows']), 'validate: ' . $case['description']);
+            // Whatever validate passes, read sends: a saved row is a sent row.
+            if ($case['errors'] === []) {
+                $sent = count(array_filter($case['rows'], static fn (array $row): bool => trim($row['name']) !== ''));
+                TinyAssert::same($sent, count($headers->forRequest($case['rows'])), 'validate agrees with read: ' . $case['description']);
+            }
         }
     }
 }
