@@ -9,8 +9,8 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
  * The order lifecycle off OpenCart's order history: after an order moves
- * into a status, fulfil or cancel its Two order as the status maps say
- * (`OrderStatusEvent`). Registered on
+ * into a status, send any edit of the order to Two, then fulfil, cancel or
+ * refund its Two order as the status maps say (`OrderStatusEvent`). Registered on
  * `catalog/model/checkout/order.addHistory/after` (Services::EVENT_TRIGGER).
  * Admin status changes run the catalog's order model in a store instance,
  * so this sees them too.
@@ -48,10 +48,21 @@ class Two extends \Opencart\System\Engine\Controller
             function (array $order): array {
                 $services = new Services($this->db, $this->log, (int) $order['store_id']);
 
+                $model = $this->model_extension_two_payment_two;
+
                 return [
                     'lifecycle' => $services->orderLifecycle($this->event),
+                    'refunds' => $services->orderRefunds($this->event),
+                    'edit' => $services->orderEdit($this->event),
+                    // The payload's identity leaves out the callback URLs, so an edit rebuilds without them.
+                    'rebuild' => static fn (array $record): ?array => $model->orderInput((int) $order['order_id'], [
+                        'company_name' => $record['company_name'] ?? '',
+                        'organization_number' => $record['organization_number'] ?? '',
+                        'country_code' => $record['country_code'] ?? '',
+                    ], []),
                     'fulfil' => $services->settings->fulfilStatusIds(),
                     'cancel' => $services->settings->cancelStatusId(),
+                    'refund' => $services->settings->refundStatusId(),
                 ];
             },
             static fn (int $orderId): ?array => $model->orderRows($orderId),

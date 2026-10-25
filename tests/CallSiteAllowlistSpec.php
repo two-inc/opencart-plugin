@@ -18,6 +18,8 @@ final class CallSiteAllowlistSpec
     private const CALLERS = [
         'system/library/core/order_flow.php' => true,
         'system/library/core/order_lifecycle.php' => true,
+        'system/library/core/order_refunds.php' => true,
+        'system/library/core/order_edit.php' => true,
         'system/library/core/record_provider.php' => false,
         'system/library/core/api_key_verdict.php' => false,
     ];
@@ -46,11 +48,13 @@ final class CallSiteAllowlistSpec
         $expected = [
             'system/library/core/order_flow.php' => [3, 'OrderFlow sends order create, confirm and cancel'],
             'system/library/core/order_lifecycle.php' => [1, 'OrderLifecycle sends fulfil (its cancel is OrderFlow\'s)'],
+            'system/library/core/order_refunds.php' => [1, 'OrderRefunds sends every refund through one method'],
+            'system/library/core/order_edit.php' => [1, 'OrderEdit sends the edit'],
         ];
         foreach ($expected as $path => [$count, $description]) {
             $posts = 0;
             foreach (preg_split('~\n    (?:public|private) (?:static )?function ~', $files[$path]) ?: [] as $method) {
-                $post = strpos($method, "client->request('POST'");
+                $post = preg_match("~client->request\\('(POST|PUT)'~", $method, $write, PREG_OFFSET_CAPTURE) === 1 ? $write[0][1] : false;
                 if ($post === false) {
                     continue;
                 }

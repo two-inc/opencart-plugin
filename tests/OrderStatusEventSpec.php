@@ -9,7 +9,9 @@ use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\OrderEdit;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
+use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Opencart\OrderStatusEvent;
@@ -91,13 +93,15 @@ final class OrderStatusEventSpec
         $postprocessing = new Postprocessing(new ScriptedSubscribers([]), $logger);
         $flow = new OrderFlow($client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $records, $logger);
         $lifecycle = new OrderLifecycle($flow, $client, $postprocessing, new ErrorMapper(), $records, $logger);
+        $refunds = new OrderRefunds($client, $postprocessing, new ErrorMapper(), $records, new MemoryRefunds(), $logger);
+        $edit = new OrderEdit($flow, $client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $records, $logger);
 
         $notes = new LineLog();
         $errors = new LineLog();
         $event = null;
         $event = new OrderStatusEvent(
             static fn (int $orderId): array => ['order_id' => $orderId, 'order_status_id' => $status, 'store_id' => 0, 'payment_method' => ['code' => $code]],
-            static fn (array $order): array => ['lifecycle' => $lifecycle, 'fulfil' => [3], 'cancel' => $cancelStatus],
+            static fn (array $order): array => ['lifecycle' => $lifecycle, 'refunds' => $refunds, 'edit' => $edit, 'rebuild' => static fn (array $record): ?array => null, 'fulfil' => [3], 'cancel' => $cancelStatus, 'refund' => null],
             static function (int $orderId) use ($rows, $throwRows): array {
                 if ($throwRows) {
                     throw new \RuntimeException('rows unreadable');

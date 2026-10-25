@@ -60,7 +60,7 @@ final class SettingsSave
      * @param int       $voidStatusId   the shop's void status (0 for none), which no map may name
      * @return array{errors: array<string, string>, credentials: string|null, status: string|null, code: int|null}
      */
-    public function save(array $submitted, array $orderStatusIds, int $voidStatusId = 0): array
+    public function save(array $submitted, array $orderStatusIds, int $voidStatusId): array
     {
         $write = [];
         $errors = [];

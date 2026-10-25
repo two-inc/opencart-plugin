@@ -131,3 +131,35 @@ final class ScriptedSubscribers implements \Opencart\System\Library\Extension\Tw
         return $result;
     }
 }
+
+/** The RefundRecords port over an array, ids from 1. */
+final class MemoryRefunds implements \Opencart\System\Library\Extension\Two\Core\RefundRecords
+{
+    /** @var array<int, array<string, string>> */
+    public array $rows = [];
+
+    public function __construct(private readonly bool $fails = false)
+    {
+    }
+
+    public function create(int $orderId, array $fields): int
+    {
+        if ($this->fails) {
+            return 0;
+        }
+        $id = count($this->rows) + 1;
+        $this->rows[$id] = ['refund_id' => (string) $id, 'order_id' => (string) $orderId, 'date_added' => '2026-10-25 12:00:00'] + $fields;
+
+        return $id;
+    }
+
+    public function update(int $refundId, array $fields): void
+    {
+        $this->rows[$refundId] = $fields + $this->rows[$refundId];
+    }
+
+    public function forOrder(int $orderId): array
+    {
+        return array_values(array_filter($this->rows, static fn (array $row): bool => $row['order_id'] === (string) $orderId));
+    }
+}
