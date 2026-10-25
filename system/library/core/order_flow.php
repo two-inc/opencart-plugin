@@ -89,6 +89,17 @@ final class OrderFlow
             return $this->refused($orderId, 'Two order not created: ' . $refused->detail);
         }
 
+        // A re-create (the buyer placed the order again) replaces the earlier
+        // Two order, so cancel that first rather than leave it open at Two.
+        $earlier = $this->records->get($orderId) ?? [];
+        $earlierId = $earlier['two_order_id'] ?? '';
+        if ($earlierId !== '' && self::validTwoOrderId($earlierId) && ($earlier['two_order_state'] ?? '') !== 'CANCELLED') {
+            $failure = $this->sendCancel($earlierId, 'order_recreate', $orderId);
+            if ($failure !== null && $this->readState($orderId, $earlierId) !== 'CANCELLED') {
+                return $this->refused($orderId, 'Two order not created: the earlier Two order ' . $earlierId . ' for this order could not be cancelled (' . $failure . ').');
+            }
+        }
+
         $stored = [
             'token_hash' => self::tokenHash($token),
             'payload_hash' => self::payloadHash($payload),
@@ -147,7 +158,7 @@ final class OrderFlow
             return self::outcome(self::REFUSED, 'No Two order was created for this order, so there is nothing to confirm.', '');
         }
 
-        $changed = $this->changedSince($record, $rebuild);
+        $changed = $this->snapshotMismatch($record, $rebuild);
         if ($changed !== null) {
             $this->sendCancel($twoOrderId, 'order_changed', $orderId);
             $this->readState($orderId, $twoOrderId);
@@ -171,11 +182,11 @@ final class OrderFlow
 
         $path = '/v1/order/' . $twoOrderId . '/confirm';
         try {
-            $this->postprocessing->apply(Postprocessing::ORDER_CONFIRM, 'buyer_return', $path, [], ['order_id' => $orderId]);
+            $body = $this->postprocessing->apply(Postprocessing::ORDER_CONFIRM, 'buyer_return', $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
             return self::outcome(self::REFUSED, 'Two order ' . $twoOrderId . ' not confirmed: ' . $refused->detail, $twoOrderId);
         }
-        $response = $this->client->request('POST', $path, []);
+        $response = $this->client->request('POST', $path, $body);
         if (!$response->reachedTwo() || $response->status >= 400) {
             return self::outcome(self::REFUSED, 'Two refused to confirm order ' . $twoOrderId . ': ' . $this->errors->reason($response), $twoOrderId);
         }
@@ -304,7 +315,7 @@ final class OrderFlow
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
      * @return array{0: string, 1: string}|null
      */
-    private function changedSince(array $record, \Closure $rebuild): ?array
+    public function snapshotMismatch(array $record, \Closure $rebuild): ?array
     {
         if (($record['payload_hash'] ?? '') === '') {
             return [self::REFUSED, 'no payload hash was stored at create.'];
@@ -340,7 +351,7 @@ final class OrderFlow
     }
 
     /** Two's state for the order, stored as read; null when Two did not answer with one. */
-    private function readState(int $orderId, string $twoOrderId): ?string
+    public function readState(int $orderId, string $twoOrderId): ?string
     {
         $response = $this->client->request('GET', '/v1/order/' . $twoOrderId);
         $body = $response->json();
@@ -354,24 +365,43 @@ final class OrderFlow
         return strtoupper($body['state']);
     }
 
-    private function sendCancel(string $twoOrderId, string $trigger, int $orderId): bool
+    /**
+     * Sends the cancel of a whole Two order, through the hook, with an
+     * idempotency key.
+     *
+     * @return string|null why it was not sent or Two refused it, null when Two accepted it
+     */
+    public function sendCancel(string $twoOrderId, string $trigger, int $orderId): ?string
     {
         $path = '/v1/order/' . $twoOrderId . '/cancel';
         try {
-            $this->postprocessing->apply(Postprocessing::CANCEL, $trigger, $path, [], ['order_id' => $orderId]);
+            $body = $this->postprocessing->apply(Postprocessing::CANCEL, $trigger, $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
             $this->logger->error('Two order ' . $twoOrderId . ' cancel not sent: ' . $refused->detail);
 
-            return false;
+            return 'not sent: ' . $refused->detail;
         }
-        $response = $this->client->request('POST', $path, []);
+        $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, self::idempotencyHeader($twoOrderId, 'cancel'));
         if (!$response->reachedTwo() || $response->status >= 400) {
-            $this->logger->error('Two order ' . $twoOrderId . ' cancel refused: ' . $this->errors->reason($response));
+            $reason = $this->errors->reason($response);
+            $this->logger->error('Two order ' . $twoOrderId . ' cancel refused: ' . $reason);
 
-            return false;
+            return $reason;
         }
 
-        return true;
+        return null;
+    }
+
+    /**
+     * The idempotency key for one whole-order action on one Two order. It is
+     * the same on every attempt, so a retried event is the same request; the
+     * plugin's own guard against a repeat is the stored and live Two state.
+     *
+     * @return array<string, string>
+     */
+    public static function idempotencyHeader(string $twoOrderId, string $action): array
+    {
+        return ['Idempotency-Key' => 'oc-' . $action . '-' . $twoOrderId];
     }
 
     /**
@@ -389,7 +419,7 @@ final class OrderFlow
      * @param array<string, mixed> $body
      * @return array<string, string>
      */
-    private static function stateFields(array $body): array
+    public static function stateFields(array $body): array
     {
         $fields = [];
         foreach (['state' => 'two_order_state', 'status' => 'two_order_status'] as $key => $field) {
@@ -402,7 +432,7 @@ final class OrderFlow
     }
 
     /** Two's order ids are UUIDs; anything else is never put in a path. */
-    private static function validTwoOrderId(string $id): bool
+    public static function validTwoOrderId(string $id): bool
     {
         return preg_match('~^[A-Za-z0-9-]{1,64}\z~', $id) === 1;
     }

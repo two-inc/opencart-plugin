@@ -75,3 +75,15 @@ $_['error_key_unreachable'] = 'This shop could not reach the %s API at all (netw
 $_['error_key_not_configured'] = 'Enter your %1$s API key to enable %1$s.';
 $_['error_key_unexpected'] = '%s returned an unexpected response while verifying the API key (HTTP %d).';
 $_['error_key_unverified'] = 'The API key could not be verified.';
+
+// Order page: the Two tab and the invoice download
+$_['text_two_order'] = 'Two order';
+$_['text_two_state'] = 'State at Two';
+$_['text_no_two_order'] = 'No Two order is linked to this order.';
+$_['button_invoice'] = 'Download invoice';
+$_['help_invoice'] = 'The invoice Two issued when the order was fulfilled.';
+$_['error_invoice_permission'] = 'You do not have permission to see this invoice.';
+$_['error_invoice_not_ready'] = 'The invoice is not ready yet because the order is still being fulfilled. Please try again later.';
+$_['error_invoice_state'] = 'No invoice is available because the order is in state: %s.';
+$_['error_invoice_no_reference'] = 'No Two order is linked to this order.';
+$_['error_invoice'] = 'The invoice could not be retrieved. Please try again later.';

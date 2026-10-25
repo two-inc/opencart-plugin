@@ -48,6 +48,7 @@ final class Client
      * @param string                    $path          starting with a slash, for example /v1/order
      * @param array<string, mixed>|null $body          sent as JSON when not null
      * @param bool                      $authenticated false for the calls Two takes without a key (the order intent), so the key is never sent where it is not needed
+     * @param array<string, string>     $headers       per-request headers (an idempotency key, Accept), over the defaults but never over the API key
      */
     public function request(
         string $method,
@@ -55,6 +56,7 @@ final class Client
         ?array $body = null,
         int $timeoutSeconds = self::TIMEOUT_SECONDS,
         bool $authenticated = true,
+        array $headers = [],
     ): HttpResponse {
         $method = strtoupper($method);
         if (!in_array($method, self::METHODS, true)) {
@@ -69,7 +71,7 @@ final class Client
             . $path . (str_contains($path, '?') ? '&' : '?') . http_build_query($params);
         $payload = $body === null ? null : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $custom = $this->customHeaders->forRequest($this->settings->customHeaderRows());
-        $headers = $this->headers($custom, $authenticated);
+        $headers = $this->headers($custom, $authenticated, $headers);
         $verifyTls = $this->settings->verifyTls();
         $timeoutSeconds = max(1, $timeoutSeconds);
 
@@ -102,13 +104,17 @@ final class Client
      * never be overridden even if a row slipped past CustomHeaders.
      *
      * @param array<string, string> $custom
+     * @param array<string, string> $own
      * @return array<string, string>
      */
-    private function headers(array $custom, bool $authenticated): array
+    private function headers(array $custom, bool $authenticated, array $own): array
     {
         $headers = $custom;
         $headers['Content-Type'] = 'application/json; charset=utf-8';
         $headers['Accept'] = 'application/json';
+        foreach ($own as $name => $value) {
+            $headers[$name] = $value;
+        }
         $apiKey = $this->settings->apiKey();
         if ($authenticated && $apiKey !== '') {
             $headers['X-API-Key'] = $apiKey;
@@ -147,7 +153,7 @@ final class Client
         $line = 'Two API ' . $method . ' ' . $path;
         $context = [
             'request' => ['params' => $params, 'headers' => $logged, 'body' => $body, 'verify_tls' => $verifyTls],
-            'response' => ['status' => $response->status, 'body' => $response->json() ?? $response->body, 'transport_error' => $response->transportError],
+            'response' => ['status' => $response->status, 'body' => $response->json() ?? (str_starts_with($response->body, '%PDF-') ? '(PDF, ' . strlen($response->body) . ' bytes)' : $response->body), 'transport_error' => $response->transportError],
         ];
 
         $this->logger->debug($line, self::scrub($context, $secrets));

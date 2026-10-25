@@ -25,6 +25,7 @@ final class OrderFlowSpec
     public static function runAll(): void
     {
         self::testCreate();
+        self::testRecreate();
         self::testConfirm();
         self::testCancel();
         self::testNewToken();
@@ -80,6 +81,30 @@ final class OrderFlowSpec
             if ($result['ok']) {
                 TinyAssert::same('https://checkout.sandbox.two.inc/o/1', $result['redirect'], $d . ': redirect');
             }
+        }
+    }
+
+    /** The buyer placed the order again: the earlier Two order is cancelled before its id is overwritten. */
+    private static function testRecreate(): void
+    {
+        $earlier = '5f1c2a7e-0000-4000-8000-000000000000';
+        $created = self::json(201, ['id' => self::ID, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);
+        $cancel = 'POST /v1/order/' . $earlier . '/cancel';
+        $read = 'GET /v1/order/' . $earlier;
+        $cases = [
+            ['state' => 'UNVERIFIED', 'responses' => [self::json(200, []), $created], 'ok' => true, 'calls' => [$cancel, 'POST /v1/order'], 'id' => self::ID, 'description' => 'the earlier order is cancelled, then the new one created'],
+            ['state' => 'UNVERIFIED', 'responses' => [self::json(409, []), self::json(200, ['state' => 'CANCELLED']), $created], 'ok' => true, 'calls' => [$cancel, $read, 'POST /v1/order'], 'id' => self::ID, 'description' => 'the cancel is refused but Two holds it cancelled: created'],
+            ['state' => 'UNVERIFIED', 'responses' => [self::json(500, []), self::json(200, ['state' => 'VERIFIED'])], 'ok' => false, 'calls' => [$cancel, $read], 'id' => $earlier, 'description' => 'the earlier order stays open at Two: refused, its id kept'],
+            ['state' => 'CANCELLED', 'responses' => [$created], 'ok' => true, 'calls' => ['POST /v1/order'], 'id' => self::ID, 'description' => 'the earlier order is already cancelled: no cancel sent'],
+        ];
+        foreach ($cases as $case) {
+            $records = new MemoryRecords([42 => ['token_hash' => 'old', 'two_order_id' => $earlier, 'two_order_state' => $case['state']]]);
+            [$flow, $transport] = self::flow($case['responses'], $records);
+            $result = $flow->create(self::order(), self::lines(2), [], self::TOKEN);
+            $d = 're-create: ' . $case['description'];
+            TinyAssert::same($case['ok'], $result['ok'], $d . ': ok');
+            TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
+            TinyAssert::same($case['id'], $records->rows[42]['two_order_id'], $d . ': stored Two order id');
         }
     }
 

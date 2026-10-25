@@ -92,6 +92,9 @@ ok "install() mapped fulfilment to Shipped"
 cron() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(action, '|', cycle, '|', status) FROM oc_cron WHERE code = 'two_record_refresh'"; }
 [ "$(cron)" = 'extension/two/cron/two|day|1' ] || fail "install() did not register the record refresh cron (got '$(cron)')"
 ok "install() registered the record refresh cron"
+lifecycle() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(\`trigger\`, '|', action, '|', status) FROM oc_event WHERE code = 'two_order_lifecycle'"; }
+[ "$(lifecycle)" = 'catalog/model/checkout/order.addHistory/after|extension/two/event/two.history|1' ] || fail "install() did not register the order lifecycle event (got '$(lifecycle)')"
+ok "install() registered the order lifecycle event"
 
 # configure.php: puts the extension back, is idempotent, refuses a bad environment.
 configure > /dev/null
@@ -102,6 +105,10 @@ docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_cron WHERE 
 configure > /dev/null
 [ "$(cron)" = 'extension/two/cron/two|day|1' ] || fail "configure.php did not register the record refresh cron"
 ok "configure.php registers the record refresh cron"
+docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_event WHERE code = 'two_order_lifecycle'"
+configure > /dev/null
+[ "$(lifecycle)" = 'catalog/model/checkout/order.addHistory/after|extension/two/event/two.history|1' ] || fail "configure.php did not register the order lifecycle event"
+ok "configure.php registers the order lifecycle event"
 if configure -e TWO_ENVIRONMENT=bogus > /dev/null 2>&1; then fail "configure.php accepted TWO_ENVIRONMENT=bogus"; fi
 ok "configure.php refuses an unknown environment"
 
@@ -145,6 +152,24 @@ ok "the bounce stays on the shop"
 location=$(curl -s -o /dev/null -w '%{redirect_url}' "$base/${cb}&token=${token}&two_bounce=1")
 grep -q 'checkout/cart' <<<"$location" || fail "a callback for an unknown order did not go back to the cart (got '${location}')"
 ok "a callback for an unknown order goes back to the cart"
+
+# Order lifecycle: an admin status change runs the catalog event in the store
+# instance. A Two order with no Two order linked moves to Shipped and to
+# Canceled: each refusal is noted at the merchant's status, never undone,
+# and an unmapped status (Pending) writes nothing. The Two tab renders.
+sql "DELETE FROM oc_order WHERE order_id = 9001; DELETE FROM oc_order_history WHERE order_id = 9001; INSERT INTO oc_order SET order_id = 9001, store_id = 0, store_name = 'Smoke', store_url = '${base}/', customer_group_id = 1, firstname = 'Kari', lastname = 'Nordmann', email = 'buyer@example.com', telephone = '', payment_method = '{\"name\":\"Two\",\"code\":\"two.two\"}', shipping_method = '', total = 100, order_status_id = 1, language_id = 1, currency_id = 1, currency_code = 'GBP', currency_value = 1, date_added = NOW(), date_modified = NOW()"
+history() { contains "status change to $1" "$(curl -s -b "$jar" -X POST -d "order_id=9001&order_status_id=$1&comment=&notify=0&override=0" "$base/admin/index.php?route=sale/order.call&call=history_add&store_id=0&language=en-gb&${user_token}")" '"success"'; }
+canceled=$(sql "SELECT order_status_id FROM oc_order_status WHERE name = 'Canceled' ORDER BY language_id LIMIT 1")
+history "$shipped"
+history 1
+history "$canceled"
+notes=$(sql "SELECT CONCAT(order_status_id, '|', comment) FROM oc_order_history WHERE order_id = 9001 ORDER BY order_history_id")
+expected=$(printf '%s\n' "${shipped}|" "${shipped}|Two: Not fulfilled: no Two order is linked to this order." "1|" "${canceled}|" "${canceled}|Two: Not cancelled: no Two order is linked to this order.")
+[ "$notes" = "$expected" ] || fail "the order lifecycle did not note its refusals at the merchant's status (got '${notes}')"
+ok "an admin status change runs the order lifecycle and notes the outcome"
+contains "the Two tab on the admin order page" "$(admin 'sale/order.info&order_id=9001')" 'No Two order is linked to this order.'
+# The two refusals are expected in the log; anything else still fails the check below.
+docker exec "$app" sed -i '/Two error: Order 9001: Not \(fulfilled\|cancelled\): no Two order is linked/d' /var/www/html/system/storage/logs/error.log
 
 # The Installer's Uninstall deletes extension/two; the checkout mount must not allow it.
 if docker exec "$app" touch /var/www/html/extension/two/.smoke-probe 2> /dev/null; then fail "extension/two is writable from the shop"; fi

@@ -11,6 +11,7 @@ use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\RecordProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
@@ -29,6 +30,17 @@ final class Services
     public const CRON_ACTION = 'extension/two/cron/two';
     public const CRON_CYCLE = 'day';
     public const CRON_DESCRIPTION = 'Refreshes the cached Two merchant record.';
+
+    /**
+     * The order lifecycle's row in OpenCart's event table. Admin status
+     * changes run the catalog's order model in a store instance, so this one
+     * catalog event sees every status change: admin, storefront and the
+     * extension's own.
+     */
+    public const EVENT_CODE = 'two_order_lifecycle';
+    public const EVENT_TRIGGER = 'catalog/model/checkout/order.addHistory/after';
+    public const EVENT_ACTION = 'extension/two/event/two.history';
+    public const EVENT_DESCRIPTION = 'Fulfils or cancels the Two order when an order moves into a mapped status.';
 
     public readonly SettingsProvider $settings;
     public readonly Environment $environment;
@@ -60,6 +72,15 @@ final class Services
         $postprocessing = new Postprocessing(new EventSubscribers($this->db, $event), $this->logger);
 
         return new OrderFlow($this->client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
+    }
+
+    /** Fulfil, cancel and the invoice download, sharing the checkout flow's Two reads and snapshot check. */
+    public function orderLifecycle(\Opencart\System\Engine\Event $event): OrderLifecycle
+    {
+        $postprocessing = new Postprocessing(new EventSubscribers($this->db, $event), $this->logger);
+        $flow = new OrderFlow($this->client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
+
+        return new OrderLifecycle($flow, $this->client, $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
     }
 
     public static function internalEnvironmentsEnabled(): bool

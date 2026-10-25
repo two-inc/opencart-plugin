@@ -6,6 +6,7 @@ namespace Opencart\Admin\Controller\Extension\Two\Payment;
 
 use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
 use Opencart\System\Library\Extension\Two\Core\Brand;
+use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
@@ -32,6 +33,9 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Library\Log $log
  * @property-read \Opencart\Admin\Model\Setting\Setting $model_setting_setting
  * @property-read \Opencart\Admin\Model\Setting\Cron $model_setting_cron
+ * @property-read \Opencart\Admin\Model\Setting\Event $model_setting_event
+ * @property-read \Opencart\Admin\Model\Sale\Order $model_sale_order
+ * @property-read \Opencart\System\Engine\Event $event
  * @property-read \Opencart\Admin\Model\Localisation\Language $model_localisation_language
  * @property-read \Opencart\Admin\Model\Localisation\OrderStatus $model_localisation_order_status
  */
@@ -236,6 +240,10 @@ class Two extends \Opencart\System\Engine\Controller
         $this->model_setting_cron->deleteCronByCode(Services::CRON_CODE);
         $this->model_setting_cron->addCron(Services::CRON_CODE, Services::CRON_DESCRIPTION, Services::CRON_CYCLE, Services::CRON_ACTION, true);
 
+        $this->load->model('setting/event');
+        $this->model_setting_event->deleteEventByCode(Services::EVENT_CODE);
+        $this->model_setting_event->addEvent(['code' => Services::EVENT_CODE, 'description' => Services::EVENT_DESCRIPTION, 'trigger' => Services::EVENT_TRIGGER, 'action' => Services::EVENT_ACTION, 'status' => true, 'sort_order' => 0]);
+
         // The order-scoped table. Kept on uninstall: it holds the Two order ids of placed orders.
         DbOrderRecords::install(function (string $sql): array {
             $result = $this->db->query($sql);
@@ -251,6 +259,87 @@ class Two extends \Opencart\System\Engine\Controller
 
         $this->load->model('setting/cron');
         $this->model_setting_cron->deleteCronByCode(Services::CRON_CODE);
+
+        $this->load->model('setting/event');
+        $this->model_setting_event->deleteEventByCode(Services::EVENT_CODE);
+    }
+
+    /**
+     * The Two tab on the admin order page (Sales > Orders > the order),
+     * which OpenCart shows for orders paid with this extension: the Two
+     * order and, once fulfilment has been asked for, the invoice download.
+     */
+    public function order(): string
+    {
+        $this->load->language(self::ROUTE);
+        $orderId = (int) ($this->request->get['order_id'] ?? 0);
+        $record = (new Services($this->db, $this->log))->orders->get($orderId) ?? [];
+        $state = $record['two_order_state'] ?? '';
+
+        return $this->load->view(self::ROUTE . '_order', [
+            'two_order_id' => $record['two_order_id'] ?? '',
+            'two_order_state' => $state,
+            'invoice' => in_array($state, OrderLifecycle::FULFILLED_STATES, true)
+                ? $this->url->link(self::ROUTE . '.invoice', 'user_token=' . $this->session->data['user_token'] . '&order_id=' . $orderId, true)
+                : '',
+            'text_two_order' => $this->language->get('text_two_order'),
+            'text_two_state' => $this->language->get('text_two_state'),
+            'text_no_two_order' => $this->language->get('text_no_two_order'),
+            'button_invoice' => $this->language->get('button_invoice'),
+            'help_invoice' => $this->language->get('help_invoice'),
+        ]);
+    }
+
+    /**
+     * Streams the order's Two invoice. Admin only: the route sits behind the
+     * admin login and its user_token, and the user must also be allowed to
+     * see orders and this extension.
+     */
+    public function invoice(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->user->hasPermission('access', 'sale/order') || !$this->user->hasPermission('access', self::ROUTE)) {
+            $this->invoiceNotice($this->language->get('error_invoice_permission'), 403);
+
+            return;
+        }
+        $orderId = (int) ($this->request->get['order_id'] ?? 0);
+        $this->load->model('sale/order');
+        $order = $orderId > 0 ? $this->model_sale_order->getOrder($orderId) : [];
+        if (!$order || (string) ($order['payment_method']['code'] ?? '') !== 'two.two') {
+            $this->invoiceNotice($this->language->get('error_invoice_no_reference'), 404);
+
+            return;
+        }
+
+        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderLifecycle($this->event)->invoice($orderId);
+        if (isset($result['pdf'])) {
+            $this->response->addHeader('Content-Type: application/pdf');
+            $this->response->addHeader('Content-Disposition: attachment; filename="invoice-' . $orderId . '.pdf"');
+            $this->response->addHeader('Cache-Control: private, no-store');
+            $this->response->setOutput($result['pdf']);
+
+            return;
+        }
+        $message = match ($result['notice']) {
+            OrderLifecycle::INVOICE_NOT_READY => $this->language->get('error_invoice_not_ready'),
+            OrderLifecycle::INVOICE_UNAVAILABLE_STATE => sprintf($this->language->get('error_invoice_state'), $result['state']),
+            OrderLifecycle::INVOICE_NO_REFERENCE => $this->language->get('error_invoice_no_reference'),
+            default => $this->language->get('error_invoice'),
+        };
+        $this->invoiceNotice($message, 200);
+    }
+
+    /** Why there is no invoice, as a short page the download link opened. */
+    private function invoiceNotice(string $message, int $status): void
+    {
+        if ($status !== 200) {
+            $this->response->addHeader(($this->request->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1') . ' ' . $status . ($status === 403 ? ' Forbidden' : ' Not Found'));
+        }
+        $this->response->addHeader('Content-Type: text/html; charset=utf-8');
+        $this->response->addHeader('Cache-Control: no-store');
+        $this->response->setOutput('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' . htmlspecialchars($this->language->get('heading_title'), ENT_QUOTES, 'UTF-8')
+            . '</title></head><body><p>' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p></body></html>');
     }
 
     /**
