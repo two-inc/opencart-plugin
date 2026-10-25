@@ -291,11 +291,14 @@ class Two extends \Opencart\System\Engine\Controller
         $text = [];
         foreach (['text_two_order', 'text_two_state', 'text_no_two_order', 'button_invoice', 'help_invoice', 'button_credit_note', 'help_credit_note', 'text_refund', 'text_refunded', 'text_remaining',
             'text_refund_help', 'text_refund_unavailable', 'text_refund_unread', 'text_refunds', 'column_line', 'column_quantity', 'column_net', 'column_tax', 'column_rate', 'column_refund_quantity',
-            'column_date', 'column_amount', 'column_state', 'entry_refund_net', 'entry_refund_tax', 'entry_refund_rate', 'entry_refund_reason', 'button_refund'] as $key) {
+            'column_date', 'column_amount', 'column_state', 'entry_refund_net', 'entry_refund_tax', 'entry_refund_rate', 'entry_refund_reason', 'button_refund', 'button_retry', 'text_refund_blocked'] as $key) {
             $text[$key] = $this->language->get($key);
         }
+        $unresolved = false;
         foreach ($refunds as &$refund) {
             $refund['state_text'] = $this->language->get('text_refund_state_' . $refund['state']);
+            $refund['retry'] = in_array($refund['state'], [RefundRecords::UNKNOWN, RefundRecords::PENDING], true);
+            $unresolved = $unresolved || $refund['retry'];
         }
         unset($refund);
 
@@ -307,6 +310,8 @@ class Two extends \Opencart\System\Engine\Controller
             'refundable' => $refundable,
             'read' => $two !== null,
             'refund_action' => $link('refund'),
+            'retry_action' => $link('refundRetry'),
+            'unresolved' => $unresolved,
             'currency' => (string) ($two['currency'] ?? ''),
             'refunded' => $two === null ? '' : Postprocessing::money(OrderRefunds::refundedCents($two)),
             'remaining' => $remaining === null ? '' : Postprocessing::money($remaining),
@@ -354,6 +359,31 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->event)->partial($orderId, $request);
+        $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
+        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
+    }
+
+    /**
+     * Sends a refund whose outcome is unknown again, under its own key, and
+     * notes the outcome in the order history. Same rights as a refund.
+     */
+    public function refundRetry(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->user->hasPermission('modify', 'sale/order') || !$this->user->hasPermission('modify', self::ROUTE)) {
+            $this->json(['error' => $this->language->get('error_refund_permission')]);
+
+            return;
+        }
+        $orderId = (int) ($this->request->get['order_id'] ?? 0);
+        $order = $this->twoOrder($orderId);
+        if ($order === null) {
+            $this->json(['error' => $this->language->get('error_invoice_no_reference')]);
+
+            return;
+        }
+        $refundId = (int) ($this->request->post['two_refund_id'] ?? 0);
+        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->event)->retry($orderId, $refundId);
         $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
         $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
     }

@@ -24,6 +24,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   by at least the amount sent; less means Two answered with an earlier
  *   refund under the same key and this one was not applied. More is fine (a
  *   refund made meanwhile elsewhere).
+ * - When Two's answer is not received (a timeout, a network error, a 5xx)
+ *   and the refunded total does not show the refund, its row is marked
+ *   unknown. No other refund is sent until it is retried under its own key.
  */
 final class OrderRefunds
 {
@@ -166,6 +169,10 @@ final class OrderRefunds
         if ($record === null || !OrderFlow::validTwoOrderId($twoOrderId)) {
             return $this->refused($orderId, 'Not refunded: no Two order is linked to this order.');
         }
+        $blocked = $this->blocked($orderId);
+        if ($blocked !== null) {
+            return $blocked;
+        }
         $storedState = $record['two_order_state'] ?? '';
         $two = $this->read($orderId, $twoOrderId);
         if ($two === null) {
@@ -218,6 +225,10 @@ final class OrderRefunds
         $twoOrderId = $record['two_order_id'] ?? '';
         if ($record === null || !OrderFlow::validTwoOrderId($twoOrderId)) {
             return $this->refused($orderId, 'Not refunded: no Two order is linked to this order.');
+        }
+        $blocked = $this->blocked($orderId);
+        if ($blocked !== null) {
+            return $blocked;
         }
         $two = $this->read($orderId, $twoOrderId);
         if ($two === null) {
@@ -382,6 +393,57 @@ final class OrderRefunds
     }
 
     /**
+     * The order's refund whose outcome is not known yet (no answer from Two,
+     * or the request never settled), or null. While there is one, no other
+     * refund is sent: a new one would carry a new key, and Two could refund
+     * twice. It is retried under its own key instead.
+     *
+     * @return array<string, string>|null
+     */
+    public function unresolved(int $orderId): ?array
+    {
+        foreach ($this->refunds->forOrder($orderId) as $row) {
+            if (in_array($row['state'] ?? '', [RefundRecords::UNKNOWN, RefundRecords::PENDING], true)) {
+                return $row;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Sends a refund whose outcome is unknown again: the same payload under
+     * the same key, so Two applies it at most once, then the usual check on
+     * Two's refunded total. If Two answers with a refund it already held
+     * before this retry, that is the earlier attempt, applied after all.
+     *
+     * @return array{outcome: string, reason: string}
+     */
+    public function retry(int $orderId, int $refundId): array
+    {
+        $row = null;
+        foreach ($this->refunds->forOrder($orderId) as $candidate) {
+            if ((int) $candidate['refund_id'] === $refundId) {
+                $row = $candidate;
+            }
+        }
+        if ($row === null || !in_array($row['state'], [RefundRecords::UNKNOWN, RefundRecords::PENDING], true)) {
+            return $this->refused($orderId, 'Not retried: that refund is not waiting for a retry.');
+        }
+        $twoOrderId = $row['two_order_id'];
+        $payload = json_decode($row['payload'], true);
+        if (!OrderFlow::validTwoOrderId($twoOrderId) || !is_array($payload) || $row['idempotency_key'] === '') {
+            return $this->refused($orderId, 'Not retried: the stored refund cannot be read. Check the order in the Two merchant portal.');
+        }
+        $two = $this->read($orderId, $twoOrderId);
+        if ($two === null) {
+            return $this->refused($orderId, 'Not retried: Two could not be asked for order ' . $twoOrderId . '. Try again.', self::UNKNOWN);
+        }
+
+        return $this->post($orderId, $twoOrderId, $two, $refundId, $payload, Postprocessing::cents($row['amount']), $row['idempotency_key'], $row['currency'], true);
+    }
+
+    /**
      * Stores the refund, sends it through the hook and checks Two applied it.
      *
      * @param array<string, mixed> $two     Two's order as read just before
@@ -400,13 +462,13 @@ final class OrderRefunds
         if ($body !== []) {
             $amount = Postprocessing::cents($body['amount'] ?? 0);
         }
-        $before = self::refundedCents($two);
         $remaining = self::remainingCents($two) ?? 0;
         if ($amount <= 0 || $amount > $remaining) {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: ' . Postprocessing::money($amount) . ' is more than remains to refund (' . Postprocessing::money($remaining) . ').');
         }
 
-        $fields = ['two_order_id' => $twoOrderId, 'kind' => $kind, 'amount' => Postprocessing::money($amount), 'currency' => (string) ($two['currency'] ?? ''),
+        $currency = (string) ($two['currency'] ?? '');
+        $fields = ['two_order_id' => $twoOrderId, 'kind' => $kind, 'amount' => Postprocessing::money($amount), 'currency' => $currency,
             'payload' => (string) json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 'state' => RefundRecords::PENDING, 'idempotency_key' => $key ?? ''];
         $rowId = $this->refunds->create($orderId, $fields);
         if ($key === null) {
@@ -417,8 +479,22 @@ final class OrderRefunds
             $this->refunds->update($rowId, ['idempotency_key' => $key]);
         }
 
-        $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header($key));
-        $money = Postprocessing::money($amount) . ' ' . $fields['currency'];
+        return $this->post($orderId, $twoOrderId, $two, $rowId, $body, $amount, $key, $currency, false);
+    }
+
+    /**
+     * Posts a stored refund and settles its row from Two's answer and the refunded total read back.
+     *
+     * @param array<string, mixed> $two  Two's order as read just before
+     * @param array<string, mixed> $body
+     * @return array{outcome: string, reason: string}
+     */
+    private function post(int $orderId, string $twoOrderId, array $two, int $rowId, array $body, int $amount, string $key, string $currency, bool $retry): array
+    {
+        $before = self::refundedCents($two);
+        $beforeIds = array_map(static fn (array $refund): string => (string) ($refund['id'] ?? ''), self::list($two['refunds'] ?? null));
+        $response = $this->client->request('POST', '/v1/order/' . $twoOrderId . '/refund', $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header($key));
+        $money = Postprocessing::money($amount) . ' ' . $currency;
         if ($response->reachedTwo() && $response->status >= 400 && $response->status < 500) {
             $result = $this->refused($orderId, 'Two refused the refund of ' . $money . ' on order ' . $twoOrderId . ': ' . $this->errors->reason($response));
 
@@ -426,18 +502,32 @@ final class OrderRefunds
         }
         $after = $this->read($orderId, $twoOrderId);
         $answered = $response->reachedTwo() && $response->status < 300;
+        $done = 'Two refunded ' . $money . ' on order ' . $twoOrderId . '. The credit note is on the order page under Two.';
         if ($after !== null && self::refundedCents($after) - $before >= $amount) {
-            return $this->settled($rowId, RefundRecords::DONE, self::outcome(OrderLifecycle::DONE, 'Two refunded ' . $money . ' on order ' . $twoOrderId . '. The credit note is on the order page under Two.'));
+            return $this->settled($rowId, RefundRecords::DONE, self::outcome(OrderLifecycle::DONE, $done));
+        }
+        $answeredId = (string) ($response->json()['id'] ?? '');
+        if ($retry && $answered && $answeredId !== '' && in_array($answeredId, $beforeIds, true)) {
+            return $this->settled($rowId, RefundRecords::DONE, self::outcome(OrderLifecycle::DONE, $done . ' Two had applied the earlier attempt.'));
         }
         if ($answered && $after !== null) {
             $result = $this->refused($orderId, 'Two answered the refund of ' . $money . ' on order ' . $twoOrderId . ' with an earlier refund made under the same key (' . $key . '), so this refund was not applied. Two\'s refunded total did not rise by the amount sent.', self::NOT_APPLIED);
 
             return $this->settled($rowId, RefundRecords::NOT_APPLIED, $result);
         }
-        $result = $this->refused($orderId, 'The refund of ' . $money . ' on order ' . $twoOrderId . ' may not have reached Two (' . ($answered ? 'the order could not be read back' : $this->errors->reason($response))
-            . '). Check the refunded total on the order page under Two before refunding again.', self::UNKNOWN);
+        $result = $this->refused($orderId, 'The outcome of the refund of ' . $money . ' on order ' . $twoOrderId . ' is unknown (' . ($answered ? 'the order could not be read back' : $this->errors->reason($response))
+            . '). Retry it on the Two tab of the order page; no other refund is sent until then.', self::UNKNOWN);
 
         return $this->settled($rowId, RefundRecords::UNKNOWN, $result);
+    }
+
+    /** @return array{outcome: string, reason: string}|null the refusal while a refund awaits a retry */
+    private function blocked(int $orderId): ?array
+    {
+        $row = $this->unresolved($orderId);
+
+        return $row === null ? null : $this->refused($orderId, 'Not refunded: the refund of ' . $row['amount'] . ' ' . $row['currency'] . ' sent on ' . $row['date_added']
+            . ' has an unknown outcome. Retry it on the Two tab of the order page first, so Two never refunds twice.');
     }
 
     /**

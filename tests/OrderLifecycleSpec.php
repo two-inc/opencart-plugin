@@ -42,9 +42,14 @@ final class OrderLifecycleSpec
             [2, [3, 5], 7, null, 'an unmapped status asks nothing'],
             [7, [3], null, null, 'no cancel status mapped'],
             [0, [0], 0, null, 'status 0, an unplaced order, never acts'],
+            [11, [3], 7, OrderLifecycle::REFUND, 'the mapped refund status refunds the rest', 11],
+            [7, [3], 7, OrderLifecycle::CANCEL, 'a status in the cancel and refund maps cancels', 7],
+            [3, [3], 7, OrderLifecycle::FULFIL, 'a status in the fulfil and refund maps fulfils', 3],
+            [11, [3], 7, null, 'no refund status mapped', null],
         ];
-        foreach ($cases as [$status, $fulfil, $cancel, $expected, $description]) {
-            TinyAssert::same($expected, OrderLifecycle::action($status, $fulfil, $cancel), 'action: ' . $description);
+        foreach ($cases as $case) {
+            [$status, $fulfil, $cancel, $expected, $description] = $case;
+            TinyAssert::same($expected, OrderLifecycle::action($status, $fulfil, $cancel, $case[5] ?? null), 'action: ' . $description);
         }
     }
 

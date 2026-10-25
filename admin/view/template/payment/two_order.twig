@@ -23,6 +23,8 @@
 <p>{{ text_refund_unavailable|e }}</p>
 {% elseif not read %}
 <p>{{ text_refund_unread|e }}</p>
+{% elseif unresolved %}
+<div class="alert alert-warning">{{ text_refund_blocked|e }}</div>
 {% else %}
 <form id="form-two-refund" action="{{ refund_action|e }}" method="post" data-oc-toggle="ajax">
   <p class="form-text">{{ text_refund_help|e }}</p>
@@ -53,7 +55,8 @@
   <thead><tr><th>{{ column_date|e }}</th><th class="text-end">{{ column_amount|e }}</th><th>{{ column_state|e }}</th></tr></thead>
   <tbody>
     {% for refund in refunds %}
-    <tr><td>{{ refund.date_added|e }}</td><td class="text-end">{{ refund.amount|e }} {{ refund.currency|e }}</td><td>{{ refund.state_text|e }}{% if refund.reason %}<div class="form-text">{{ refund.reason|e }}</div>{% endif %}</td></tr>
+    <tr><td>{{ refund.date_added|e }}</td><td class="text-end">{{ refund.amount|e }} {{ refund.currency|e }}</td><td>{{ refund.state_text|e }}{% if refund.reason %}<div class="form-text">{{ refund.reason|e }}</div>{% endif %}
+      {% if refund.retry %}<form action="{{ retry_action|e }}" method="post" data-oc-toggle="ajax" class="mt-2"><input type="hidden" name="two_refund_id" value="{{ refund.refund_id|e }}"/><button type="submit" class="btn btn-sm btn-warning"><i class="fa-solid fa-rotate"></i> {{ button_retry|e }}</button></form>{% endif %}</td></tr>
     {% endfor %}
   </tbody>
 </table>

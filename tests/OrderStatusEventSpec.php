@@ -30,6 +30,7 @@ final class OrderStatusEventSpec
     public static function runAll(): void
     {
         self::testCases();
+        self::testRefundAndEdit();
         self::testRecursionGuard();
         self::testThrowable();
     }
@@ -49,6 +50,28 @@ final class OrderStatusEventSpec
         ];
         foreach ($cases as $case) {
             $shop = self::shop($case['code'], $case['status'], $case['stored'], $case['responses'], $case['cancel'] ?? 7);
+            $shop['event']->handle(42);
+            $d = 'status event: ' . $case['description'];
+            TinyAssert::same($case['calls'], self::calls($shop['transport']), $d . ': requests');
+            TinyAssert::same($case['notes'], $shop['notes']->list, $d . ': history notes');
+        }
+    }
+
+    /** The refund status refunds the rest; an edit is synced before the status action, each with its own note. */
+    private static function testRefundAndEdit(): void
+    {
+        $two = static fn (string $state, array $refunds): HttpResponse => new HttpResponse(200, (string) json_encode(['id' => self::ID, 'state' => $state, 'currency' => 'NOK', 'gross_amount' => '250.00', 'refunds' => $refunds]));
+        $read = 'GET /v1/order/' . self::ID;
+        $cases = [
+            ['status' => 11, 'stored' => 'FULFILLED', 'edited' => false, 'responses' => [$two('FULFILLED', []), new HttpResponse(201, '{"id":"r1"}'), $two('REFUNDED', [['id' => 'r1', 'total_amount' => '-250.00']])],
+                'calls' => [$read, 'POST /v1/order/' . self::ID . '/refund', $read], 'notes' => ['11|Two refunded 250.00 NOK on order ' . self::ID . '. The credit note is on the order page under Two.'], 'description' => 'the mapped refund status refunds the rest, noted'],
+            ['status' => 3, 'stored' => 'CONFIRMED', 'edited' => true, 'responses' => [new HttpResponse(200, '{"state":"CONFIRMED","status":"APPROVED"}')],
+                'calls' => [$read], 'notes' => ['3|The edit to this order was not sent to Two: the order can no longer be read.', '3|Two order ' . self::ID . ' not fulfilled: the order was edited after it was placed with Two. Two still holds the order as placed.'], 'description' => 'an edit that cannot be sent is noted, and the fulfil then refuses'],
+            ['status' => 2, 'stored' => 'FULFILLED', 'edited' => true, 'responses' => [],
+                'calls' => [], 'notes' => ['2|The order was edited after Two invoiced all or part of order ' . self::ID . ', so the change was not sent to Two. Two invoices the order as it was; refund any difference from the Two tab.'], 'description' => 'an edit after fulfilment is refused with a note, even at an unmapped status'],
+        ];
+        foreach ($cases as $case) {
+            $shop = self::shop('two.two', $case['status'], $case['stored'], $case['responses'], 7, refundStatus: 11, edited: $case['edited']);
             $shop['event']->handle(42);
             $d = 'status event: ' . $case['description'];
             TinyAssert::same($case['calls'], self::calls($shop['transport']), $d . ': requests');
@@ -83,10 +106,11 @@ final class OrderStatusEventSpec
      * @param list<HttpResponse> $responses
      * @return array{event: OrderStatusEvent, transport: ScriptedTransport, notes: LineLog, errors: LineLog}
      */
-    private static function shop(string $code, int $status, string $stored, array $responses, int $cancelStatus, bool $reenter = false, bool $throwRows = false): array
+    private static function shop(string $code, int $status, string $stored, array $responses, int $cancelStatus, bool $reenter = false, bool $throwRows = false, ?int $refundStatus = null, bool $edited = false): array
     {
-        $rows = ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => []];
-        $records = new MemoryRecords([42 => ['two_order_id' => self::ID, 'two_order_state' => $stored, 'rows_hash' => OrderLifecycle::rowsHash($rows)]]);
+        $placed = ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => []];
+        $rows = $edited ? ['products' => [['product_id' => '7', 'quantity' => '3']], 'totals' => [], 'addresses' => []] : $placed;
+        $records = new MemoryRecords([42 => ['two_order_id' => self::ID, 'two_order_state' => $stored, 'rows_hash' => OrderLifecycle::rowsHash($placed)]]);
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
         $client = new Client(new Environment(false), new SettingsProvider(new MemoryStore(['api_key' => 'key-0123456789', 'environment' => 'sandbox'])), new CustomHeaders(), $transport, $logger, '1.0.0');
@@ -101,7 +125,7 @@ final class OrderStatusEventSpec
         $event = null;
         $event = new OrderStatusEvent(
             static fn (int $orderId): array => ['order_id' => $orderId, 'order_status_id' => $status, 'store_id' => 0, 'payment_method' => ['code' => $code]],
-            static fn (array $order): array => ['lifecycle' => $lifecycle, 'refunds' => $refunds, 'edit' => $edit, 'rebuild' => static fn (array $record): ?array => null, 'fulfil' => [3], 'cancel' => $cancelStatus, 'refund' => null],
+            static fn (array $order): array => ['lifecycle' => $lifecycle, 'refunds' => $refunds, 'edit' => $edit, 'rebuild' => static fn (array $record): ?array => null, 'fulfil' => [3], 'cancel' => $cancelStatus, 'refund' => $refundStatus],
             static function (int $orderId) use ($rows, $throwRows): array {
                 if ($throwRows) {
                     throw new \RuntimeException('rows unreadable');

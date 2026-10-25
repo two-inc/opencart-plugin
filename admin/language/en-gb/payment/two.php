@@ -120,3 +120,5 @@ $_['text_refund_state_done'] = 'Refunded';
 $_['text_refund_state_refused'] = 'Refused';
 $_['text_refund_state_unknown'] = 'Unknown';
 $_['text_refund_state_not_applied'] = 'Not applied';
+$_['button_retry'] = 'Retry';
+$_['text_refund_blocked'] = 'A refund below has an unknown outcome. Retry it before sending another refund: it is sent again under the same key, so Two refunds it at most once.';

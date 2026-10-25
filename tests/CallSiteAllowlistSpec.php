@@ -24,6 +24,9 @@ final class CallSiteAllowlistSpec
         'system/library/core/api_key_verdict.php' => false,
     ];
 
+    /** Methods that send a body built by their callers, with those callers. */
+    private const SHARED_SENDERS = ['system/library/core/order_refunds.php' => ['post' => ['send', 'retry']]];
+
     public static function runAll(): void
     {
         $root = dirname(__DIR__);
@@ -53,12 +56,18 @@ final class CallSiteAllowlistSpec
         ];
         foreach ($expected as $path => [$count, $description]) {
             $posts = 0;
-            foreach (preg_split('~\n    (?:public|private) (?:static )?function ~', $files[$path]) ?: [] as $method) {
+            $methods = preg_split('~\n    (?:public|private) (?:static )?function ~', $files[$path]) ?: [];
+            foreach ($methods as $method) {
                 $post = preg_match("~client->request\\('(POST|PUT)'~", $method, $write, PREG_OFFSET_CAPTURE) === 1 ? $write[0][1] : false;
                 if ($post === false) {
                     continue;
                 }
                 $posts++;
+                $name = (string) strtok($method, '(');
+                if (isset(self::SHARED_SENDERS[$path][$name])) {
+                    self::checkSharedSender($path, $name, $methods);
+                    continue;
+                }
                 $hook = preg_match('~postprocessing->apply\(|this->payload\(~', $method, $found, PREG_OFFSET_CAPTURE) === 1 ? $found[0][1] : false;
                 TinyAssert::true($hook !== false && $hook < $post, 'every order request in ' . $path . ' passes the hook first: ' . strtok($method, '('));
             }
@@ -69,6 +78,29 @@ final class CallSiteAllowlistSpec
 
         self::testTriggers();
         self::testLoadable();
+    }
+
+    /**
+     * A method that sends a body its callers built: each caller either runs
+     * the hook before calling it, or resends a body stored after the hook ran
+     * (a retry under the same key must send exactly what was sent).
+     *
+     * @param list<string> $methods
+     */
+    private static function checkSharedSender(string $path, string $name, array $methods): void
+    {
+        $callers = 0;
+        foreach ($methods as $method) {
+            $call = strpos($method, '$this->' . $name . '(');
+            if ($call === false) {
+                continue;
+            }
+            $callers++;
+            $hook = strpos($method, 'postprocessing->apply(');
+            $stored = strpos($method, "json_decode(\$row['payload']");
+            TinyAssert::true(($hook !== false && $hook < $call) || ($stored !== false && $stored < $call), $path . ': ' . strtok($method, '(') . ' runs the hook, or resends the stored hooked body, before ' . $name);
+        }
+        TinyAssert::same(count(self::SHARED_SENDERS[$path][$name]), $callers, $path . ': ' . $name . ' has only its listed callers');
     }
 
     private static function testLoadable(): void
