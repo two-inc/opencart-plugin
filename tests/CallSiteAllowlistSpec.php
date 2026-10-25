@@ -7,9 +7,9 @@ use Opencart\System\Library\Extension\Two\Opencart\EventSubscribers;
 /**
  * Build Guide section 21.7: no order request bypasses the choke point. Only
  * the listed files call the Client; order requests come from OrderFlow
- * alone, and every request there that changes an order goes through
- * Postprocessing::apply (directly or through OrderFlow::payload) in the
- * same method first. Also pins which event
+ * and OrderLifecycle alone, and every request there that changes an order
+ * goes through Postprocessing::apply (directly or through
+ * OrderFlow::payload) in the same method first. Also pins which event
  * triggers OpenCart would run for the hook.
  */
 final class CallSiteAllowlistSpec
@@ -17,6 +17,7 @@ final class CallSiteAllowlistSpec
     /** Files that may call Client::request, and whether they may send order requests. */
     private const CALLERS = [
         'system/library/core/order_flow.php' => true,
+        'system/library/core/order_lifecycle.php' => true,
         'system/library/core/record_provider.php' => false,
         'system/library/core/api_key_verdict.php' => false,
     ];
@@ -42,18 +43,24 @@ final class CallSiteAllowlistSpec
             }
         }
 
-        $flow = $files['system/library/core/order_flow.php'];
-        $posts = 0;
-        foreach (preg_split('~\n    (?:public|private) (?:static )?function ~', $flow) ?: [] as $method) {
-            $post = strpos($method, "client->request('POST'");
-            if ($post === false) {
-                continue;
+        $expected = [
+            'system/library/core/order_flow.php' => [3, 'OrderFlow sends order create, confirm and cancel'],
+            'system/library/core/order_lifecycle.php' => [1, 'OrderLifecycle sends fulfil (its cancel is OrderFlow\'s)'],
+        ];
+        foreach ($expected as $path => [$count, $description]) {
+            $posts = 0;
+            foreach (preg_split('~\n    (?:public|private) (?:static )?function ~', $files[$path]) ?: [] as $method) {
+                $post = strpos($method, "client->request('POST'");
+                if ($post === false) {
+                    continue;
+                }
+                $posts++;
+                $hook = preg_match('~postprocessing->apply\(|this->payload\(~', $method, $found, PREG_OFFSET_CAPTURE) === 1 ? $found[0][1] : false;
+                TinyAssert::true($hook !== false && $hook < $post, 'every order request in ' . $path . ' passes the hook first: ' . strtok($method, '('));
             }
-            $posts++;
-            $hook = preg_match('~postprocessing->apply\(|this->payload\(~', $method, $found, PREG_OFFSET_CAPTURE) === 1 ? $found[0][1] : false;
-            TinyAssert::true($hook !== false && $hook < $post, 'every order request in OrderFlow passes the hook first: ' . strtok($method, '('));
+            TinyAssert::same($count, $posts, $description);
         }
-        TinyAssert::same(3, $posts, 'OrderFlow sends order create, confirm and cancel');
+        $flow = $files['system/library/core/order_flow.php'];
         TinyAssert::true(preg_match('~function payload\([^{]*\{[^}]*postprocessing->apply\(~s', $flow) === 1, 'OrderFlow::payload runs the hook');
 
         self::testTriggers();

@@ -14,7 +14,7 @@ $_['button_confirm'] = 'Confirm order';
 $_['text_returning'] = 'Returning to the shop';
 $_['text_continue'] = 'Continue';
 $_['text_cancelled'] = 'Your order is cancelled.';
-$_['text_pending'] = 'We\'re still confirming your payment. You\'ll receive an email when your order is confirmed.';
+$_['text_pending'] = 'We\'re still confirming your payment. Please wait a minute before you try again, so that the order is not placed twice.';
 $_['text_cart_changed'] = 'Your cart changed during payment verification. Please review your cart and try again.';
 $_['text_history_prefix'] = 'Two: ';
 

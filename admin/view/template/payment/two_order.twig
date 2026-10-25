@@ -1,0 +1,14 @@
+{% if two_order_id %}
+<table class="table table-bordered">
+  <tbody>
+    <tr><td class="w-25">{{ text_two_order|e }}</td><td>{{ two_order_id|e }}</td></tr>
+    <tr><td>{{ text_two_state|e }}</td><td>{{ two_order_state|e }}</td></tr>
+  </tbody>
+</table>
+{% if invoice %}
+<a href="{{ invoice|e }}" target="_blank" rel="noopener" class="btn btn-primary"><i class="fa-solid fa-file-pdf"></i> {{ button_invoice|e }}</a>
+<div class="form-text">{{ help_invoice|e }}</div>
+{% endif %}
+{% else %}
+<p>{{ text_no_two_order|e }}</p>
+{% endif %}

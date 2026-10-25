@@ -141,6 +141,13 @@ class Two extends \Opencart\System\Engine\Controller
         if ($this->bounce($kind, $orderId, $token)) {
             return;
         }
+        // The token first, so a request that does not own the order never holds
+        // its lock. Not logged: anyone can send one, so it would only fill the log.
+        if (!$this->services()->orderFlow($this->event)->owns($orderId, $token)) {
+            $this->leave('cart', 'generic');
+
+            return;
+        }
         // One callback per order at a time, so the status read before a write
         // cannot go stale under a concurrent hit (the bounce page's link and its
         // refresh). A guarded UPDATE cannot do this: OpenCart's addHistory must
@@ -209,7 +216,7 @@ class Two extends \Opencart\System\Engine\Controller
                 'organization_number' => $record['organization_number'] ?? '',
                 'country_code' => $record['country_code'] ?? '',
             ], []);
-            $result = $flow->confirm($orderId, $token, $rebuild);
+            $result = $flow->confirm($orderId, $token, $rebuild, $model->orderRows($orderId));
         }
 
         if ($result['outcome'] === OrderFlow::UNAUTHORISED) {

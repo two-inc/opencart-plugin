@@ -59,6 +59,37 @@ class Two extends \Opencart\System\Engine\Model
         ];
     }
 
+    /** The address columns the order keeps for each role, hashed as stored. */
+    private const ADDRESS_FIELDS = ['firstname', 'lastname', 'company', 'address_1', 'address_2', 'city', 'postcode', 'country_id', 'zone_id'];
+
+    /**
+     * The order's own rows, as stored: its products (price, tax and
+     * quantity), its totals, and its billing and shipping addresses. Nothing
+     * from the catalogue or the tax setup, so only an edit of the order
+     * itself changes them. Null when there is no such order.
+     *
+     * @return array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null
+     */
+    public function orderRows(int $orderId): ?array
+    {
+        $order = $this->db->query('SELECT * FROM `' . DB_PREFIX . "order` WHERE `order_id` = '" . $orderId . "'")->row;
+        if (!$order) {
+            return null;
+        }
+        $addresses = [];
+        foreach (['payment', 'shipping'] as $role) {
+            foreach (self::ADDRESS_FIELDS as $field) {
+                $addresses[$role . '_' . $field] = $order[$role . '_' . $field] ?? '';
+            }
+        }
+
+        return [
+            'products' => array_values($this->db->query('SELECT `product_id`, `name`, `model`, `quantity`, `price`, `total`, `tax` FROM `' . DB_PREFIX . "order_product` WHERE `order_id` = '" . $orderId . "'")->rows),
+            'totals' => array_values($this->db->query('SELECT `code`, `title`, `value` FROM `' . DB_PREFIX . "order_total` WHERE `order_id` = '" . $orderId . "'")->rows),
+            'addresses' => $addresses,
+        ];
+    }
+
     /**
      * The stored order as OrderBuilder's inputs, or null when there is no
      * such order.

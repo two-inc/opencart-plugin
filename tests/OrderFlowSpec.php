@@ -9,6 +9,7 @@ use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 
@@ -25,6 +26,8 @@ final class OrderFlowSpec
     public static function runAll(): void
     {
         self::testCreate();
+        self::testRecreate();
+        self::testCreateKeyPerAttempt();
         self::testConfirm();
         self::testCancel();
         self::testNewToken();
@@ -74,12 +77,77 @@ final class OrderFlowSpec
             TinyAssert::same($case['buyer'], $result['ok'] ? null : $result['buyer'], $d . ': buyer keys');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['state'], $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
+            self::assertKeys($transport, $d);
             if ($case['state'] !== null && empty($case['lossy'])) {
                 TinyAssert::same(OrderFlow::tokenHash(self::TOKEN), $records->rows[42]['token_hash'], $d . ': the token hash is stored, not the token');
             }
             if ($result['ok']) {
                 TinyAssert::same('https://checkout.sandbox.two.inc/o/1', $result['redirect'], $d . ': redirect');
             }
+        }
+    }
+
+    /** The buyer placed the order again: the earlier Two order is cancelled before its id is overwritten. */
+    private static function testRecreate(): void
+    {
+        $earlier = '5f1c2a7e-0000-4000-8000-000000000000';
+        $created = self::json(201, ['id' => self::ID, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);
+        $cancel = 'POST /v1/order/' . $earlier . '/cancel';
+        $read = 'GET /v1/order/' . $earlier;
+        $cases = [
+            ['state' => 'UNVERIFIED', 'responses' => [self::json(200, []), $created], 'ok' => true, 'calls' => [$cancel, 'POST /v1/order'], 'id' => self::ID, 'description' => 'the earlier order is cancelled, then the new one created'],
+            ['state' => 'UNVERIFIED', 'responses' => [self::json(409, []), self::json(200, ['state' => 'CANCELLED']), $created], 'ok' => true, 'calls' => [$cancel, $read, 'POST /v1/order'], 'id' => self::ID, 'description' => 'the cancel is refused but Two holds it cancelled: created'],
+            ['state' => 'UNVERIFIED', 'responses' => [self::json(500, []), self::json(200, ['state' => 'VERIFIED'])], 'ok' => false, 'calls' => [$cancel, $read], 'id' => $earlier, 'description' => 'the earlier order stays open at Two: refused, its id kept'],
+            ['state' => 'CANCELLED', 'responses' => [$created], 'ok' => true, 'calls' => ['POST /v1/order'], 'id' => self::ID, 'description' => 'the earlier order is already cancelled: no cancel sent'],
+        ];
+        foreach ($cases as $case) {
+            $records = new MemoryRecords([42 => ['token_hash' => 'old', 'two_order_id' => $earlier, 'two_order_state' => $case['state']]]);
+            [$flow, $transport] = self::flow($case['responses'], $records);
+            $result = $flow->create(self::order(), self::lines(2), [], self::TOKEN);
+            $d = 're-create: ' . $case['description'];
+            TinyAssert::same($case['ok'], $result['ok'], $d . ': ok');
+            TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
+            TinyAssert::same($case['id'], $records->rows[42]['two_order_id'], $d . ': stored Two order id');
+            self::assertKeys($transport, $d, $earlier);
+        }
+    }
+
+    /** One key per checkout attempt: each attempt has its own token, so the same cart and company never share a create key. */
+    private static function testCreateKeyPerAttempt(): void
+    {
+        $created = static fn (): HttpResponse => self::json(201, ['id' => self::ID, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);
+        $keys = [];
+        foreach ([self::TOKEN, self::TOKEN, str_repeat('c', 48)] as $token) {
+            [$flow, $transport] = self::flow([$created()], new MemoryRecords());
+            $flow->create(self::order(), self::lines(2), [], $token);
+            $keys[] = $transport->calls[0]['headers']['Idempotency-Key'] ?? '';
+        }
+        $cases = [
+            [$keys[0], 'create_42_' . substr(OrderFlow::tokenHash(self::TOKEN), 0, 16), 'the shape: create, the shop order id, the start of the token hash'],
+            [$keys[1], $keys[0], 'a retry of the same attempt (same token) reuses the key'],
+            [$keys[2] !== $keys[0], true, 'a new attempt on the same cart and company gets a new key'],
+            [str_contains($keys[0], self::TOKEN), false, 'the token itself never appears in the key'],
+        ];
+        foreach ($cases as [$actual, $expected, $description]) {
+            TinyAssert::same($expected, $actual, 'create key: ' . $description);
+        }
+    }
+
+    /**
+     * Every write carries Idempotency-Key in its operation's shape; reads carry none.
+     */
+    private static function assertKeys(ScriptedTransport $transport, string $d, string $cancelled = self::ID): void
+    {
+        foreach ($transport->calls as $call) {
+            $path = (string) parse_url($call['url'], PHP_URL_PATH);
+            $expected = match (true) {
+                $call['method'] === 'GET' => null,
+                $path === '/v1/order' => 'create_42_' . substr(OrderFlow::tokenHash(self::TOKEN), 0, 16),
+                str_ends_with($path, '/confirm') => 'confirm_' . self::ID,
+                str_ends_with($path, '/cancel') => 'cancel_' . (str_contains($path, $cancelled) ? $cancelled : self::ID),
+                default => 'unexpected write ' . $path,
+            };
+            TinyAssert::same($expected, $call['headers']['Idempotency-Key'] ?? null, $d . ': ' . $call['method'] . ' ' . $path . ' idempotency key');
         }
     }
 
@@ -134,11 +202,22 @@ final class OrderFlowSpec
             [$flow, $transport] = self::flow($case['responses'], $records);
             $spec = array_key_exists('rebuild', $case) ? $case['rebuild'] : [2, []];
             $rebuild = static fn (array $record): ?array => $spec === null ? null : ['order' => $spec[1] + self::order(), 'lines' => self::lines($spec[0]), 'totals' => []];
-            $result = $kind === 'confirm' ? $flow->confirm(42, $case['token'], $rebuild) : $flow->cancel(42, $case['token']);
+            $rows = ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => ['payment_city' => 'Oslo']];
+            $result = $kind === 'confirm' ? $flow->confirm(42, $case['token'], $rebuild, $rows) : $flow->cancel(42, $case['token']);
             $d = $kind . ': ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'], $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['state'], $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
+            foreach ($transport->calls as $call) {
+                if ($call['method'] === 'POST') {
+                    TinyAssert::same('{}', $call['body'], $d . ': ' . (string) parse_url($call['url'], PHP_URL_PATH) . ' sends an empty object');
+                }
+            }
+            self::assertKeys($transport, $d);
+            if ($kind === 'confirm') {
+                $kept = $result['outcome'] === OrderFlow::CONFIRMED ? OrderLifecycle::rowsHash($rows) : null;
+                TinyAssert::same($kept, $records->rows[42]['rows_hash'] ?? null, $d . ': the rows hash is kept once Two holds the order as placed');
+            }
         }
     }
 

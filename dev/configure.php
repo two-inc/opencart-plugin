@@ -16,7 +16,7 @@ declare(strict_types=1);
  * straight against the database, because neither step has a CLI entry point:
  * the extension_install and extension rows, the admin permissions for the
  * extension's route, the payment_two settings (status forced on), the
- * record refresh cron and the two_order table.
+ * record refresh cron, the order lifecycle event and the two_order table.
  *
  * Environment:
  *   OPENCART_DIR     shop root holding config.php (default /var/www/html)
@@ -177,7 +177,13 @@ if (query($db, "SELECT `cron_id` FROM `{$p}cron` WHERE `code` = ?", [Services::C
     say('registered cron ' . Services::CRON_CODE);
 }
 
-// 6. The order-scoped table, as install() creates it.
+// 6. The order lifecycle on OpenCart's order history event, as install() registers it.
+if (query($db, "SELECT `event_id` FROM `{$p}event` WHERE `code` = ?", [Services::EVENT_CODE]) === []) {
+    query($db, "INSERT INTO `{$p}event` SET `code` = ?, `description` = ?, `trigger` = ?, `action` = ?, `status` = 1, `sort_order` = 0", [Services::EVENT_CODE, Services::EVENT_DESCRIPTION, Services::EVENT_TRIGGER, Services::EVENT_ACTION]);
+    say('registered event ' . Services::EVENT_CODE);
+}
+
+// 7. The order-scoped table, as install() creates it.
 $renamed = DbOrderRecords::install(static fn (string $sql): array => query($db, $sql), $p);
 if ($renamed !== null) {
     say('renamed the old ' . $p . DbOrderRecords::TABLE . ' table to ' . $renamed);

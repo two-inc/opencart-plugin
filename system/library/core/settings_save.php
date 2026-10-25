@@ -37,6 +37,8 @@ final class SettingsSave
     public const TITLE_MISSING = 'title_missing';
     public const STATUS_MISSING = 'status_missing';
     public const STATUS_UNKNOWN = 'status_unknown';
+    /** The shop's void status: OpenCart sets it on orders being edited, so the order lifecycle never acts on it. */
+    public const STATUS_VOID = 'status_void';
 
     /** Printable ASCII with no spaces: a key is sent as a header value, so nothing else may reach the wire. */
     private const KEY = '/^[\x21-\x7E]+\z/';
@@ -55,9 +57,10 @@ final class SettingsSave
      *
      * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string} $submitted
      * @param list<int> $orderStatusIds the shop's order statuses, which the maps may name
+     * @param int       $voidStatusId   the shop's void status (0 for none), which no map may name
      * @return array{errors: array<string, string>, credentials: string|null, status: string|null, code: int|null}
      */
-    public function save(array $submitted, array $orderStatusIds): array
+    public function save(array $submitted, array $orderStatusIds, int $voidStatusId = 0): array
     {
         $write = [];
         $errors = [];
@@ -75,6 +78,8 @@ final class SettingsSave
             $ids = array_values(array_unique(array_filter(array_map('trim', $submitted['fulfil_status_ids']), static fn (string $id): bool => $id !== '')));
             if (array_diff($ids, array_map('strval', $orderStatusIds)) !== []) {
                 $errors['fulfil_status_ids'] = self::STATUS_UNKNOWN;
+            } elseif ($voidStatusId > 0 && in_array((string) $voidStatusId, $ids, true)) {
+                $errors['fulfil_status_ids'] = self::STATUS_VOID;
             } else {
                 $write['fulfil_status_ids'] = (string) json_encode(array_map('intval', $ids));
             }
@@ -88,6 +93,7 @@ final class SettingsSave
             $error = match (true) {
                 $id === '' || $id === '0' => self::STATUS_MISSING,
                 !in_array($id, array_map('strval', $orderStatusIds), true) => self::STATUS_UNKNOWN,
+                $voidStatusId > 0 && $id === (string) $voidStatusId => self::STATUS_VOID,
                 default => null,
             };
             if ($error !== null) {

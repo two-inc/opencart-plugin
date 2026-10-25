@@ -19,6 +19,9 @@ final class DbOrderRecords implements OrderRecords
 {
     public const TABLE = 'two_order';
 
+    /** Columns added after the table first shipped, added in place by install() rather than renaming the table aside. */
+    public const ADDED_COLUMNS = ['rows_hash' => "CHAR(64) NOT NULL DEFAULT ''"];
+
     /** @var list<string>|null */
     private ?array $columns = null;
 
@@ -43,9 +46,16 @@ final class DbOrderRecords implements OrderRecords
         if ($query("SHOW TABLES LIKE '" . str_replace('_', '\\_', $table) . "'") !== []) {
             $columns = array_map(static fn (array $row): string => (string) $row['Field'], $query('SHOW COLUMNS FROM `' . $table . '`'));
             $primary = array_map(static fn (array $row): string => (string) $row['Column_name'], $query("SHOW KEYS FROM `" . $table . "` WHERE `Key_name` = 'PRIMARY'"));
-            if ($primary !== ['order_id'] || array_diff(array_merge(['order_id'], self::FIELDS), $columns) !== []) {
+            $required = array_diff(array_merge(['order_id'], self::FIELDS), array_keys(self::ADDED_COLUMNS));
+            if ($primary !== ['order_id'] || array_diff($required, $columns) !== []) {
                 $renamed = $table . '_legacy_' . gmdate('YmdHis');
                 $query('RENAME TABLE `' . $table . '` TO `' . $renamed . '`');
+            } else {
+                foreach (self::ADDED_COLUMNS as $column => $definition) {
+                    if (!in_array($column, $columns, true)) {
+                        $query('ALTER TABLE `' . $table . '` ADD COLUMN `' . $column . '` ' . $definition);
+                    }
+                }
             }
         }
         $query(self::createTableSql($prefix));
@@ -66,6 +76,7 @@ final class DbOrderRecords implements OrderRecords
             . '`company_name` VARCHAR(255) NOT NULL DEFAULT \'\','
             . '`organization_number` VARCHAR(64) NOT NULL DEFAULT \'\','
             . '`country_code` CHAR(2) NOT NULL DEFAULT \'\','
+            . '`rows_hash` CHAR(64) NOT NULL DEFAULT \'\','
             . '`date_added` DATETIME NOT NULL,'
             . '`date_modified` DATETIME NOT NULL,'
             . 'PRIMARY KEY (`order_id`),'
