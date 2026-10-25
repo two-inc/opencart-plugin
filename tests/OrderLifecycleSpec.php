@@ -125,6 +125,8 @@ final class OrderLifecycleSpec
             ['stored' => 'CONFIRMED', 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderLifecycle::DONE, 'calls' => [$post, $read], 'state' => 'CANCELLED', 'description' => 'confirmed: cancelled and read back'],
             ['stored' => 'CONFIRMED', 'responses' => [self::json(409, []), $get('CANCELLED')], 'outcome' => OrderLifecycle::ALREADY, 'calls' => [$post, $read], 'state' => 'CANCELLED', 'description' => 'already cancelled at Two: counts as cancelled, noted'],
             ['stored' => 'DELIVERED', 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'DELIVERED', 'description' => 'delivered: refused, no cancel attempted'],
+            ['stored' => 'CONFIRMED', 'responses' => [new HttpResponse(202, '""'), $get('CANCELLED')], 'outcome' => OrderLifecycle::ALREADY, 'reason' => ' is already cancelled.', 'calls' => [$post, $read], 'state' => 'CANCELLED', 'description' => 'Two answers 202 (already cancelled): noted as already cancelled'],
+            ['stored' => 'CONFIRMED', 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderLifecycle::DONE, 'reason' => ' cancelled.', 'calls' => [$post, $read], 'state' => 'CANCELLED', 'description' => 'Two answers 200: noted as cancelled'],
             ['stored' => 'CANCELLED', 'responses' => [], 'outcome' => OrderLifecycle::SKIPPED, 'calls' => [], 'state' => 'CANCELLED', 'description' => 'already cancelled: a repeat event sends nothing'],
             ['stored' => 'FULFILLED', 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'FULFILLED', 'description' => 'fulfilled: refused, nothing sent'],
             ['stored' => 'CONFIRMED', 'responses' => [self::json(200, []), $get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$post, $read], 'state' => 'CONFIRMED', 'description' => 'Two still holds it confirmed: refused'],
@@ -135,6 +137,9 @@ final class OrderLifecycleSpec
             [$lifecycle, $transport, $records, $logger] = self::lifecycle($case['responses'], $case['stored']);
             $result = $lifecycle->cancel(42);
             self::check('cancel: ' . $case['description'], $case, $result, $transport, $records, $logger);
+            if (isset($case['reason'])) {
+                TinyAssert::true(str_ends_with($result['reason'], $case['reason']), 'cancel: ' . $case['description'] . ': the history note (got ' . $result['reason'] . ')');
+            }
             if (in_array($post, self::calls($transport), true)) {
                 TinyAssert::same('cancel_' . self::ID, $transport->calls[0]['headers']['Idempotency-Key'] ?? null, 'cancel: ' . $case['description'] . ': idempotency key');
                 TinyAssert::same('{}', $transport->calls[0]['body'], 'cancel: ' . $case['description'] . ': the body is an empty object');

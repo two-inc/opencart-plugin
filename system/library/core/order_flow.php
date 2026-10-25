@@ -380,23 +380,35 @@ final class OrderFlow
      */
     public function sendCancel(string $twoOrderId, string $trigger, int $orderId): ?string
     {
+        return $this->cancelOrder($twoOrderId, $trigger, $orderId)['failure'];
+    }
+
+    /**
+     * sendCancel with Two's status too: 202 means Two already held the order
+     * as cancelled, 200 that this request cancelled it, 0 that nothing was sent
+     * or Two was not reached.
+     *
+     * @return array{failure: string|null, status: int}
+     */
+    public function cancelOrder(string $twoOrderId, string $trigger, int $orderId): array
+    {
         $path = '/v1/order/' . $twoOrderId . '/cancel';
         try {
             $body = $this->postprocessing->apply(Postprocessing::CANCEL, $trigger, $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
             $this->logger->error('Two order ' . $twoOrderId . ' cancel not sent: ' . $refused->detail);
 
-            return 'not sent: ' . $refused->detail;
+            return ['failure' => 'not sent: ' . $refused->detail, 'status' => 0];
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CANCEL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
             $reason = $this->errors->reason($response);
             $this->logger->error('Two order ' . $twoOrderId . ' cancel refused: ' . $reason);
 
-            return $reason;
+            return ['failure' => $reason, 'status' => $response->status];
         }
 
-        return null;
+        return ['failure' => null, 'status' => $response->status];
     }
 
     /**

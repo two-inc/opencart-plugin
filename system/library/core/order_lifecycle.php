@@ -183,10 +183,13 @@ final class OrderLifecycle
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' is ' . $stored . ', so it was not cancelled. A fulfilled order is refunded, not cancelled.');
         }
 
-        $failure = $this->flow->sendCancel($twoOrderId, 'status_change', $orderId);
+        ['failure' => $failure, 'status' => $status] = $this->flow->cancelOrder($twoOrderId, 'status_change', $orderId);
         $state = $this->flow->readState($orderId, $twoOrderId);
         if ($state === 'CANCELLED') {
-            return self::outcome($failure === null ? self::DONE : self::ALREADY, 'Two order ' . $twoOrderId . ($failure === null ? ' cancelled.' : ' is already cancelled.'));
+            // 202: Two held it as cancelled already; a refusal read back as cancelled means the same.
+            $already = $failure !== null || $status === 202;
+
+            return self::outcome($already ? self::ALREADY : self::DONE, 'Two order ' . $twoOrderId . ($already ? ' is already cancelled.' : ' cancelled.'));
         }
 
         return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not cancelled' . ($failure === null ? '' : ': ' . $failure) . '. Two holds it as ' . ($state ?? 'unknown') . '.'
