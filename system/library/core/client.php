@@ -69,7 +69,8 @@ final class Client
         $params = ['client' => self::CLIENT_CODE, 'client_v' => $this->pluginVersion];
         $url = $this->environment->apiBaseUrl($this->settings->environment())
             . $path . (str_contains($path, '?') ? '&' : '?') . http_build_query($params);
-        $payload = $body === null ? null : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        // Two's request bodies are objects: an empty one is sent as {}, never as the list [].
+        $payload = $body === null ? null : ($body === [] ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
         $custom = $this->customHeaders->forRequest($this->settings->customHeaderRows());
         $headers = $this->headers($custom, $authenticated, $headers);
         $verifyTls = $this->settings->verifyTls();
