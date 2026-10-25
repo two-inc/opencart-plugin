@@ -110,7 +110,7 @@ final class OrderLifecycleSpec
                 TinyAssert::true(str_contains($result['reason'], $case['reason']), $d . ': the history note says why');
             }
             if (in_array($post, self::calls($transport), true)) {
-                TinyAssert::same('oc-fulfil-' . self::ID, $transport->calls[1]['headers']['Idempotency-Key'] ?? null, $d . ': idempotency key');
+                TinyAssert::same('fulfil_' . self::ID, $transport->calls[1]['headers']['Idempotency-Key'] ?? null, $d . ': idempotency key');
                 TinyAssert::same('{}', $transport->calls[1]['body'], $d . ': the body is an empty object');
             }
         }
@@ -136,7 +136,7 @@ final class OrderLifecycleSpec
             $result = $lifecycle->cancel(42);
             self::check('cancel: ' . $case['description'], $case, $result, $transport, $records, $logger);
             if (in_array($post, self::calls($transport), true)) {
-                TinyAssert::same('oc-cancel-' . self::ID, $transport->calls[0]['headers']['Idempotency-Key'] ?? null, 'cancel: ' . $case['description'] . ': idempotency key');
+                TinyAssert::same('cancel_' . self::ID, $transport->calls[0]['headers']['Idempotency-Key'] ?? null, 'cancel: ' . $case['description'] . ': idempotency key');
                 TinyAssert::same('{}', $transport->calls[0]['body'], 'cancel: ' . $case['description'] . ': the body is an empty object');
             }
         }
@@ -169,6 +169,7 @@ final class OrderLifecycleSpec
             TinyAssert::same($case['expected'], $actual, $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             foreach ($transport->calls as $call) {
+                TinyAssert::true(!isset($call['headers']['Idempotency-Key']), $d . ': a read carries no idempotency key');
                 if (str_contains($call['url'], '/v1/invoice/')) {
                     TinyAssert::same('application/pdf', $call['headers']['Accept'] ?? null, $d . ': asks for a PDF');
                     TinyAssert::true(str_contains($call['url'], '/pdf?v=original&proxy=true&'), $d . ': asks for the original, streamed by Two (no redirect)');

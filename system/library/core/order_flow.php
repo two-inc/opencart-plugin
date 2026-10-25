@@ -118,7 +118,7 @@ final class OrderFlow
             }
         }
 
-        $response = $this->client->request('POST', '/v1/order', $payload);
+        $response = $this->client->request('POST', '/v1/order', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderCreate($orderId, $stored['token_hash'])));
         $body = $response->json();
         if (!$response->reachedTwo() || $response->status >= 400) {
             return $this->refused($orderId, 'Two refused the order: ' . $this->errors->reason($response), $this->errors->buyerMessageKeys($response->status, $body));
@@ -193,7 +193,7 @@ final class OrderFlow
         } catch (OrderRefused $refused) {
             return self::outcome(self::REFUSED, 'Two order ' . $twoOrderId . ' not confirmed: ' . $refused->detail, $twoOrderId);
         }
-        $response = $this->client->request('POST', $path, $body);
+        $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CONFIRM, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
             return self::outcome(self::REFUSED, 'Two refused to confirm order ' . $twoOrderId . ': ' . $this->errors->reason($response), $twoOrderId);
         }
@@ -388,7 +388,7 @@ final class OrderFlow
 
             return 'not sent: ' . $refused->detail;
         }
-        $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, self::idempotencyHeader($twoOrderId, 'cancel'));
+        $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CANCEL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
             $reason = $this->errors->reason($response);
             $this->logger->error('Two order ' . $twoOrderId . ' cancel refused: ' . $reason);
@@ -397,19 +397,6 @@ final class OrderFlow
         }
 
         return null;
-    }
-
-    /**
-     * The idempotency key for one whole-order action on one Two order, the
-     * same on every attempt. Two honours the key today only on partial
-     * fulfilments and refunds, so it is not what stops a repeat here: the
-     * plugin's own guard is the stored and live Two state.
-     *
-     * @return array<string, string>
-     */
-    public static function idempotencyHeader(string $twoOrderId, string $action): array
-    {
-        return ['Idempotency-Key' => 'oc-' . $action . '-' . $twoOrderId];
     }
 
     /**

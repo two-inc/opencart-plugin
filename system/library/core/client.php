@@ -65,6 +65,9 @@ final class Client
         if (preg_match('~^/[^\s?#]*(\?[^\s#]*)?\z~', $path) !== 1) {
             throw new \InvalidArgumentException('A Two API path starts with a slash and holds no whitespace or fragment.');
         }
+        if (in_array($method, IdempotencyKey::WRITE_METHODS, true) && IdempotencyKey::in($headers) === null) {
+            throw new \InvalidArgumentException('Every write request to Two carries an idempotency key (IdempotencyKey::header).');
+        }
 
         $params = ['client' => self::CLIENT_CODE, 'client_v' => $this->pluginVersion];
         $url = $this->environment->apiBaseUrl($this->settings->environment())
@@ -151,7 +154,8 @@ final class Client
         }
         $secrets[] = $this->settings->apiKey();
         $secrets = array_values(array_filter($secrets, static fn (string $secret): bool => strlen($secret) >= self::MIN_SCRUB_LENGTH));
-        $line = 'Two API ' . $method . ' ' . $path;
+        $key = IdempotencyKey::in($headers);
+        $line = 'Two API ' . $method . ' ' . $path . ($key === null ? '' : ' (' . IdempotencyKey::HEADER . ' ' . $key . ')');
         $context = [
             'request' => ['params' => $params, 'headers' => $logged, 'body' => $body, 'verify_tls' => $verifyTls],
             'response' => ['status' => $response->status, 'body' => $response->json() ?? (str_starts_with($response->body, '%PDF-') ? '(PDF, ' . strlen($response->body) . ' bytes)' : $response->body), 'transport_error' => $response->transportError],

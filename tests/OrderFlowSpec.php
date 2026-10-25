@@ -27,6 +27,7 @@ final class OrderFlowSpec
     {
         self::testCreate();
         self::testRecreate();
+        self::testCreateKeyPerAttempt();
         self::testConfirm();
         self::testCancel();
         self::testNewToken();
@@ -76,6 +77,7 @@ final class OrderFlowSpec
             TinyAssert::same($case['buyer'], $result['ok'] ? null : $result['buyer'], $d . ': buyer keys');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['state'], $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
+            self::assertKeys($transport, $d);
             if ($case['state'] !== null && empty($case['lossy'])) {
                 TinyAssert::same(OrderFlow::tokenHash(self::TOKEN), $records->rows[42]['token_hash'], $d . ': the token hash is stored, not the token');
             }
@@ -106,6 +108,46 @@ final class OrderFlowSpec
             TinyAssert::same($case['ok'], $result['ok'], $d . ': ok');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['id'], $records->rows[42]['two_order_id'], $d . ': stored Two order id');
+            self::assertKeys($transport, $d, $earlier);
+        }
+    }
+
+    /** One key per checkout attempt: each attempt has its own token, so the same cart and company never share a create key. */
+    private static function testCreateKeyPerAttempt(): void
+    {
+        $created = static fn (): HttpResponse => self::json(201, ['id' => self::ID, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);
+        $keys = [];
+        foreach ([self::TOKEN, self::TOKEN, str_repeat('c', 48)] as $token) {
+            [$flow, $transport] = self::flow([$created()], new MemoryRecords());
+            $flow->create(self::order(), self::lines(2), [], $token);
+            $keys[] = $transport->calls[0]['headers']['Idempotency-Key'] ?? '';
+        }
+        $cases = [
+            [$keys[0], 'create_42_' . substr(OrderFlow::tokenHash(self::TOKEN), 0, 16), 'the shape: create, the shop order id, the start of the token hash'],
+            [$keys[1], $keys[0], 'a retry of the same attempt (same token) reuses the key'],
+            [$keys[2] !== $keys[0], true, 'a new attempt on the same cart and company gets a new key'],
+            [str_contains($keys[0], self::TOKEN), false, 'the token itself never appears in the key'],
+        ];
+        foreach ($cases as [$actual, $expected, $description]) {
+            TinyAssert::same($expected, $actual, 'create key: ' . $description);
+        }
+    }
+
+    /**
+     * Every write carries Idempotency-Key in its operation's shape; reads carry none.
+     */
+    private static function assertKeys(ScriptedTransport $transport, string $d, string $cancelled = self::ID): void
+    {
+        foreach ($transport->calls as $call) {
+            $path = (string) parse_url($call['url'], PHP_URL_PATH);
+            $expected = match (true) {
+                $call['method'] === 'GET' => null,
+                $path === '/v1/order' => 'create_42_' . substr(OrderFlow::tokenHash(self::TOKEN), 0, 16),
+                str_ends_with($path, '/confirm') => 'confirm_' . self::ID,
+                str_ends_with($path, '/cancel') => 'cancel_' . (str_contains($path, $cancelled) ? $cancelled : self::ID),
+                default => 'unexpected write ' . $path,
+            };
+            TinyAssert::same($expected, $call['headers']['Idempotency-Key'] ?? null, $d . ': ' . $call['method'] . ' ' . $path . ' idempotency key');
         }
     }
 
@@ -171,6 +213,7 @@ final class OrderFlowSpec
                     TinyAssert::same('{}', $call['body'], $d . ': ' . (string) parse_url($call['url'], PHP_URL_PATH) . ' sends an empty object');
                 }
             }
+            self::assertKeys($transport, $d);
             if ($kind === 'confirm') {
                 $kept = $result['outcome'] === OrderFlow::CONFIRMED ? OrderLifecycle::rowsHash($rows) : null;
                 TinyAssert::same($kept, $records->rows[42]['rows_hash'] ?? null, $d . ': the rows hash is kept once Two holds the order as placed');

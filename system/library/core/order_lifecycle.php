@@ -14,8 +14,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   later work; the refund status map is not acted on yet.
  * - Idempotent: the stored Two state and then Two's live state decide
  *   whether anything is sent, so a repeated event or a re-save never fulfils
- *   or cancels twice. Each call also carries an idempotency key, which Two
- *   honours today only on partial fulfilments and refunds.
+ *   or cancels twice. Each call also carries an idempotency key
+ *   (IdempotencyKey), which Two honours today only on partial fulfilments
+ *   and refunds.
  * - Before fulfilling, the order's own rows (products, totals, addresses)
  *   must still hash to what was stored when Two confirmed it, so Two never
  *   invoices an order the merchant has since edited. Only data the order
@@ -150,7 +151,7 @@ final class OrderLifecycle
         } catch (OrderRefused $refused) {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: ' . $refused->detail);
         }
-        $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, OrderFlow::idempotencyHeader($twoOrderId, self::FULFIL));
+        $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::FULFIL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
             return $this->refused($orderId, 'Two refused to fulfil order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' Save the status again to retry.');
         }
