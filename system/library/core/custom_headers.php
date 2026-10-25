@@ -19,13 +19,15 @@ final class CustomHeaders
     /**
      * Names a row may not take: what the Client or cURL sets, the hop-by-hop
      * headers, headers that change how a response or connection is framed,
-     * and credentials or caller identity that must not be forgeable.
+     * credentials or caller identity that must not be forgeable, and the
+     * idempotency key, which the plugin sets per request.
      */
     public const RESERVED = [
         'host', 'content-type', 'content-length', 'accept', 'accept-language', 'accept-encoding',
         'x-api-key', 'x-vendor-name', 'x-forwarded-for', 'x-real-ip',
         'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer',
         'transfer-encoding', 'upgrade', 'expect', 'authorization', 'cookie',
+        'idempotency-key', 'x-idempotency-key',
     ];
 
     /** validate() error codes, in the order a row is checked. The adapter maps them to copy. */
