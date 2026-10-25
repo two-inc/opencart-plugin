@@ -4,21 +4,19 @@ declare(strict_types=1);
 
 namespace Opencart\Catalog\Controller\Extension\Two\Event;
 
-use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
+use Opencart\System\Library\Extension\Two\Opencart\OrderStatusEvent;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
  * The order lifecycle off OpenCart's order history: after an order moves
- * into a status, fulfil or cancel its Two order as the status maps say.
- * Registered on `catalog/model/checkout/order.addHistory/after`
- * (Services::EVENT_TRIGGER). Admin status changes run the catalog's order
- * model in a store instance, so this sees them too.
- *
- * The status change has already been written: the outcome is added to the
- * order history at the same status, never by changing it back, and an
- * order the extension did not take is left alone.
+ * into a status, fulfil or cancel its Two order as the status maps say
+ * (`OrderStatusEvent`). Registered on
+ * `catalog/model/checkout/order.addHistory/after` (Services::EVENT_TRIGGER).
+ * Admin status changes run the catalog's order model in a store instance,
+ * so this sees them too.
  *
  * @property-read \Opencart\System\Engine\Loader $load
+ * @property-read \Opencart\System\Engine\Config $config
  * @property-read \Opencart\System\Engine\Event $event
  * @property-read \Opencart\System\Library\Language $language
  * @property-read \Opencart\System\Library\DB $db
@@ -31,62 +29,39 @@ class Two extends \Opencart\System\Engine\Controller
     private const ROUTE = 'extension/two/payment/two';
     private const MODEL_ROUTE = 'checkout/order.addHistory';
 
-    /** Set while this handler runs: its own history note goes through addHistory too. */
-    private static bool $running = false;
-
     /**
      * @param array<int, mixed> $args addHistory's: order id, status id, comment, notify, override
      */
     public function history(string &$route = '', array &$args = [], mixed &$output = null): void
     {
         // Also reachable as a URL route, with no arguments: only the model event acts.
-        if (self::$running || $route !== self::MODEL_ROUTE || !is_numeric($args[0] ?? null)) {
+        if ($route !== self::MODEL_ROUTE || !is_numeric($args[0] ?? null)) {
             return;
         }
-        $orderId = (int) $args[0];
         $this->load->model('checkout/order');
-        $order = $this->model_checkout_order->getOrder($orderId);
-        if (!$order || (string) ($order['payment_method']['code'] ?? '') !== 'two.two') {
-            return;
-        }
-        $services = new Services($this->db, $this->log, (int) $order['store_id']);
-        $statusId = (int) $order['order_status_id'];
-        $action = OrderLifecycle::action($statusId, $services->settings->fulfilStatusIds(), $services->settings->cancelStatusId());
-        if ($action === null) {
-            return;
-        }
+        $this->load->model(self::ROUTE);
+        $orders = $this->model_checkout_order;
+        $model = $this->model_extension_two_payment_two;
 
-        self::$running = true;
-        try {
-            $lifecycle = $services->orderLifecycle($this->event);
-            if ($action === OrderLifecycle::FULFIL) {
-                $this->load->model(self::ROUTE);
-                $model = $this->model_extension_two_payment_two;
-                $rebuild = static fn (array $record): ?array => $model->orderInput($orderId, [
-                    'company_name' => $record['company_name'] ?? '',
-                    'organization_number' => $record['organization_number'] ?? '',
-                    'country_code' => $record['country_code'] ?? '',
-                ], []);
-                $result = $lifecycle->fulfil($orderId, $rebuild);
-            } else {
-                $result = $lifecycle->cancel($orderId);
-            }
-            if ($result['outcome'] !== OrderLifecycle::SKIPPED) {
-                $this->note($orderId, $statusId, $result['reason']);
-            }
-        } catch (\Throwable $error) {
-            $reason = 'The ' . $action . ' at Two failed: ' . get_class($error) . ' at ' . basename($error->getFile()) . ':' . $error->getLine() . '.';
-            $this->log->write('Two error: order ' . $orderId . ': ' . $reason . ' ' . $error->getMessage());
-            $this->note($orderId, $statusId, $reason);
-        } finally {
-            self::$running = false;
-        }
-    }
+        (new OrderStatusEvent(
+            static fn (int $orderId): ?array => $orders->getOrder($orderId) ?: null,
+            function (array $order): array {
+                $services = new Services($this->db, $this->log, (int) $order['store_id']);
 
-    /** The outcome in the history at the status the merchant chose; override skips the fraud check a second time. */
-    private function note(int $orderId, int $statusId, string $reason): void
-    {
-        $this->load->language(self::ROUTE);
-        $this->model_checkout_order->addHistory($orderId, $statusId, $this->language->get('text_history_prefix') . $reason, false, true);
+                return [
+                    'lifecycle' => $services->orderLifecycle($this->event),
+                    'fulfil' => $services->settings->fulfilStatusIds(),
+                    'cancel' => $services->settings->cancelStatusId(),
+                ];
+            },
+            static fn (int $orderId): ?array => $model->orderRows($orderId),
+            function (int $orderId, int $statusId, string $reason) use ($orders): void {
+                // override skips the fraud check a second time.
+                $this->load->language(self::ROUTE);
+                $orders->addHistory($orderId, $statusId, $this->language->get('text_history_prefix') . $reason, false, true);
+            },
+            fn (string $line) => $this->log->write($line),
+            (int) $this->config->get('config_void_status_id'),
+        ))->handle((int) $args[0]);
     }
 }

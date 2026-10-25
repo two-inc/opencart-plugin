@@ -9,6 +9,7 @@ use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 
@@ -159,11 +160,21 @@ final class OrderFlowSpec
             [$flow, $transport] = self::flow($case['responses'], $records);
             $spec = array_key_exists('rebuild', $case) ? $case['rebuild'] : [2, []];
             $rebuild = static fn (array $record): ?array => $spec === null ? null : ['order' => $spec[1] + self::order(), 'lines' => self::lines($spec[0]), 'totals' => []];
-            $result = $kind === 'confirm' ? $flow->confirm(42, $case['token'], $rebuild) : $flow->cancel(42, $case['token']);
+            $rows = ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => ['payment_city' => 'Oslo']];
+            $result = $kind === 'confirm' ? $flow->confirm(42, $case['token'], $rebuild, $rows) : $flow->cancel(42, $case['token']);
             $d = $kind . ': ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'], $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['state'], $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
+            foreach ($transport->calls as $call) {
+                if ($call['method'] === 'POST') {
+                    TinyAssert::same('{}', $call['body'], $d . ': ' . (string) parse_url($call['url'], PHP_URL_PATH) . ' sends an empty object');
+                }
+            }
+            if ($kind === 'confirm') {
+                $kept = $result['outcome'] === OrderFlow::CONFIRMED ? OrderLifecycle::rowsHash($rows) : null;
+                TinyAssert::same($kept, $records->rows[42]['rows_hash'] ?? null, $d . ': the rows hash is kept once Two holds the order as placed');
+            }
         }
     }
 

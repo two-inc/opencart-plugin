@@ -216,7 +216,7 @@ class Two extends \Opencart\System\Engine\Controller
                 'organization_number' => $record['organization_number'] ?? '',
                 'country_code' => $record['country_code'] ?? '',
             ], []);
-            $result = $flow->confirm($orderId, $token, $rebuild);
+            $result = $flow->confirm($orderId, $token, $rebuild, $model->orderRows($orderId));
         }
 
         if ($result['outcome'] === OrderFlow::UNAUTHORISED) {

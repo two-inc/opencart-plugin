@@ -37,7 +37,7 @@ final class OrderFlow
     public const CALLBACK_CANCEL = 'cancel';
 
     /** Two order states in which the buyer has verified and the order stands. */
-    public const PLACED_STATES = ['CONFIRMED', 'FULFILLING', 'FULFILLED', 'PARTIALLY_FULFILLED', 'REFUNDED', 'PARTIALLY_REFUNDED'];
+    public const PLACED_STATES = ['CONFIRMED', 'FULFILLING', 'FULFILMENT_NEEDS_MANUAL_RESOLUTION', 'FULFILLED', 'DELIVERED', 'REFUNDED'];
 
     public function __construct(
         private readonly Client $client,
@@ -145,9 +145,11 @@ final class OrderFlow
      *
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
      *        the shop's stored order as create's inputs, given the stored record (company included); null when it is gone
+     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null $rows
+     *        the order's own rows, whose hash is kept once Two holds the order as placed, for the check before fulfilment
      * @return array{outcome: string, reason: string, two_order_id: string}
      */
-    public function confirm(int $orderId, string $token, \Closure $rebuild): array
+    public function confirm(int $orderId, string $token, \Closure $rebuild, ?array $rows = null): array
     {
         $record = $this->authorised($orderId, $token);
         if ($record === null) {
@@ -173,7 +175,12 @@ final class OrderFlow
         if ($state === 'CANCELLED') {
             return self::outcome(self::CANCELLED, 'Two holds order ' . $twoOrderId . ' as cancelled.', $twoOrderId);
         }
+        $placed = $rows === null ? [] : ['rows_hash' => OrderLifecycle::rowsHash($rows)];
         if (in_array($state, self::PLACED_STATES, true)) {
+            if ($placed !== []) {
+                $this->records->put($orderId, $placed);
+            }
+
             return self::outcome(self::CONFIRMED, 'Two order ' . $twoOrderId . ' is ' . $state . '.', $twoOrderId);
         }
         if ($state !== 'VERIFIED') {
@@ -190,7 +197,7 @@ final class OrderFlow
         if (!$response->reachedTwo() || $response->status >= 400) {
             return self::outcome(self::REFUSED, 'Two refused to confirm order ' . $twoOrderId . ': ' . $this->errors->reason($response), $twoOrderId);
         }
-        $this->records->put($orderId, self::stateFields($response->json() ?? []) + ['two_order_state' => 'CONFIRMED']);
+        $this->records->put($orderId, self::stateFields($response->json() ?? []) + ['two_order_state' => 'CONFIRMED'] + $placed);
 
         return self::outcome(self::CONFIRMED, 'Two order ' . $twoOrderId . ' confirmed.', $twoOrderId);
     }
@@ -393,9 +400,10 @@ final class OrderFlow
     }
 
     /**
-     * The idempotency key for one whole-order action on one Two order. It is
-     * the same on every attempt, so a retried event is the same request; the
-     * plugin's own guard against a repeat is the stored and live Two state.
+     * The idempotency key for one whole-order action on one Two order, the
+     * same on every attempt. Two honours the key today only on partial
+     * fulfilments and refunds, so it is not what stops a repeat here: the
+     * plugin's own guard is the stored and live Two state.
      *
      * @return array<string, string>
      */

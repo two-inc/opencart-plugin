@@ -26,6 +26,7 @@ final class OrderLifecycleSpec
     public static function runAll(): void
     {
         self::testAction();
+        self::testRowsHash();
         self::testFulfil();
         self::testCancel();
         self::testInvoice();
@@ -47,6 +48,28 @@ final class OrderLifecycleSpec
         }
     }
 
+    /** Only a change in the order's own rows counts. */
+    private static function testRowsHash(): void
+    {
+        $base = OrderLifecycle::rowsHash(self::rows());
+        $two = self::rows();
+        $two['products'][] = ['product_id' => '8', 'name' => 'Gadget', 'model' => 'G', 'quantity' => '1', 'price' => '10.0000', 'total' => '10.0000', 'tax' => '2.5000'];
+        $reordered = $two;
+        $reordered['products'] = array_reverse($reordered['products']);
+        $cases = [
+            [self::rows(), true, 'the same rows'],
+            [self::rows(['price' => '101.0000']), false, 'a price edited'],
+            [self::rows(['quantity' => '3']), false, 'a quantity edited'],
+            [self::rows([], ['value' => '260.0000']), false, 'a total edited'],
+            [self::rows([], [], ['shipping_city' => 'Bergen']), false, 'the shipping address edited'],
+            [self::rows([], [], ['payment_postcode' => '0151']), false, 'the billing address edited'],
+        ];
+        foreach ($cases as [$rows, $same, $description]) {
+            TinyAssert::same($same, OrderLifecycle::rowsHash($rows) === $base, 'rows hash: ' . $description);
+        }
+        TinyAssert::same(OrderLifecycle::rowsHash($two), OrderLifecycle::rowsHash($reordered), 'rows hash: rows re-written in another order hash the same');
+    }
+
     private static function testFulfil(): void
     {
         $get = self::get(...);
@@ -63,26 +86,32 @@ final class OrderLifecycleSpec
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), self::json(201, []), $get('FULFILLED')], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'state' => 'FULFILLED', 'description' => 'confirmed: fulfilled and read back'],
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), self::json(201, []), self::json(500, [])], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'state' => 'FULFILLING', 'description' => 'fulfilled, the read back fails: marked as asked for, so a repeat skips'],
             ['stored' => 'FULFILLED', 'responses' => [], 'outcome' => OrderLifecycle::SKIPPED, 'calls' => [], 'state' => 'FULFILLED', 'description' => 'already fulfilled: a repeat event or re-save sends nothing'],
+            ['stored' => 'DELIVERED', 'responses' => [], 'outcome' => OrderLifecycle::SKIPPED, 'calls' => [], 'state' => 'DELIVERED', 'description' => 'delivered counts as fulfilled: nothing sent'],
             ['stored' => 'FULFILLING', 'responses' => [], 'outcome' => OrderLifecycle::SKIPPED, 'calls' => [], 'state' => 'FULFILLING', 'description' => 'fulfilment already asked for: nothing sent'],
-            ['stored' => 'CONFIRMED', 'responses' => [$get('FULFILLED')], 'outcome' => OrderLifecycle::SKIPPED, 'calls' => [$read], 'state' => 'FULFILLED', 'description' => 'fulfilled at Two already (stored state stale): nothing sent'],
+            ['stored' => 'CONFIRMED', 'responses' => [$get('FULFILLED')], 'outcome' => OrderLifecycle::ALREADY, 'calls' => [$read], 'state' => 'FULFILLED', 'description' => 'fulfilled at Two after an earlier refusal: nothing sent, noted'],
+            ['stored' => 'CONFIRMED', 'responses' => [$get('DELIVERED')], 'outcome' => OrderLifecycle::ALREADY, 'calls' => [$read], 'state' => 'DELIVERED', 'description' => 'delivered at Two: nothing sent, noted'],
             ['stored' => 'CANCELLED', 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CANCELLED', 'description' => 'cancelled: refused, nothing sent'],
             ['stored' => null, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => null, 'description' => 'no Two order linked: refused, nothing sent'],
             ['stored' => 'CONFIRMED', 'responses' => [self::json(500, [])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'CONFIRMED', 'description' => 'Two\'s state cannot be read: refused, nothing sent'],
             ['stored' => 'VERIFIED', 'responses' => [$get('VERIFIED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'VERIFIED', 'description' => 'not confirmed at Two: refused'],
-            ['stored' => 'CONFIRMED', 'rebuild' => 3, 'responses' => [$get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'CONFIRMED', 'description' => 'the order changed since create: refused, nothing sent'],
-            ['stored' => 'CONFIRMED', 'rebuild' => null, 'responses' => [$get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'CONFIRMED', 'description' => 'the shop order cannot be rebuilt: refused'],
+            ['stored' => 'CONFIRMED', 'rows' => self::rows(['quantity' => '3']), 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'edited after it was placed', 'description' => 'the order was edited after it was placed: refused, nothing asked'],
+            ['stored' => 'CONFIRMED', 'rows' => null, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'description' => 'the shop order is gone: refused'],
+            ['stored' => 'CONFIRMED', 'unhashed' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'merchant portal', 'description' => 'no rows hash kept (placed before it was stored): refused, never fulfilled unchecked'],
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), self::json(400, ['error_code' => 'X'])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $post], 'state' => 'CONFIRMED', 'description' => 'Two refuses the fulfil: refused, state kept so a re-save retries'],
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), HttpResponse::unreachable('timeout')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $post], 'state' => 'CONFIRMED', 'description' => 'Two not reached: refused'],
             ['stored' => 'CONFIRMED', 'handlers' => $throws, 'responses' => [$get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'CONFIRMED', 'description' => 'the hook refuses the capture: nothing sent'],
         ];
         foreach ($cases as $case) {
-            [$lifecycle, $transport, $records, $logger] = self::lifecycle($case['responses'], $case['stored'], $case['handlers'] ?? []);
-            $quantity = array_key_exists('rebuild', $case) ? $case['rebuild'] : 2;
-            $rebuild = static fn (array $record): ?array => $quantity === null ? null : ['order' => self::order(), 'lines' => self::lines($quantity), 'totals' => []];
-            $result = $lifecycle->fulfil(42, $rebuild);
-            self::check('fulfil: ' . $case['description'], $case, $result, $transport, $records, $logger);
+            [$lifecycle, $transport, $records, $logger] = self::lifecycle($case['responses'], $case['stored'], $case['handlers'] ?? [], !empty($case['unhashed']));
+            $result = $lifecycle->fulfil(42, array_key_exists('rows', $case) ? $case['rows'] : self::rows());
+            $d = 'fulfil: ' . $case['description'];
+            self::check($d, $case, $result, $transport, $records, $logger);
+            if (isset($case['reason'])) {
+                TinyAssert::true(str_contains($result['reason'], $case['reason']), $d . ': the history note says why');
+            }
             if (in_array($post, self::calls($transport), true)) {
-                TinyAssert::same('oc-fulfil-' . self::ID, $transport->calls[1]['headers']['Idempotency-Key'] ?? null, 'fulfil: ' . $case['description'] . ': idempotency key');
+                TinyAssert::same('oc-fulfil-' . self::ID, $transport->calls[1]['headers']['Idempotency-Key'] ?? null, $d . ': idempotency key');
+                TinyAssert::same('{}', $transport->calls[1]['body'], $d . ': the body is an empty object');
             }
         }
     }
@@ -94,7 +123,8 @@ final class OrderLifecycleSpec
         $post = 'POST /v1/order/' . self::ID . '/cancel';
         $cases = [
             ['stored' => 'CONFIRMED', 'responses' => [self::json(200, []), $get('CANCELLED')], 'outcome' => OrderLifecycle::DONE, 'calls' => [$post, $read], 'state' => 'CANCELLED', 'description' => 'confirmed: cancelled and read back'],
-            ['stored' => 'CONFIRMED', 'responses' => [self::json(409, []), $get('CANCELLED')], 'outcome' => OrderLifecycle::DONE, 'calls' => [$post, $read], 'state' => 'CANCELLED', 'description' => 'already cancelled at Two: counts as cancelled'],
+            ['stored' => 'CONFIRMED', 'responses' => [self::json(409, []), $get('CANCELLED')], 'outcome' => OrderLifecycle::ALREADY, 'calls' => [$post, $read], 'state' => 'CANCELLED', 'description' => 'already cancelled at Two: counts as cancelled, noted'],
+            ['stored' => 'DELIVERED', 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'DELIVERED', 'description' => 'delivered: refused, no cancel attempted'],
             ['stored' => 'CANCELLED', 'responses' => [], 'outcome' => OrderLifecycle::SKIPPED, 'calls' => [], 'state' => 'CANCELLED', 'description' => 'already cancelled: a repeat event sends nothing'],
             ['stored' => 'FULFILLED', 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'FULFILLED', 'description' => 'fulfilled: refused, nothing sent'],
             ['stored' => 'CONFIRMED', 'responses' => [self::json(200, []), $get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$post, $read], 'state' => 'CONFIRMED', 'description' => 'Two still holds it confirmed: refused'],
@@ -107,6 +137,7 @@ final class OrderLifecycleSpec
             self::check('cancel: ' . $case['description'], $case, $result, $transport, $records, $logger);
             if (in_array($post, self::calls($transport), true)) {
                 TinyAssert::same('oc-cancel-' . self::ID, $transport->calls[0]['headers']['Idempotency-Key'] ?? null, 'cancel: ' . $case['description'] . ': idempotency key');
+                TinyAssert::same('{}', $transport->calls[0]['body'], 'cancel: ' . $case['description'] . ': the body is an empty object');
             }
         }
     }
@@ -122,6 +153,8 @@ final class OrderLifecycleSpec
             ['stored' => 'FULFILLING', 'responses' => [$notFulfilled, self::get('FULFILLING')], 'expected' => OrderLifecycle::INVOICE_NOT_READY, 'calls' => [$fetch, $read], 'description' => 'ORDER_NOT_FULFILLED while fulfilling: not ready yet'],
             ['stored' => 'CONFIRMED', 'responses' => [$notFulfilled, self::get('CONFIRMED')], 'expected' => OrderLifecycle::INVOICE_UNAVAILABLE_STATE . ':CONFIRMED', 'calls' => [$fetch, $read], 'description' => 'ORDER_NOT_FULFILLED, not fulfilled: names the state'],
             ['stored' => 'FULFILLING', 'responses' => [$notFulfilled, self::get('FULFILLED'), $pdf], 'expected' => 'pdf', 'calls' => [$fetch, $read, $fetch], 'description' => 'ORDER_NOT_FULFILLED, fulfilled just now: asked once more'],
+            ['stored' => 'FULFILLED', 'responses' => [$notFulfilled, self::get('DELIVERED'), $pdf], 'expected' => 'pdf', 'calls' => [$fetch, $read, $fetch], 'description' => 'ORDER_NOT_FULFILLED, delivered: invoiced, asked once more'],
+            ['stored' => 'FULFILLING', 'responses' => [$notFulfilled, self::get('FULFILMENT_NEEDS_MANUAL_RESOLUTION')], 'expected' => OrderLifecycle::INVOICE_NOT_READY, 'calls' => [$fetch, $read], 'description' => 'ORDER_NOT_FULFILLED while fulfilment needs manual resolution: not ready yet'],
             ['stored' => 'FULFILLING', 'responses' => [$notFulfilled, self::get('FULFILLED'), $notFulfilled], 'expected' => OrderLifecycle::INVOICE_ERROR, 'calls' => [$fetch, $read, $fetch], 'description' => 'fulfilled but still no invoice on the retry: an error, no loop'],
             ['stored' => 'FULFILLING', 'responses' => [$notFulfilled, self::json(500, [])], 'expected' => OrderLifecycle::INVOICE_ERROR, 'calls' => [$fetch, $read], 'description' => 'ORDER_NOT_FULFILLED and the state cannot be read: an error'],
             ['stored' => 'FULFILLED', 'responses' => [self::json(500, [])], 'expected' => OrderLifecycle::INVOICE_ERROR, 'calls' => [$fetch], 'description' => 'Two fails: an error'],
@@ -138,6 +171,7 @@ final class OrderLifecycleSpec
             foreach ($transport->calls as $call) {
                 if (str_contains($call['url'], '/v1/invoice/')) {
                     TinyAssert::same('application/pdf', $call['headers']['Accept'] ?? null, $d . ': asks for a PDF');
+                    TinyAssert::true(str_contains($call['url'], '/pdf?v=original&proxy=true&'), $d . ': asks for the original, streamed by Two (no redirect)');
                 }
             }
         }
@@ -161,12 +195,13 @@ final class OrderLifecycleSpec
      * @param array<string, \Closure(array<string, mixed>, array<string, mixed>): mixed> $handlers
      * @return array{0: OrderLifecycle, 1: ScriptedTransport, 2: MemoryRecords, 3: RecordingLogger}
      */
-    private static function lifecycle(array $responses, ?string $stored, array $handlers = []): array
+    private static function lifecycle(array $responses, ?string $stored, array $handlers = [], bool $unhashed = false): array
     {
         $rows = $stored === null ? [] : [42 => [
             'token_hash' => OrderFlow::tokenHash(str_repeat('a', 48)),
             'payload_hash' => OrderFlow::payloadHash((new OrderBuilder())->build(self::order(), self::lines(2), [])),
             'two_order_id' => self::ID, 'two_order_state' => $stored, 'company_name' => 'Acme AS',
+            'rows_hash' => $unhashed ? '' : OrderLifecycle::rowsHash(self::rows()),
         ]];
         $records = new MemoryRecords($rows);
         $transport = new ScriptedTransport($responses);
@@ -193,6 +228,23 @@ final class OrderLifecycleSpec
     private static function json(int $status, array $body): HttpResponse
     {
         return new HttpResponse($status, (string) json_encode($body));
+    }
+
+    /**
+     * The order's own rows as the shop stores them, with overrides on the product, the total and the addresses.
+     *
+     * @param array<string, string> $product
+     * @param array<string, string> $total
+     * @param array<string, string> $addresses
+     * @return array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}
+     */
+    private static function rows(array $product = [], array $total = [], array $addresses = []): array
+    {
+        return [
+            'products' => [$product + ['product_id' => '7', 'name' => 'Widget', 'model' => 'W1', 'quantity' => '2', 'price' => '100.0000', 'total' => '200.0000', 'tax' => '25.0000']],
+            'totals' => [['code' => 'sub_total', 'title' => 'Sub-Total', 'value' => '200.0000'], $total + ['code' => 'total', 'title' => 'Total', 'value' => '250.0000']],
+            'addresses' => $addresses + ['payment_city' => 'Oslo', 'payment_postcode' => '0150', 'payment_country_id' => '160', 'shipping_city' => 'Oslo', 'shipping_postcode' => '0150', 'shipping_country_id' => '160'],
+        ];
     }
 
     /** @return list<array<string, mixed>> */

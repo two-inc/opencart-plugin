@@ -124,6 +124,14 @@ configure > /dev/null
 [ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'token_hash'" | wc -l)" = 1 ] || fail "configure.php did not replace a legacy two_order table"
 [ "$(legacy)" = $((before + 1)) ] || fail "the legacy two_order table was not kept aside"
 ok "configure.php renames a legacy two_order table aside"
+# A table from before rows_hash (the first rewrite release) keeps its rows and gains the column.
+sql "INSERT INTO oc_two_order SET order_id = 9002, two_order_id = 'kept', date_added = NOW(), date_modified = NOW(); ALTER TABLE oc_two_order DROP COLUMN rows_hash"
+before=$(legacy)
+configure > /dev/null
+[ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'rows_hash'" | wc -l)" = 1 ] || fail "configure.php did not add rows_hash to the two_order table"
+[ "$(sql "SELECT two_order_id FROM oc_two_order WHERE order_id = 9002")" = kept ] && [ "$(legacy)" = "$before" ] || fail "configure.php renamed a current two_order table aside instead of adding the column"
+sql "DELETE FROM oc_two_order WHERE order_id = 9002"
+ok "configure.php adds rows_hash in place, keeping the rows"
 
 # An order's tax rates come from its own customer group, never the request's session: the
 # probe runs OpenCart's tax engine as the plugin sets it up, with no session at all.
