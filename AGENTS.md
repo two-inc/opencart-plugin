@@ -10,8 +10,8 @@ The repo root is the extension directory: a shop serves it as `extension/two/`.
 |---|---|
 | `install.json` | OpenCart 4 extension manifest. Holds the one version string |
 | `system/library/opencart/` | OpenCart 4 implementations of the core's ports (`DbSettingsStore`, which upserts; `CurlTransport`; `LogLogger`; `DbOrderRecords`, the `two_order` table; `EventSubscribers`, the order postprocessing event) and `Services`, the one place the core graph is built |
-| `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `SettingsSave` (the selective admin save), `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, `ApiKeyVerdict` (the key heartbeat), `OrderFlow` (create, confirm and cancel) and `OrderRefused`, plus the ports they need (`SettingsStore`, `Transport`, `Logger`, `OrderRecords`, `PostprocessingSubscribers`) and `SettingsOverlay` (read-only typed credentials for the live key check) |
-| `admin/`, `catalog/` | Thin OpenCart 4 adapters: controllers, models, language files, templates, and `admin/view/javascript/two_admin.js` (the live API key check). `catalog/controller/cron/two.php` is the daily merchant-record refresh, registered in OpenCart's cron table by install() and `configure.php` |
+| `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `SettingsSave` (the selective admin save), `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, `ApiKeyVerdict` (the key heartbeat), `OrderFlow` (create, confirm and cancel), `OrderLifecycle` (whole-order fulfil and cancel off the status maps, and the invoice) and `OrderRefused`, plus the ports they need (`SettingsStore`, `Transport`, `Logger`, `OrderRecords`, `PostprocessingSubscribers`) and `SettingsOverlay` (read-only typed credentials for the live key check) |
+| `admin/`, `catalog/` | Thin OpenCart 4 adapters: controllers, models, language files, templates, and `admin/view/javascript/two_admin.js` (the live API key check). `catalog/controller/cron/two.php` is the daily merchant-record refresh, registered in OpenCart's cron table by install() and `configure.php`; `catalog/controller/event/two.php` is the order lifecycle, registered in OpenCart's event table the same way |
 | `dev/` | `configure.php` (installs and enables the extension), the docker image, CI scripts (`ci/smoke.sh`), packaging |
 | `tests/` | Offline PHP suite: `tests/*Spec.php`, run by `tests/run.php` |
 
@@ -48,7 +48,7 @@ The staging shops deploy this repo to `extension/two` on every new commit and th
 
 ## Admin settings
 
-The settings page has PrestaShop's five tabs. P2 fills only what the core flow needs: status, environment, API key and sort order (General), the per-language title (Checkout fields) and the fulfilment, cancel and refund status maps (Order management; refunds are sent from P5). Every other tab, and the rest of each tab, says the settings are coming in a later release.
+The settings page has PrestaShop's five tabs. P2 fills only what the core flow needs: status, environment, API key and sort order (General), the per-language title (Checkout fields) and the fulfilment, cancel and refund status maps (Order management; the refund map is not acted on yet). Every other tab, and the rest of each tab, says the settings are coming in a later release.
 
 - The save is selective (`SettingsSave`): a refused field keeps its stored value and is named, and the rest are written. The API key and environment are one pair, written together or not at all. A rejected key is never stored, and a key Two could not judge never replaces one that last verified.
 - The API key is never sent back to the browser. An empty key field means "keep the stored key".
@@ -70,13 +70,26 @@ The buyer picks Two, enters the company in the tile (name, organisation number, 
 - The callbacks are guarded by a per-order token (its hash in `two_order`). OpenCart's session cookie is SameSite=Strict by default, so a callback arriving without it bounces once through a same-site page rebuilt from the route and the validated id and token.
 - Refusals: the buyer gets `ErrorMapper`'s copy (section 6.4), the merchant's order history and the log get the reason.
 
+## Order lifecycle
+
+Once placed, the order's Two order follows the merchant's status maps. One catalog event, `catalog/model/checkout/order.addHistory/after` (`Services::EVENT_*`), runs `catalog/controller/event/two.php` after every status change: the admin's (OpenCart runs the catalog order model in a store instance, events included), the storefront's and the extension's own. Orders paid with another method are left alone.
+
+- Moving into a mapped fulfilment status fulfils the whole Two order (`POST /v1/order/{id}/fulfillments`, through the hook as `capture`); into the mapped cancel status cancels it. A status in both maps fulfils.
+- Idempotent: the stored Two state, then Two's live state, decide whether anything is sent, so a repeated event or a re-save sends nothing. A fulfil marks the order FULFILLING before reading it back. Every fulfil and cancel also carries an `Idempotency-Key` fixed per Two order and action.
+- Before fulfilling, the stored order must still rebuild the create payload's hash (the confirm check, hook included). If it does not, nothing is sent and the history says why: Two still holds the order as placed.
+- The status change is never undone. Every outcome except "nothing to do" goes in the order history at the status the merchant chose (a second `addHistory`, guarded so it does not re-enter the handler), and every refusal in the log. A fulfilled order is not cancelled: the note says it needs a refund.
+- The admin order page has a Two tab (the payment extension's `order()`): the Two order id and state, and once fulfilment has been asked for, an invoice download. The download (`two.invoice`) sits behind the admin login and its user_token and also needs access to Sales > Orders and the extension. On Two's `ORDER_NOT_FULFILLED` it reads the order's state: still fulfilling says try later, another state is named, and a just-fulfilled order is asked once more. Only a real PDF is served.
+- A re-create (the buyer confirms the same OpenCart order again) cancels the earlier Two order before its id is overwritten, and refuses the new one if Two still holds the earlier one open.
+
+Deferred, not built yet: partial fulfilment, refunds (full and partial, and the refund form; the refund status map stays unused), order-edit sync (an edited order is refused at fulfil instead), and the credit-note download.
+
 Later-phase items, not built yet:
 - The Diagnostics tab: SSL bypass, debug logging, refresh merchant profile, scheduled refresh URL.
 - The error log view (last 100 lines).
 - The custom request-header table, with halt-and-show on save (`CustomHeaders::validate` is built and tested) and a `send_from_browser` flag per row.
 - P9's E2E must include a 4.1.0.0 CI leg that places a whole order: the floor voids an unplaced order on every checkout edit, and the CI shop otherwise runs 4.1.0.4.
 - The availability chain at checkout (P6): the tile is offered whenever the extension is enabled with an API key.
-- A plugin status for confirmed orders (the shop's default order status is used) and the order lifecycle off the status maps (P5).
+- A plugin status for confirmed orders (the shop's default order status is used).
 - The rest of the PrestaShop field set: vendor name, subtitle, the checkout field toggles, payment terms, and the remaining status maps.
 
 ## Conventions
