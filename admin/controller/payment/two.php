@@ -153,7 +153,7 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         $services = new Services($this->db, $this->log);
-        $result = $services->save->save($this->submitted($post), $this->orderStatusIds());
+        $result = $services->save->save($this->submitted($post), $this->orderStatusIds(), (int) $this->config->get('config_void_status_id'));
 
         foreach ($result['errors'] as $field => $code) {
             $json['error'][$field] = $this->language->get('error_' . $code);

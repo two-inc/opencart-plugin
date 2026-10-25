@@ -65,6 +65,7 @@ $_['error_partial'] = 'Some settings were not saved. See the highlighted fields.
 $_['error_title_missing'] = 'Enter a title.';
 $_['error_status_missing'] = 'Select an order status.';
 $_['error_status_unknown'] = 'Select an order status this shop has.';
+$_['error_status_void'] = 'OpenCart uses this status for orders that are being edited, so it cannot be mapped. Select another order status.';
 $_['error_key_missing'] = 'Enter an API key.';
 $_['error_kept_malformed'] = 'This is not a valid API key: it may only contain printable characters, with no spaces or line breaks. The previously saved key was kept.';
 $_['error_kept_environment'] = 'Please select a valid environment.';

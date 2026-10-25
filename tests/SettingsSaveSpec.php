@@ -20,7 +20,7 @@ final class SettingsSaveSpec
 {
     private const NOW = 1_800_000_000;
     private const GOOD = 'good-stored-key';
-    private const STATUSES = [1, 3, 5, 7, 11];
+    private const STATUSES = [1, 3, 5, 7, 11, 16];
 
     public static function runAll(): void
     {
@@ -133,10 +133,13 @@ final class SettingsSaveSpec
             [['cancel_status_id' => '7', 'refund_status_id' => '11'], [], ['cancel_status_id' => '7', 'refund_status_id' => '11'], 'the cancel and refund statuses are stored'],
             [['cancel_status_id' => '', 'refund_status_id' => '0'], ['cancel_status_id' => SettingsSave::STATUS_MISSING, 'refund_status_id' => SettingsSave::STATUS_MISSING], ['cancel_status_id' => null, 'refund_status_id' => null], 'the cancel and refund statuses are required'],
             [['cancel_status_id' => '99', 'refund_status_id' => '11'], ['cancel_status_id' => SettingsSave::STATUS_UNKNOWN], ['cancel_status_id' => null, 'refund_status_id' => '11'], 'one bad field does not stop the others'],
+            [['fulfil_status_ids' => ['3', '16']], ['fulfil_status_ids' => SettingsSave::STATUS_VOID], ['fulfil_status_ids' => null], 'the void status is refused in the fulfilment map'],
+            [['cancel_status_id' => '16', 'refund_status_id' => '11'], ['cancel_status_id' => SettingsSave::STATUS_VOID], ['cancel_status_id' => null, 'refund_status_id' => '11'], 'the void status is refused as the cancel status'],
+            [['cancel_status_id' => '7', 'refund_status_id' => '16'], ['refund_status_id' => SettingsSave::STATUS_VOID], ['cancel_status_id' => '7', 'refund_status_id' => null], 'the void status is refused as the refund status'],
         ];
         foreach ($cases as [$submitted, $errors, $after, $description]) {
             [$save, $store] = self::save([], null, []);
-            $result = $save->save($submitted, self::STATUSES);
+            $result = $save->save($submitted, self::STATUSES, 16);
             TinyAssert::same($errors, $result['errors'], 'fields: ' . $description);
             foreach ($after as $key => $value) {
                 TinyAssert::same($value, $store->get($key), 'fields: ' . $description . ' (' . $key . ')');
