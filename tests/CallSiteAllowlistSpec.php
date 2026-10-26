@@ -20,6 +20,7 @@ final class CallSiteAllowlistSpec
         'system/library/core/order_lifecycle.php' => true,
         'system/library/core/record_provider.php' => false,
         'system/library/core/api_key_verdict.php' => false,
+        'system/library/core/company_lookup.php' => false,
     ];
 
     public static function runAll(): void
@@ -44,7 +45,7 @@ final class CallSiteAllowlistSpec
         }
 
         $expected = [
-            'system/library/core/order_flow.php' => [3, 'OrderFlow sends order create, confirm and cancel'],
+            'system/library/core/order_flow.php' => [4, 'OrderFlow sends order intent, create, confirm and cancel'],
             'system/library/core/order_lifecycle.php' => [1, 'OrderLifecycle sends fulfil (its cancel is OrderFlow\'s)'],
         ];
         foreach ($expected as $path => [$count, $description]) {

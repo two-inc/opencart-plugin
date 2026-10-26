@@ -33,7 +33,28 @@ final class SettingsProvider
         'disable_ssl_verify' => '0',
         'debug_mode' => '0',
         'custom_headers' => '[]',
+        'company_search_in_address' => '1',
+        'enable_invoice_email' => '1',
+        'enable_po_number' => '1',
+        'enable_project' => '1',
+        'enable_department' => '1',
+        'min_order_amount' => '',
+        'min_order_basis' => '',
     ];
+
+    /**
+     * The optional buyer fields at checkout (Build Guide section 6.1), in the
+     * order the tile renders them, each with its toggle.
+     */
+    public const OPTIONAL_FIELDS = [
+        'invoice_email' => 'enable_invoice_email',
+        'purchase_order_number' => 'enable_po_number',
+        'project' => 'enable_project',
+        'department' => 'enable_department',
+    ];
+
+    public const BASIS_GROSS = 'gross';
+    public const BASIS_NET = 'net';
 
     /** The checkout title in every language the merchant has not set one for. */
     public const DEFAULT_TITLE = 'Business invoice';
@@ -98,6 +119,52 @@ final class SettingsProvider
     public function refundStatusId(): ?int
     {
         return self::statusId($this->store->get('refund_status_id'));
+    }
+
+    /**
+     * Where the company search sits (the placement switch): in the address
+     * forms (the default) or in the payment tile.
+     */
+    public function companySearchInAddressArea(): bool
+    {
+        return trim((string) ($this->store->get('company_search_in_address') ?? '1')) !== '0';
+    }
+
+    /**
+     * The optional fields switched on, in render order. A toggle with no
+     * stored value is on, as on a fresh install.
+     *
+     * @return list<string> keys of OPTIONAL_FIELDS
+     */
+    public function optionalFields(): array
+    {
+        $fields = [];
+        foreach (self::OPTIONAL_FIELDS as $field => $key) {
+            if (trim((string) ($this->store->get($key) ?? '1')) !== '0') {
+                $fields[] = $field;
+            }
+        }
+
+        return $fields;
+    }
+
+    /**
+     * The merchant's own minimum order value, in the shop's default currency,
+     * or null when none is set.
+     */
+    public function merchantMinimumOrder(): ?float
+    {
+        $value = trim((string) $this->store->get('min_order_amount'));
+
+        return is_numeric($value) && (float) $value > 0 ? (float) $value : null;
+    }
+
+    /** The basis the merchant chose for that minimum (gross or net), or null when unset. */
+    public function merchantMinimumOrderBasis(): ?string
+    {
+        $basis = trim((string) $this->store->get('min_order_basis'));
+
+        return in_array($basis, [self::BASIS_GROSS, self::BASIS_NET], true) ? $basis : null;
     }
 
     /** TLS verification is on unless the merchant switched it off (section 13.2). */

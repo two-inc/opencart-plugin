@@ -33,6 +33,14 @@ final class OrderFlow
     public const CHANGED = 'changed';
     public const UNAUTHORISED = 'unauthorised';
 
+    public const APPROVED = 'approved';
+    public const DECLINED = 'declined';
+    /** The intent could not be asked (no answer, an error, an answer without a decision). */
+    public const UNDECIDED = 'undecided';
+
+    /** What the order intent asks about: the create payload without what only an order needs. */
+    public const INTENT_KEYS = ['gross_amount', 'net_amount', 'tax_amount', 'discount_amount', 'currency', 'invoice_type', 'buyer', 'billing_address', 'shipping_address', 'line_items'];
+
     public const CALLBACK_CONFIRM = 'confirmation';
     public const CALLBACK_CANCEL = 'cancel';
 
@@ -109,6 +117,7 @@ final class OrderFlow
             'company_name' => trim((string) $company['company_name']),
             'organization_number' => trim((string) $company['organization_number']),
             'country_code' => trim((string) $company['country_code']),
+            'buyer_fields' => BuyerFields::encode(is_array($order['buyer_fields'] ?? null) ? $order['buyer_fields'] : []),
         ];
         $this->records->put($orderId, $stored);
         $record = $this->records->get($orderId) ?? [];
@@ -305,12 +314,78 @@ final class OrderFlow
      * @param array<string, mixed>       $context
      * @return array<string, mixed>
      */
-    private function payload(array $order, array $lines, array $totals, array $context, string $trigger): array
+    private function payload(array $order, array $lines, array $totals, array $context, string $trigger, string $requestType = Postprocessing::ORDER_CREATE): array
     {
         $payload = $this->builder->build($order, $lines, $totals);
         $failures = OrderBuilder::shopMatchFailures($payload, $order);
+        $intent = $requestType === Postprocessing::ORDER_INTENT;
+        $payload = $intent ? self::intentPayload($payload, $context) : $payload;
 
-        return $this->postprocessing->apply(Postprocessing::ORDER_CREATE, $trigger, '/v1/order', $payload, $context + ['order_id' => (int) $order['order_id']], $failures);
+        return $this->postprocessing->apply($requestType, $trigger, $intent ? '/v1/order_intent' : '/v1/order', $payload, $context + ['order_id' => (int) $order['order_id']], $failures);
+    }
+
+    /**
+     * The create payload cut to what the order intent asks about.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    private static function intentPayload(array $payload, array $context): array
+    {
+        $payload = array_intersect_key($payload, array_flip(self::INTENT_KEYS));
+        $shortName = $context['merchant_short_name'] ?? null;
+
+        return is_string($shortName) && $shortName !== '' ? $payload + ['merchant_short_name' => $shortName] : $payload;
+    }
+
+    /**
+     * Asks Two whether it would take this order (Build Guide section 6.3),
+     * built server-side from the shop's stored order by the same builder as
+     * the create, through the hook as `order_intent`. Only a decision counts:
+     * an outage or an error is UNDECIDED, and the order create decides.
+     *
+     * $sessionHash names the buyer's checkout session (a hex hash, never the
+     * session id itself); without one nothing is sent, since the key must
+     * never be shared between buyers.
+     *
+     * @param array<string, mixed>       $order
+     * @param list<array<string, mixed>> $lines
+     * @param list<array<string, mixed>> $totals
+     * @param array<string, mixed>       $context
+     * @return array{outcome: string, reason: string, buyer: list<string>}
+     */
+    public function intent(array $order, array $lines, array $totals, string $sessionHash, array $context = []): array
+    {
+        $orderId = (int) $order['order_id'];
+        $company = is_array($order['company'] ?? null) ? $order['company'] : [];
+        foreach (['company_name', 'organization_number', 'country_code'] as $field) {
+            if (trim((string) ($company[$field] ?? '')) === '') {
+                return ['outcome' => self::REFUSED, 'reason' => 'No company was entered.', 'buyer' => [ErrorMapper::COMPANY_REQUIRED]];
+            }
+        }
+        if (preg_match('~^[0-9a-f]{16,}\z~', $sessionHash) !== 1) {
+            return ['outcome' => self::UNDECIDED, 'reason' => 'Order intent not sent: no checkout session.', 'buyer' => []];
+        }
+        try {
+            $payload = $this->payload($order, $lines, $totals, $context, 'checkout', Postprocessing::ORDER_INTENT);
+        } catch (OrderRefused $refused) {
+            $this->logger->error('Order ' . $orderId . ': order intent not sent: ' . $refused->detail);
+
+            return ['outcome' => self::REFUSED, 'reason' => 'Order intent not sent: ' . $refused->detail, 'buyer' => [ErrorMapper::GENERIC]];
+        }
+
+        $response = $this->client->request('POST', '/v1/order_intent', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderIntent($sessionHash, self::payloadHash($payload))));
+        $body = $response->json();
+        if ($response->reachedTwo() && $response->status < 300 && is_bool($body['approved'] ?? null)) {
+            return $body['approved']
+                ? ['outcome' => self::APPROVED, 'reason' => 'Two approved the order intent.', 'buyer' => []]
+                : ['outcome' => self::DECLINED, 'reason' => 'Two declined the order intent.', 'buyer' => []];
+        }
+        $reason = $response->reachedTwo() && $response->status < 300 ? 'Two answered the order intent without a decision (HTTP ' . $response->status . ').' : 'Order intent not answered: ' . $this->errors->reason($response);
+        $this->logger->error('Order ' . $orderId . ': ' . $reason);
+
+        return ['outcome' => self::UNDECIDED, 'reason' => $reason, 'buyer' => []];
     }
 
     /**

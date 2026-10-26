@@ -1,0 +1,174 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Opencart\System\Library\Extension\Two\Core;
+
+/**
+ * The checkout's company capture calls to Two (Build Guide section 1.1),
+ * relayed by the shop so the API key never reaches the browser:
+ *
+ * - search: the company register for one country, one page of results;
+ * - supportedCountries: the countries the search covers;
+ * - soleTraderAvailable: whether the registry lets a buyer in a country
+ *   enrol as a sole trader;
+ * - soleTraderTokens: the two short-lived delegated-authority tokens the
+ *   hosted sole-trader signup takes, minted with the merchant's key. Two
+ *   answers each in the `two-delegated-authority-token` response header.
+ *   Both or neither: the browser is never handed half a flow.
+ *
+ * Nothing here is a credit decision: the order intent and the order create
+ * are. A failure is reported as one, never as an empty answer.
+ */
+final class CompanyLookup
+{
+    public const SEARCH_LIMIT = 50;
+    public const MIN_TERM_LENGTH = 3;
+    public const MAX_TERM_LENGTH = 100;
+    public const TIMEOUT_SECONDS = 10;
+    public const SOLE_TRADER = 'SOLE_TRADER';
+    public const TOKEN_HEADER = 'two-delegated-authority-token';
+    public const SIGNUP_PATH = '/soletrader/signup';
+
+    /** The two mints, each with the scopes the signup needs. */
+    private const MINTS = [
+        'delegation' => ['/registry/v1/delegation', ['create_proposal' => true, 'read_current_business' => true]],
+        'autofill' => ['/autofill/v1/delegation', ['read_current_buyer' => true, 'write_current_buyer' => true]],
+    ];
+
+    public function __construct(
+        private readonly Client $client,
+        private readonly Environment $environment,
+        private readonly SettingsProvider $settings,
+    ) {
+    }
+
+    /**
+     * Companies matching a term in one country's register, or null when the
+     * search failed (as opposed to finding nothing).
+     *
+     * @return list<array{name: string, organization_number: string, highlight: string, lookup_id: string}>|null
+     */
+    public function search(string $term, string $country): ?array
+    {
+        $term = trim($term);
+        $country = strtoupper(trim($country));
+        if (mb_strlen($term) < self::MIN_TERM_LENGTH || mb_strlen($term) > self::MAX_TERM_LENGTH || preg_match('~^[A-Z]{2}\z~', $country) !== 1) {
+            return [];
+        }
+        $query = http_build_query(['country' => $country, 'q' => $term, 'limit' => self::SEARCH_LIMIT, 'offset' => 0]);
+        $response = $this->client->request('GET', '/companies/v2/company?' . $query, null, self::TIMEOUT_SECONDS);
+        $body = $response->json();
+        if ($response->status !== 200 || $body === null || !is_array($body['items'] ?? null)) {
+            return null;
+        }
+        $companies = [];
+        foreach ($body['items'] as $item) {
+            if (!is_array($item) || !is_string($item['name'] ?? null) || trim($item['name']) === '') {
+                continue;
+            }
+            $companies[] = [
+                'name' => trim($item['name']),
+                'organization_number' => self::organizationNumber($item),
+                'highlight' => is_string($item['highlight'] ?? null) ? $item['highlight'] : '',
+                'lookup_id' => is_scalar($item['id'] ?? null) ? (string) $item['id'] : '',
+            ];
+        }
+
+        return $companies;
+    }
+
+    /**
+     * The countries the search covers, as uppercase alpha-2 codes, or null
+     * when Two did not say.
+     *
+     * @return list<string>|null
+     */
+    public function supportedCountries(): ?array
+    {
+        $response = $this->client->request('GET', '/companies/v2/supported-countries', null, self::TIMEOUT_SECONDS);
+        $body = $response->json();
+        $list = $body['supported_countries'] ?? null;
+        if ($response->status !== 200 || !is_array($list)) {
+            return null;
+        }
+        $codes = [];
+        foreach ($list as $code) {
+            $code = is_string($code) ? strtoupper(trim($code)) : '';
+            if (preg_match('~^[A-Z]{2}\z~', $code) === 1) {
+                $codes[] = $code;
+            }
+        }
+
+        return array_values(array_unique($codes));
+    }
+
+    /** Whether a buyer in this country may enrol as a sole trader; null when the registry did not answer. */
+    public function soleTraderAvailable(string $country): ?bool
+    {
+        $country = strtoupper(trim($country));
+        if (preg_match('~^[A-Z]{2}\z~', $country) !== 1) {
+            return false;
+        }
+        $response = $this->client->request('GET', '/registry/v1/supported-company-types/' . $country, null, self::TIMEOUT_SECONDS);
+        $body = $response->json();
+        $types = $body['supported_company_types'] ?? null;
+        if ($response->status !== 200 || !is_array($types)) {
+            return null;
+        }
+
+        return in_array(self::SOLE_TRADER, array_map(static fn (mixed $type): string => is_string($type) ? strtoupper($type) : '', $types), true);
+    }
+
+    /**
+     * Mints the signup's two tokens. $keyBase names this enrolment attempt
+     * for one buyer (see IdempotencyKey::soleTraderMint); null when either
+     * mint failed.
+     *
+     * @return array{delegation_token: string, autofill_token: string}|null
+     */
+    public function soleTraderTokens(string $keyBase): ?array
+    {
+        $tokens = [];
+        foreach (self::MINTS as $name => [$path, $scopes]) {
+            $response = $this->client->request('POST', $path, $scopes, self::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::soleTraderMint($name, $keyBase)));
+            $token = trim($response->headers[self::TOKEN_HEADER] ?? '');
+            if (!$response->reachedTwo() || $response->status >= 300 || $token === '') {
+                return null;
+            }
+            $tokens[$name . '_token'] = $token;
+        }
+
+        return ['delegation_token' => $tokens['delegation_token'], 'autofill_token' => $tokens['autofill_token']];
+    }
+
+    /** The hosted sole-trader signup page for the environment in force. */
+    public function signupUrl(): string
+    {
+        return $this->environment->checkoutBaseUrl($this->settings->environment()) . self::SIGNUP_PATH;
+    }
+
+    /** The API host the browser asks for the enrolled buyer (it holds the buyer's own Two session). */
+    public function apiBaseUrl(): string
+    {
+        return $this->environment->apiBaseUrl($this->settings->environment());
+    }
+
+    /** @param array<string, mixed> $item */
+    private static function organizationNumber(array $item): string
+    {
+        $identifier = $item['national_identifier'] ?? null;
+        foreach (is_array($identifier) ? ['id', 'value', 'organisationNumber', 'organizationNumber', 'registration_number', 'company_number'] : [] as $key) {
+            if (is_scalar($identifier[$key] ?? null) && trim((string) $identifier[$key]) !== '') {
+                return trim((string) $identifier[$key]);
+            }
+        }
+        foreach (['registration_number', 'company_number', 'organization_number'] as $key) {
+            if (is_scalar($item[$key] ?? null) && trim((string) $item[$key]) !== '') {
+                return trim((string) $item[$key]);
+            }
+        }
+
+        return '';
+    }
+}
