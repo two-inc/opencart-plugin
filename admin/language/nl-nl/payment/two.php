@@ -1,0 +1,235 @@
+<?php
+
+// Strings with %s take the brand's product name.
+
+// Heading
+$_['heading_title'] = 'Two';
+// The payment method title at checkout when none is set for a language: the same as the storefront file's.
+$_['text_title_default'] = 'Zakelijke factuur';
+
+// Text
+$_['text_extension'] = 'Extensies';
+$_['text_success'] = 'Instellingen opgeslagen.';
+$_['text_success_partial'] = 'De overige instellingen zijn opgeslagen.';
+$_['text_edit'] = 'Two-instellingen bewerken';
+$_['text_version'] = 'Versie';
+$_['text_coming_later'] = 'Deze instellingen komen in een latere versie.';
+$_['text_environment_production'] = 'Productie';
+$_['text_environment_sandbox'] = 'Sandbox';
+$_['text_environment_staging'] = 'Staging';
+$_['text_key_saved'] = 'Er is een sleutel opgeslagen. Laat dit veld leeg om die te behouden.';
+$_['text_key_verified'] = 'API-sleutel succesvol geverifieerd';
+$_['text_key_verifying'] = 'De API-sleutel wordt geverifieerd. Laad de pagina zo opnieuw.';
+$_['text_key_checking'] = 'API-sleutel controleren...';
+$_['text_key_kept'] = 'De eerder opgeslagen sleutel en omgeving zijn behouden.';
+$_['text_merchant_id'] = 'Merchant-ID';
+$_['text_merchant_short_name'] = 'Korte naam merchant';
+$_['text_record_fetched_at'] = 'Merchantprofiel opgehaald';
+$_['text_status_mapping_intro'] = 'Koppel %s-betaalstatussen aan bestelstatussen in OpenCart om ze in je werkproces te integreren.';
+$_['text_default_mappings'] = 'Standaardtoewijzingen:';
+$_['text_default_fulfil'] = '%s: bestelling uitgeleverd → Verzonden';
+$_['text_default_cancel'] = '%s: bestelling geannuleerd → Geannuleerd';
+$_['text_default_refund'] = '%s: bestelling terugbetaald → Terugbetaald';
+$_['text_currently_active'] = 'Momenteel actief:';
+$_['text_none_selected'] = 'Niets geselecteerd';
+
+// Tab
+$_['tab_general'] = 'Algemeen';
+$_['tab_checkout_fields'] = 'Afrekenvelden';
+$_['tab_payment_terms'] = 'Betaaltermijnen';
+$_['tab_order_management'] = 'Orderbeheer';
+$_['tab_diagnostics'] = 'Diagnostiek';
+
+// Legend
+$_['legend_status_mapping'] = 'Statustoewijzing';
+
+// Entry
+$_['entry_status'] = 'Status';
+$_['entry_sort_order'] = 'Sorteervolgorde';
+$_['entry_environment'] = 'Omgeving';
+$_['entry_api_key'] = 'API-sleutel';
+$_['entry_title'] = 'Titel';
+$_['entry_fulfil'] = '%s: bestelling uitgeleverd, triggerstatussen';
+$_['entry_cancel'] = '%s: Bestelling geannuleerd';
+$_['entry_refund'] = '%s: Bestelling terugbetaald';
+
+// Help
+$_['help_environment'] = 'Kies de %s API-omgeving die je wilt gebruiken. Productie voor echte transacties, Sandbox om te testen.';
+$_['help_api_key'] = 'Vul de API-sleutel in die je van %s hebt gekregen.';
+$_['help_title'] = 'Vul een titel in die op de afrekenpagina wordt weergegeven als titel van de betaalmethode.';
+$_['help_fulfil'] = 'Selecteer een of meer bestelstatussen die uitlevering bij %1$s moeten activeren. Zodra een van deze statussen wordt ingesteld, wordt de bestelling bij %1$s als uitgeleverd gemarkeerd. De betaaltermijnen van de koper worden actief en de uitbetalingscyclus start. Je kunt meerdere statussen selecteren (houd Ctrl/Cmd ingedrukt om meerdere te selecteren). Standaard: Verzonden';
+$_['help_cancel'] = 'De bestelling is bij %s geannuleerd. Dit voorkomt uitlevering en stopt het betaalproces. Standaard: Geannuleerd';
+$_['help_refund'] = 'Als een bestelling naar deze status gaat, wordt die volledig terugbetaald bij %s en krijgt de koper een creditnota. Standaard: Terugbetaald.';
+
+// Error
+$_['error_permission'] = 'Je hebt geen toestemming om de betaalinstellingen van Two te wijzigen.';
+$_['error_partial'] = 'Sommige instellingen zijn niet opgeslagen. Zie de gemarkeerde velden.';
+$_['error_title_missing'] = 'Vul een titel in.';
+$_['error_status_missing'] = 'Selecteer een bestelstatus.';
+$_['error_status_unknown'] = 'Selecteer een bestelstatus die deze winkel heeft.';
+$_['error_status_void'] = 'OpenCart gebruikt deze status voor bestellingen die worden bewerkt, dus deze kan niet worden gekoppeld. Selecteer een andere bestelstatus.';
+$_['error_key_missing'] = 'Vul een API-sleutel in.';
+$_['error_kept_malformed'] = 'Dit is geen geldige API-sleutel: deze mag alleen afdrukbare tekens bevatten, zonder spaties of regeleinden. De eerder opgeslagen sleutel is behouden.';
+$_['error_kept_environment'] = 'Selecteer een geldige omgeving.';
+$_['error_environment_unhealthy'] = 'De opgeslagen omgeving kan in deze winkel niet worden gebruikt, dus wordt sandbox gebruikt. Selecteer een omgeving en sla op.';
+$_['error_key_invalid'] = 'Deze API-sleutel is geweigerd door %1$s. Mogelijk is de sleutel ongeldig of verlopen - controleer de sleutel in je %1$s-portaal.';
+$_['error_key_service'] = '%s kon de API-sleutel op dit moment niet verifiëren (HTTP %d). Dit is meestal tijdelijk - probeer het straks opnieuw.';
+$_['error_key_unreachable'] = 'Deze webshop kon de %s API helemaal niet bereiken (netwerk, DNS of firewall). De API-sleutel zelf is niet beoordeeld.';
+$_['error_key_not_configured'] = 'Voer je %1$s API-sleutel in om %1$s te activeren.';
+$_['error_key_unexpected'] = '%s gaf een onverwacht antwoord bij het verifiëren van de API-sleutel (HTTP %d).';
+$_['error_key_unverified'] = 'De API-sleutel kon niet worden geverifieerd.';
+
+// Order page: the Two tab and the invoice download
+$_['text_two_order'] = 'Two-bestelling';
+$_['text_two_state'] = 'Status bij Two';
+$_['text_no_two_order'] = 'Er is geen Two-bestelling aan deze bestelling gekoppeld.';
+$_['button_invoice'] = 'Factuur downloaden';
+$_['help_invoice'] = 'De factuur die Two heeft uitgegeven toen de bestelling werd uitgeleverd.';
+$_['error_invoice_permission'] = 'Je hebt geen toestemming om deze factuur te bekijken.';
+$_['error_invoice_not_ready'] = 'De factuur is nog niet klaar omdat de bestelling nog wordt uitgeleverd. Probeer het later opnieuw.';
+$_['error_invoice_state'] = 'Er is geen factuur beschikbaar omdat de bestelling de status %s heeft.';
+$_['error_invoice_no_reference'] = 'Er is geen Two-bestelling aan deze bestelling gekoppeld.';
+$_['error_invoice'] = 'De factuur kon niet worden opgehaald. Probeer het later opnieuw.';
+
+// Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
+$_['entry_company_search_in_address'] = 'Bedrijfszoekfunctie in adresinvoer inschakelen';
+$_['help_company_search_in_address'] = 'Indien ingeschakeld, kan de koper zijn bedrijf opzoeken binnen het adresinvoergedeelte van het afrekenen. Zo niet, dan is de bedrijfszoekfunctie zichtbaar binnen de betaalmethode.';
+$_['entry_enable_invoice_email'] = 'Veld E-mailadres factuur weergeven';
+$_['help_enable_invoice_email'] = 'Als je Ja kiest, zien klanten een veld voor het e-mailadres van de factuur in het %s-betaalgedeelte tijdens het afrekenen. Het staat bij de betaalmethode in plaats van bij het adres, zodat de koper wordt aangezet om een apart factuuradres te overwegen, ook als het factuur- en verzendadres hetzelfde zijn.';
+$_['entry_enable_po_number'] = 'Veld PO-nummer weergeven';
+$_['help_enable_po_number'] = 'Als je Ja kiest, zien klanten een veld PO-nummer in het %s-betaalgedeelte tijdens het afrekenen.';
+$_['entry_enable_project'] = 'Veld Project weergeven';
+$_['help_enable_project'] = 'Als je Ja kiest, zien klanten een veld Project in het %s-betaalgedeelte tijdens het afrekenen.';
+$_['entry_enable_department'] = 'Veld Afdeling weergeven';
+$_['help_enable_department'] = 'Als je Ja kiest, zien klanten een veld Afdeling in het %s-betaalgedeelte tijdens het afrekenen.';
+$_['entry_min_order_amount'] = 'Minimale orderwaarde, %s';
+$_['help_min_order_amount'] = 'Verberg de betaalmethode onder deze orderwaarde (standaardvaluta van de winkel, op de hieronder gekozen belastinggrondslag). Laat leeg voor geen minimum.';
+$_['entry_min_order_basis'] = 'Belastinggrondslag minimale orderwaarde';
+$_['help_min_order_basis'] = 'Bepaalt of de winkelwagen inclusief of exclusief btw met het minimum wordt vergeleken.';
+$_['text_basis_default'] = 'Zoals het platformminimum (inclusief belasting als er geen is)';
+$_['text_basis_option_gross'] = 'Inclusief btw (bruto)';
+$_['text_basis_option_net'] = 'Exclusief btw (netto)';
+$_['error_switch_invalid'] = 'Kies Ja of Nee.';
+$_['error_minimum_invalid'] = 'Vul een bedrag boven nul in met maximaal twee decimalen, of laat het veld leeg.';
+$_['error_basis_invalid'] = 'Kies een belastinggrondslag uit de lijst.';
+
+// Health row (Build Guide section 18). %1$s is the provider's full name, %2$s the shop's default currency.
+$_['entry_health'] = 'Betaalmethode in de checkout';
+$_['text_health_hidden'] = 'Niet zichtbaar in de checkout';
+$_['text_health_shown'] = 'Zichtbaar in de checkout';
+$_['text_withheld_disabled'] = 'de extensie is niet ingeschakeld. Zet Status aan.';
+$_['text_withheld_no_api_key'] = 'er is geen API-sleutel opgeslagen. Controleer API-sleutel.';
+$_['text_withheld_key_rejected'] = 'de API-sleutel is geweigerd. Controleer API-sleutel en Omgeving.';
+$_['text_withheld_buyer_countries_empty'] = 'er zijn momenteel geen landen van de koper geactiveerd voor je account. Neem contact op met %1$s om ze te laten activeren.';
+$_['text_withheld_buyer_countries_malformed'] = 'de landen van de koper op je account konden niet worden gelezen. Neem contact op met %1$s.';
+$_['text_withheld_merchant_unidentified'] = 'je merchant-account is nog niet geïdentificeerd. Sla Algemeen op om de API-sleutel te verifiëren.';
+$_['text_withheld_currency'] = 'geen van de ingeschakelde valuta van de winkel kan voor facturen worden gebruikt.';
+$_['text_health_below'] = 'verborgen voor winkelwagens onder %s';
+$_['text_health_floor'] = '%1$s %2$s %3$s';
+$_['text_basis_gross'] = 'inclusief btw';
+$_['text_basis_net'] = 'exclusief btw';
+$_['text_or'] = 'of';
+$_['text_health_countries'] = 'alleen aangeboden aan kopers in %s';
+$_['text_health_currencies'] = 'verborgen voor winkelwagens in %s';
+// Order page: refunds and the credit note
+$_['button_credit_note'] = 'Creditnota downloaden';
+$_['help_credit_note'] = 'De laatste creditnota die Two voor deze bestelling heeft uitgegeven.';
+$_['error_credit_note'] = 'De creditnota kon niet worden opgehaald. Mogelijk wordt deze nog verwerkt. Probeer het later opnieuw.';
+$_['text_refund'] = 'Terugbetaling';
+$_['text_refunded'] = 'Terugbetaald bij Two';
+$_['text_remaining'] = 'Nog terug te betalen';
+$_['text_refund_help'] = 'Kies hoeveel van elke regel je terugbetaalt, vul een bedragregel in, of allebei. De status voor volledige terugbetaling betaalt terug wat er nog over is.';
+$_['text_refund_unavailable'] = 'Terugbetalingen zijn mogelijk zodra Two de bestelling heeft gefactureerd.';
+$_['text_refund_unread'] = 'Two kon niet worden geraadpleegd over deze bestelling. Laad de pagina opnieuw om het nog eens te proberen.';
+$_['text_refunds'] = 'Terugbetalingen verzonden vanuit deze winkel';
+$_['column_line'] = 'Regel';
+$_['column_quantity'] = 'Besteld';
+$_['column_net'] = 'Netto';
+$_['column_tax'] = 'Belasting';
+$_['column_rate'] = 'Belastingtarief';
+$_['column_refund_quantity'] = 'Terugbetalen';
+$_['column_date'] = 'Datum';
+$_['column_amount'] = 'Bedrag';
+$_['column_state'] = 'Resultaat';
+$_['entry_refund_net'] = 'Bedragregel, netto';
+$_['entry_refund_tax'] = 'Bedragregel, belasting';
+$_['entry_refund_rate'] = 'Bedragregel, belastingtarief';
+$_['entry_refund_reason'] = 'Reden (op de creditnota)';
+$_['button_refund'] = 'Terugbetaling naar Two sturen';
+$_['error_refund_permission'] = 'Je hebt geen toestemming om deze bestelling terug te betalen.';
+$_['error_refund_quantity'] = 'Niet terugbetaald: een aantal is geen geheel getal.';
+$_['text_refund_state_pending'] = 'Niet beantwoord';
+$_['text_refund_state_done'] = 'Terugbetaald';
+$_['text_refund_state_refused'] = 'Geweigerd';
+$_['text_refund_state_unknown'] = 'Onbekend';
+$_['text_refund_state_not_applied'] = 'Niet toegepast';
+$_['button_retry'] = 'Opnieuw proberen';
+$_['text_refund_blocked'] = 'Een terugbetaling hieronder heeft een onbekend resultaat. Probeer die opnieuw voordat je een andere terugbetaling verstuurt: die wordt opnieuw verzonden met dezelfde sleutel, zodat Two hem hooguit één keer terugbetaalt.';
+$_['column_left'] = 'Nog terug te betalen';
+$_['error_ajax'] = 'De winkel antwoordde niet zoals verwacht. Controleer de bestelgeschiedenis en het tabblad Two voordat je het opnieuw probeert.';
+
+// Diagnostics: trusted proxies for the checkout's rate limits.
+$_['entry_trusted_proxies'] = 'Vertrouwde proxy\'s';
+$_['help_trusted_proxies'] = 'Adressen van uw eigen reverse proxy\'s, load balancers of CDN-uitgang, als IP\'s of CIDR-bereiken, gescheiden door komma\'s of nieuwe regels. Deze IP-adressen worden vrijgesteld van rate limiting.';
+$_['error_proxy_invalid'] = 'Vertrouwde proxy\'s: "%s" is geen geldig IP-adres of CIDR-bereik.';
+$_['entry_disable_rate_limit'] = 'Rate limiting bij checkout uitschakelen';
+$_['help_disable_rate_limit'] = 'Verwijdert de limiet per beller op de AJAX-eindpunten van de checkout. De limiet staat standaard aan. Als deze winkel achter een CDN, load balancer of reverse proxy staat en Vertrouwde proxy\'s hierboven leeg is, arriveert elke koper als datzelfde ene adres en delen ze één limiet - kopers worden dan halverwege het afrekenen geweigerd met een te-veel-verzoeken-melding. De oplossing is Vertrouwde proxy\'s in te vullen, zodat de limiet kopers uit elkaar kan houden; schakel dit alleen tijdelijk in terwijl u die lijst verzamelt, en weer uit daarna.';
+
+// Payment terms tab (Build Guide sections 4 and 5)
+$_['text_terms_none'] = 'Het merchantprofiel biedt nog geen betaaltermijn aan, dus Two wordt niet aangeboden bij het afrekenen. Sla een geldige API-sleutel op, of controleer je termijnen in het merchantportaal van Two.';
+$_['text_days'] = '%d dagen';
+$_['text_term_type_standard'] = 'Standaard';
+$_['text_term_type_eom'] = 'Einde van de maand';
+$_['text_default_term_auto'] = 'Automatisch';
+$_['text_differential_total'] = 'Totale vergoeding voor geselecteerde termijn';
+$_['text_differential_difference'] = 'Verschil ten opzichte van standaard betaaltermijn';
+$_['text_surcharge_none'] = 'Geen toeslag';
+$_['text_surcharge_percentage'] = 'Percentage';
+$_['text_surcharge_fixed'] = 'Vast bedrag';
+$_['text_surcharge_fixed_and_percentage'] = 'Vast bedrag en percentage';
+$_['text_rounding_none'] = 'Geen';
+$_['text_rounding_up'] = 'Naar boven';
+$_['text_rounding_down'] = 'Naar beneden';
+$_['text_rounding_standard'] = 'Standaard';
+$_['text_no_rounding'] = 'Geen afronding';
+$_['legend_surcharge'] = 'Toeslag';
+$_['entry_payment_term_type'] = 'Type betaaltermijn';
+$_['entry_payment_terms'] = 'Beschikbare betaaltermijnen';
+$_['entry_default_payment_term'] = 'Standaard betaaltermijn';
+$_['entry_surcharge_type'] = 'Toeslagmethode';
+$_['entry_surcharge_differential'] = 'Basis voor toeslagberekening';
+$_['entry_surcharge_line_description'] = 'Omschrijving toeslagregel';
+$_['entry_surcharge_rounding_basis'] = 'Afronden van toeslag';
+$_['entry_surcharge_rounding_step'] = 'Afronding';
+$_['entry_surcharge_tax_class'] = 'Btw-behandeling toeslag';
+$_['entry_surcharge_grid'] = 'Toeslag per termijn';
+$_['column_term'] = 'Termijn';
+$_['column_percentage'] = 'Percentage';
+$_['column_fixed'] = 'Vast bedrag';
+$_['column_cap'] = 'Maximum';
+$_['help_payment_term_type'] = 'Standaardtermijnen lopen vanaf de uitlevering. Termijnen vanaf het einde van de maand lopen vanaf het einde van de maand waarin de bestelling wordt uitgeleverd, en bieden alleen 30, 45 en 60 dagen.';
+$_['help_payment_terms'] = 'De termijnen die je %1$s-account biedt. Kopers kiezen uit de termijnen die hier zijn aangevinkt; een nieuwe installatie vinkt 30, 60 en 90 dagen aan. Als geen van de aangevinkte termijnen wordt aangeboden, wordt %1$s niet getoond bij het afrekenen.';
+$_['help_default_payment_term'] = 'De termijn waarmee de koper begint. Automatisch gebruikt de standaardtermijn van je account als die wordt aangeboden, anders 30 dagen, anders de kortste.';
+$_['help_surcharge_type'] = 'Voeg een toeslag toe voor de betaaltermijn die de koper kiest. %s berekent de toeslag; de winkel stuurt alleen deze configuratie. Het besteltotaal Two-toeslag betaaltermijnen moet zijn ingeschakeld (Extensies > Besteltotalen).';
+$_['help_surcharge_differential'] = 'Totale vergoeding brengt de ingestelde toeslag voor de gekozen termijn in rekening. Verschil in vergoeding brengt alleen het verschil ten opzichte van de standaard betaaltermijn in rekening.';
+$_['help_surcharge_line_description'] = 'Label van de toeslagregel die de koper ziet. Gebruik %s voor de lengte van de termijn in dagen. Laat leeg voor de standaardtekst.';
+$_['help_surcharge_rounding_basis'] = 'Rond de toeslag af op een net interval. Kies Geen voor standaardbedragen met twee decimalen.';
+$_['help_surcharge_rounding_step'] = 'Het interval waarop de toeslag wordt afgerond. Geldt alleen als een afrondingsrichting is gekozen.';
+$_['help_surcharge_tax_class'] = 'De belastingklasse waartegen de toeslag wordt berekend, zoals voor elk product: de eigen belastingregels van de winkel gelden op het adres van de koper. Wil je de toeslag onbelast laten, maak dan een belastingklasse met een tarief van 0 procent en kies die. Verplicht zolang er een toeslag aan staat.';
+$_['help_surcharge_grid'] = 'Percentage is het deel van de %2$s-vergoeding dat aan de koper wordt doorberekend, van 0 tot 100. Het maximum geldt voor de hele vergoeding: het percentage en het vaste bedrag samen, niet alleen het percentage. Laat leeg voor geen maximum. Vaste bedragen en maxima zijn in %1$s en worden voor andere valuta omgerekend tegen de koersen van %2$s.';
+$_['error_term_type_unknown'] = 'Kies een type betaaltermijn uit de lijst.';
+$_['error_terms_none'] = 'Je moet minimaal één betaaltermijn selecteren.';
+$_['error_terms_unknown'] = 'Selecteer alleen termijnen die je account aanbiedt.';
+$_['error_default_term_unknown'] = 'Kies een standaard betaaltermijn uit de geselecteerde termijnen, of Automatisch.';
+$_['error_surcharge_type_unknown'] = 'Kies een toeslagmethode uit de lijst.';
+$_['error_surcharge_tax_class_missing'] = 'Selecteer een btw-behandeling voor de toeslag: toeslagen zijn ingeschakeld, dus je moet een belastingklasse kiezen voordat je opslaat.';
+$_['error_surcharge_tax_class_unknown'] = 'De btw-behandeling van de toeslag moet een van de belastingklassen van de winkel zijn. Wil je de toeslag onbelast laten, maak dan een klasse met een tarief van 0 procent.';
+$_['error_surcharge_step_unknown'] = 'De afrondingsstap moet een van de aangeboden waarden zijn.';
+$_['error_surcharge_basis_unknown'] = 'Kies een afronding van de toeslag uit de lijst.';
+$_['error_surcharge_cell_invalid'] = '%1$s voor de termijn van %2$d dagen moet een niet-negatief getal zijn.';
+$_['error_surcharge_cap_zero'] = 'Het toeslagmaximum voor de termijn van %2$d dagen mag niet 0 zijn. Wil je op deze termijn niets in rekening brengen, stel dan het percentage en het vaste bedrag in op 0 en laat het maximum leeg.';
+$_['text_health_fee_quote'] = 'de berekening van de toeslag voor betaaltermijnen mislukt sinds %s (%s), dus %s wordt niet aangeboden voor de winkelwagens waarvoor die mislukt';
+$_['text_health_fx'] = 'Wisselkoersen van %s opgehaald %s';
+$_['text_withheld_no_terms'] = 'er wordt geen betaaltermijn aangeboden: je account biedt geen van de termijnen die op het tabblad Betaaltermijnen zijn aangevinkt voor dit type termijn.';
+$_['text_withheld_fee_total_off'] = 'er is een toeslag ingesteld, maar het besteltotaal Two-toeslag betaaltermijnen is niet ingeschakeld. Schakel het in onder Extensies > Besteltotalen, of zet de toeslagmethode op Geen toeslag.';
+$_['error_surcharge_percent_range'] = '%1$s voor de termijn van %2$d dagen moet tussen 0 en 100 liggen: het is het deel van de toeslag dat aan de koper wordt doorberekend.';

@@ -1,0 +1,105 @@
+<?php
+
+// Storefront copy. %s is the brand's product name (Brand::default()).
+$_['heading_title'] = 'Two';
+// The payment method title when the merchant has set none for the language.
+$_['text_title_default'] = 'Företagsfaktura';
+
+// Tile. %s is the brand's product name.
+$_['entry_company_name'] = 'Företagsnamn';
+$_['entry_organization_number'] = 'Organisationsnummer';
+$_['entry_country'] = 'Företagets land';
+$_['text_company_intro'] = 'Sök efter företaget du handlar för.';
+// %s here is the company as the buyer reads it.
+$_['text_company_from_address'] = 'Handlar för %s.';
+$_['text_company_missing'] = 'För att betala med %s söker du efter ditt företagsnamn och väljer ditt företag i resultaten för att verifiera verksamheten.';
+$_['button_confirm'] = 'Bekräfta order';
+
+// Optional fields (Build Guide section 6.1), in the order the tile shows them.
+$_['entry_invoice_email'] = 'E-postadress för faktura';
+$_['entry_purchase_order_number'] = 'PO-nummer';
+$_['entry_project'] = 'Projekt';
+$_['entry_department'] = 'Avdelning';
+$_['text_optional'] = 'valfritt';
+$_['error_field_too_long'] = '%1$s får ha högst %2$d tecken.';
+
+// Order intent notices (section 6.3).
+$_['text_intent_approved'] = 'Din faktura hos %s kommer sannolikt att godkännas, med förbehåll för ytterligare kontroller.';
+$_['text_intent_declined'] = 'Din faktura hos %s kan inte godkännas just nu. Välj en annan betalningsmetod.';
+
+// Company search and sole trader, read by the checkout script. %1$s is the
+// brand's product name, %2$d the shortest search term.
+$_['js_search_label'] = 'Sök efter ett företag';
+$_['js_search_hint'] = 'Ange %2$d eller fler tecken';
+$_['js_searching'] = 'Söker...';
+$_['js_no_matches'] = 'Inga träffar hittades';
+$_['js_search_unavailable'] = 'Företagssökningen är tillfälligt otillgänglig. Försök igen.';
+$_['js_select_country'] = 'Välj ditt land ovan för att söka efter ditt företag.';
+$_['js_country_not_covered'] = 'Företagssökningen täcker inte det här landet. Ange ditt företag manuellt.';
+$_['js_manual_entry'] = 'Ange manuellt';
+$_['js_back_to_search'] = 'Sök efter företag';
+$_['js_sole_trader_entry'] = 'Jag har enskild firma';
+$_['js_sole_trader_error'] = 'Registreringen för enskild firma kunde inte startas. Försök igen.';
+$_['js_sole_trader_popup_blocked'] = 'Din webbläsare blockerade fönstret för registrering av enskild firma. Tillåt popup-fönster för den här webbplatsen och försök igen.';
+$_['js_change_company'] = 'Sök efter ett annat företag';
+$_['js_organization_number'] = 'Organisationsnummer';
+$_['js_checking'] = 'Kontrollerar möjligheten att betala med %1$s...';
+$_['js_selected'] = 'Vald';
+$_['js_settle_timeout'] = 'Vi sparar fortfarande dina företagsuppgifter. Försök igen om en liten stund.';
+$_['js_confirm_failed'] = 'Din order kunde inte skickas. Kontrollera anslutningen och försök igen.';
+$_['js_totals_failed'] = 'Ditt betalningsvillkor är sparat, men ordersumman kunde inte uppdateras. Ladda om sidan innan du bekräftar.';
+$_['js_number_missing'] = 'Ange ditt organisationsnummer för att fortsätta.';
+$_['error_too_many'] = 'För många förfrågningar. Vänta en stund och försök igen.';
+$_['error_forbidden'] = 'Din kassasession har ändrats. Ladda om sidan och försök igen.';
+
+// Placement refused (section 6.3): the intent, and what changed since the method list.
+$_['error_intent_connection'] = 'Anslutningsfel mot betalningsleverantören. Försök igen.';
+$_['error_intent_unavailable'] = 'Betalningsleverantören är tillfälligt otillgänglig. Försök igen senare.';
+$_['error_intent_unprocessable'] = 'Kunde inte behandla din order med %s-betalning.';
+$_['error_placement_currency'] = '%1$s är inte tillgängligt för order i %2$s. Välj en annan valuta eller betalningsmetod.';
+$_['error_placement_buyer_country'] = 'Denna betalningsmetod är inte tillgänglig.';
+$_['error_sole_trader'] = 'Registreringen för enskild firma kunde inte startas. Försök igen.';
+
+// Callbacks.
+$_['text_returning'] = 'Återvänder till butiken';
+$_['text_continue'] = 'Fortsätt';
+$_['text_cancelled'] = 'Din order är avbruten.';
+$_['text_pending'] = 'Vi bekräftar fortfarande din betalning. Vänta en minut innan du försöker igen, så att ordern inte läggs två gånger.';
+$_['text_cart_changed'] = 'Din varukorg ändrades under betalningsverifieringen. Kontrollera din varukorg och försök igen.';
+$_['text_history_prefix'] = 'Two: ';
+
+$_['error_order'] = 'Din order kunde inte hittas. Gå tillbaka till kassan och försök igen.';
+$_['error_payment_method'] = 'Välj en betalningsmetod.';
+
+// Build Guide section 6.4: the buyer never sees Two's own text.
+$_['error_two_generic'] = 'Fakturaköp med %s är inte tillgängligt för den här beställningen.';
+$_['error_two_same_company'] = 'Köpare och säljare kan inte vara samma företag';
+$_['error_two_company_required'] = 'För att betala med %s anger du företagsnamn, organisationsnummer och företagets land.';
+$_['error_two_field_phone_number'] = 'Ange ett giltigt telefonnummer för att betala mot faktura.';
+$_['error_two_field_organization_number'] = 'Ange ett giltigt organisationsnummer för att betala mot faktura.';
+$_['error_two_field_company_name'] = 'Ange ett giltigt företagsnamn för att betala mot faktura.';
+$_['error_two_field_first_name'] = 'Ange ett giltigt förnamn för att betala mot faktura.';
+$_['error_two_field_last_name'] = 'Ange ett giltigt efternamn för att betala mot faktura.';
+$_['error_two_field_email'] = 'Ange en giltig e-postadress för att betala mot faktura.';
+$_['error_two_field_address'] = 'Ange en giltig adress för att betala mot faktura.';
+$_['error_two_field_city'] = 'Ange en giltig ort för att betala mot faktura.';
+$_['error_two_field_country'] = 'Ange ett giltigt land för att betala mot faktura.';
+$_['error_two_field_postal_code'] = 'Ange ett giltigt postnummer för att betala mot faktura.';
+$_['error_two_field_invoice_email'] = 'Ange en giltig fakturaadress (e-post) för att betala mot faktura.';
+
+// Payment terms and the payment terms fee (Build Guide sections 4 and 5)
+$_['text_terms_title'] = 'Välj betalningsvillkor';
+$_['text_terms_description'] = 'Din betalningsperiod börjar när din order levereras.';
+$_['text_terms_description_eom'] = 'Betalningen förfaller i slutet av den månad ordern levereras, plus de dagar du väljer.';
+$_['text_term_days'] = '%d dagar';
+$_['text_term_eom'] = 'EOM+%d';
+$_['text_term_eom_name'] = 'EOM+%1$d: betala %1$d dagar efter månadens slut';
+$_['text_pay_in'] = 'Betala om %d dagar';
+$_['text_pay_in_eom'] = 'Betala om %d dagar från månadsskiftet';
+$_['text_fee_line'] = 'Avgift för betalningsvillkor - %d dagar';
+$_['text_fee_line_eom'] = 'Avgift för betalningsvillkor - %d dagar från månadens slut';
+$_['text_fee_plus'] = '+%s';
+$_['error_term'] = 'Det betalningsvillkoret är inte tillgängligt. Välj ett annat.';
+$_['error_placement_terms'] = 'Denna betalningsmetod är inte tillgänglig.';
+$_['error_placement_fee'] = '%s är inte tillgängligt för den här ordern just nu. Välj en annan betalningsmetod.';
+$_['error_placement_fee_changed'] = 'Avgiften för betalningsvillkor har ändrats. Kontrollera ordersumman och bekräfta igen.';
