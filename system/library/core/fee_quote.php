@@ -161,6 +161,73 @@ final class FeeQuote
     }
 
     /**
+     * The fee line an order was placed with, as stored on its record: the
+     * `two_fee` total's title, net (in the shop's default currency, as the
+     * order keeps it), tax and rate, and its tax by OpenCart tax rate id.
+     * '' when the order was placed without one.
+     *
+     * @param list<array<string, mixed>> $totals
+     */
+    public static function encodePlaced(array $totals): string
+    {
+        foreach ($totals as $total) {
+            if (($total['code'] ?? null) === 'two_fee') {
+                return (string) json_encode([
+                    'title' => (string) ($total['title'] ?? ''),
+                    'value' => (float) ($total['value'] ?? 0),
+                    'tax' => (float) ($total['tax'] ?? 0),
+                    'rate' => isset($total['rate']) ? (float) $total['rate'] : null,
+                    'tax_rates' => is_array($total['tax_rates'] ?? null) ? $total['tax_rates'] : [],
+                ]);
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * The placed fee read back, or null when there is none. An edit puts it
+     * back as it was placed (never repriced, never its tax recomputed), as
+     * the reference plugin replays a placed order's fee rows.
+     *
+     * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, float>}|null
+     */
+    public static function decodePlaced(string $stored): ?array
+    {
+        $fee = json_decode($stored, true);
+        if (!is_array($fee) || !is_numeric($fee['value'] ?? null) || (float) $fee['value'] <= 0 || !is_numeric($fee['tax'] ?? null)) {
+            return null;
+        }
+        $rates = [];
+        foreach (is_array($fee['tax_rates'] ?? null) ? $fee['tax_rates'] : [] as $id => $amount) {
+            if (is_numeric($id) && is_numeric($amount)) {
+                $rates[(int) $id] = (float) $amount;
+            }
+        }
+
+        return [
+            'title' => is_string($fee['title'] ?? null) ? $fee['title'] : '',
+            'value' => (float) $fee['value'],
+            'tax' => (float) $fee['tax'],
+            'rate' => is_numeric($fee['rate'] ?? null) ? (float) $fee['rate'] : null,
+            'tax_rates' => $rates,
+        ];
+    }
+
+    /**
+     * The fee line an admin edit puts on an existing order: the fee it was
+     * placed with, or none when it was placed without one. Never a new
+     * quote, whatever the surcharge, terms or quotes now say.
+     *
+     * @param array<string, string> $record the order's two_order row
+     * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, float>}|null
+     */
+    public static function editLine(array $record): ?array
+    {
+        return ($record['payment_fee'] ?? '') === '1' ? self::decodePlaced((string) ($record['placed_fee'] ?? '')) : null;
+    }
+
+    /**
      * Placement's term and fee check (Build Guide sections 4 and 5): why the
      * order may not be placed on its term, or null. Refused when no term is
      * offered, when the chosen term is not offered, when the fee cannot be
@@ -195,28 +262,12 @@ final class FeeQuote
      * offered term, a term that prices nothing, an empty cart); `net` is
      * null when one applies but cannot be quoted (the failure says why).
      *
-     * With $stored the term is the one an existing order was placed on, and
-     * is priced as it is, never swapped for the default: a term no longer
-     * offered, or one that no longer prices a fee, is a fee that cannot be
-     * priced (the order was placed with one).
-     *
      * @return array{applies: bool, days: int|null, net: float|null}
      */
-    public function charged(Surcharge $surcharge, PaymentTerms $terms, ?int $chosen, float $gross, string $buyerCountry, string $currency, string $shopCurrency, bool $stored = false): array
+    public function charged(Surcharge $surcharge, PaymentTerms $terms, ?int $chosen, float $gross, string $buyerCountry, string $currency, string $shopCurrency): array
     {
         $this->failure = '';
-        $days = $stored ? $chosen : $terms->selected($chosen);
-        if ($stored && $gross > 0) {
-            $this->failure = match (true) {
-                $days === null => 'the order has no stored payment term to price its payment terms fee on',
-                !$terms->offers($days) => 'the order\'s ' . $days . '-day term is no longer one the merchant record offers, so its payment terms fee cannot be priced',
-                !$surcharge->isKnown() || !$surcharge->enabled() || !$surcharge->pricesFee($days, $terms->defaultTerm(), $terms->isEndOfMonth()) => 'the surcharge no longer prices a payment terms fee for the order\'s ' . $days . '-day term',
-                default => '',
-            };
-            if ($this->failure !== '') {
-                return ['applies' => true, 'days' => $days, 'net' => null];
-            }
-        }
+        $days = $terms->selected($chosen);
         if (!$surcharge->isKnown()) {
             $this->failure = 'the stored surcharge method "' . $surcharge->type . '" is not one the plugin knows';
 
