@@ -117,79 +117,79 @@ final class OrderLifecycle
      *
      * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null $rows
      *        the order's own rows now; null when the order is gone
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     public function fulfil(int $orderId, ?array $rows): array
     {
         $record = $this->records->get($orderId);
         $twoOrderId = $record['two_order_id'] ?? '';
         if ($record === null || !OrderFlow::validTwoOrderId($twoOrderId)) {
-            return $this->refused($orderId, 'Not fulfilled: no Two order is linked to this order.');
+            return $this->refused($orderId, Message::of('note_fulfil_no_order'));
         }
         $stored = $record['two_order_state'] ?? '';
         if (in_array($stored, self::FULFILLED_STATES, true)) {
-            return self::outcome(self::SKIPPED, 'Two order ' . $twoOrderId . ' is already ' . $stored . '.');
+            return self::outcome(self::SKIPPED, Message::of('note_already', $twoOrderId, $stored));
         }
         if ($stored === 'CANCELLED') {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' is cancelled at Two, so it was not fulfilled.');
+            return $this->refused($orderId, Message::of('note_fulfil_cancelled', $twoOrderId));
         }
         if (($record['rows_hash'] ?? '') === '') {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: no record of the order as placed was kept, so it cannot be checked. Fulfil it in the Two merchant portal.');
+            return $this->refused($orderId, Message::of('note_fulfil_unhashed', $twoOrderId));
         }
         if (($record['payload_hash'] ?? '') === '') {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: whether Two holds the last edit of this order is unknown. Save the status again to send the order to Two first; if the notes show it still cannot be sent, fulfil the order in the Two merchant portal.');
+            return $this->refused($orderId, Message::of('note_fulfil_edit_unknown', $twoOrderId));
         }
         if ($rows === null || !hash_equals($record['rows_hash'], self::rowsHash($rows))) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: the order was edited after it was placed with Two. Two still holds the order as placed.');
+            return $this->refused($orderId, Message::of('note_fulfil_edited', $twoOrderId));
         }
 
         $state = $this->flow->readState($orderId, $twoOrderId);
         if ($state === null) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: Two could not be asked for its state. Save the status again to retry.');
+            return $this->refused($orderId, Message::of('note_fulfil_unread', $twoOrderId));
         }
         if (in_array($state, self::FULFILLED_STATES, true)) {
-            return self::outcome(self::ALREADY, 'Two order ' . $twoOrderId . ' is already ' . $state . '.');
+            return self::outcome(self::ALREADY, Message::of('note_already', $twoOrderId, $state));
         }
         if ($state !== 'CONFIRMED') {
-            return $this->refused($orderId, 'Two holds order ' . $twoOrderId . ' as ' . $state . ', so it was not fulfilled.');
+            return $this->refused($orderId, Message::of('note_fulfil_state', $twoOrderId, $state));
         }
 
         $path = '/v1/order/' . $twoOrderId . '/fulfillments';
         try {
             $body = $this->postprocessing->apply(Postprocessing::CAPTURE, 'status_change', $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: ' . $refused->detail);
+            return $this->refused($orderId, Message::of('note_fulfil_not_built', $twoOrderId, $refused->detail));
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::FULFIL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
-            return $this->refused($orderId, 'Two refused to fulfil order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' Save the status again to retry.');
+            return $this->refused($orderId, Message::of('note_fulfil_refused', $twoOrderId, $this->errors->reason($response)));
         }
         // Marks the fulfilment as asked for before the read back, so a repeat skips even when the read fails.
         $this->records->put($orderId, ['two_order_state' => 'FULFILLING']);
         $after = $this->flow->readState($orderId, $twoOrderId) ?? 'FULFILLING';
 
-        return self::outcome(self::DONE, 'Two order ' . $twoOrderId . ' fulfilled (' . $after . '). The invoice is on the order page under Two.');
+        return self::outcome(self::DONE, Message::of('note_fulfilled', $twoOrderId, $after));
     }
 
     /**
      * Cancels the whole Two order, and reads it back whatever the cancel
      * answered: it counts as cancelled once Two says so.
      *
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     public function cancel(int $orderId): array
     {
         $record = $this->records->get($orderId);
         $twoOrderId = $record['two_order_id'] ?? '';
         if ($record === null || !OrderFlow::validTwoOrderId($twoOrderId)) {
-            return $this->refused($orderId, 'Not cancelled: no Two order is linked to this order.');
+            return $this->refused($orderId, Message::of('note_cancel_no_two_order'));
         }
         $stored = $record['two_order_state'] ?? '';
         if ($stored === 'CANCELLED') {
-            return self::outcome(self::SKIPPED, 'Two order ' . $twoOrderId . ' is already cancelled.');
+            return self::outcome(self::SKIPPED, Message::of('note_cancel_already', $twoOrderId));
         }
         if (in_array($stored, self::FULFILLED_STATES, true)) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' is ' . $stored . ', so it was not cancelled. A fulfilled order is refunded, not cancelled.');
+            return $this->refused($orderId, Message::of('note_cancel_fulfilled', $twoOrderId, $stored));
         }
 
         ['failure' => $failure, 'status' => $status] = $this->flow->cancelOrder($twoOrderId, 'status_change', $orderId);
@@ -198,11 +198,15 @@ final class OrderLifecycle
             // 202: Two held it as cancelled already; a refusal read back as cancelled means the same.
             $already = $failure !== null || $status === 202;
 
-            return self::outcome($already ? self::ALREADY : self::DONE, 'Two order ' . $twoOrderId . ($already ? ' is already cancelled.' : ' cancelled.'));
+            return self::outcome($already ? self::ALREADY : self::DONE, Message::of($already ? 'note_cancel_already' : 'note_cancelled', $twoOrderId));
         }
 
-        return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not cancelled' . ($failure === null ? '' : ': ' . $failure) . '. Two holds it as ' . ($state ?? 'unknown') . '.'
-            . (in_array($state, self::FULFILLED_STATES, true) ? ' A fulfilled order is refunded, not cancelled.' : ' Save the status again to retry.'));
+        return $this->refused($orderId, Message::of(
+            (in_array($state, self::FULFILLED_STATES, true) ? 'note_cancel_refused_fulfilled' : 'note_cancel_refused') . ($failure === null ? '' : '_why'),
+            $twoOrderId,
+            $state ?? 'unknown',
+            ...($failure === null ? [] : [$failure]),
+        ));
     }
 
     /**
@@ -273,17 +277,17 @@ final class OrderLifecycle
         return $out;
     }
 
-    /** @return array{outcome: string, reason: string} */
-    private function refused(int $orderId, string $reason): array
+    /** @return array{outcome: string, reason: string, message: Message} */
+    private function refused(int $orderId, Message $message): array
     {
-        $this->logger->error('Order ' . $orderId . ': ' . $reason);
+        $this->logger->error('Order ' . $orderId . ': ' . $message->english());
 
-        return self::outcome(self::REFUSED, $reason);
+        return self::outcome(self::REFUSED, $message);
     }
 
-    /** @return array{outcome: string, reason: string} */
-    private static function outcome(string $outcome, string $reason): array
+    /** @return array{outcome: string, reason: string, message: Message} */
+    public static function outcome(string $outcome, Message $message): array
     {
-        return ['outcome' => $outcome, 'reason' => $reason];
+        return ['outcome' => $outcome, 'reason' => $message->english(), 'message' => $message];
     }
 }

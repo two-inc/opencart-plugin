@@ -7,6 +7,7 @@ use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Core\OrderEdit;
@@ -133,8 +134,8 @@ final class OrderStatusEventSpec
 
                 return $rows;
             },
-            static function (int $orderId, int $statusId, string $reason) use ($notes, &$event, $reenter): void {
-                $notes->list[] = $statusId . '|' . $reason;
+            static function (int $orderId, int $statusId, Message $message) use ($notes, &$event, $reenter): void {
+                $notes->list[] = $statusId . '|' . $message->english();
                 if ($reenter && $event instanceof OrderStatusEvent) {
                     $event->handle($orderId);
                 }

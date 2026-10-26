@@ -22,7 +22,7 @@ final class CoreBoundarySpec
     private const CORE_TYPES = [
         'Client', 'Environment', 'RecordProvider', 'SettingsProvider', 'Availability', 'ApiKeyVerdict', 'BuyerCountries', 'MinimumOrder', 'CompanyLookup', 'BuyerFields', 'RateLimiter',
         'OrderBuilder', 'Postprocessing', 'ErrorMapper', 'CustomHeaders', 'Brand', 'OrderFlow', 'OrderLifecycle', 'OrderRefunds', 'OrderEdit', 'IdempotencyKey', 'PaymentTerms', 'Surcharge', 'FxRates', 'FeeQuote',
-        'SettingsStore', 'SettingsOverlay', 'SettingsSave', 'Transport', 'Logger', 'HttpResponse', 'NotImplemented',
+        'SettingsStore', 'SettingsOverlay', 'SettingsSave', 'Transport', 'Logger', 'Message', 'HttpResponse', 'NotImplemented',
         'OrderRecords', 'RefundRecords', 'OrderRefused', 'PostprocessingSubscribers',
     ];
 

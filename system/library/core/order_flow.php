@@ -76,7 +76,7 @@ final class OrderFlow
      * @param list<array<string, mixed>> $lines
      * @param list<array<string, mixed>> $totals
      * @param array<string, mixed>       $context platform objects and request facts for the hook
-     * @return array{ok: true, redirect: string, two_order_id: string}|array{ok: false, buyer: non-empty-list<string>, reason: string}
+     * @return array{ok: true, redirect: string, two_order_id: string}|array{ok: false, buyer: non-empty-list<string>, reason: string, message: Message}
      */
     public function create(array $order, array $lines, array $totals, string $token, array $context = []): array
     {
@@ -84,7 +84,7 @@ final class OrderFlow
         $company = is_array($order['company'] ?? null) ? $order['company'] : [];
         foreach (['company_name', 'organization_number', 'country_code'] as $field) {
             if (trim((string) ($company[$field] ?? '')) === '') {
-                return ['ok' => false, 'buyer' => [ErrorMapper::COMPANY_REQUIRED], 'reason' => 'No company was entered.'];
+                return self::failed([ErrorMapper::COMPANY_REQUIRED], Message::of('note_no_company'));
             }
         }
         $tooLong = [];
@@ -94,13 +94,13 @@ final class OrderFlow
             }
         }
         if ($tooLong !== []) {
-            return ['ok' => false, 'buyer' => $tooLong, 'reason' => 'A company field is longer than the plugin stores.'];
+            return self::failed($tooLong, Message::of('note_company_too_long'));
         }
 
         try {
             $payload = $this->payload($order, $lines, $totals, $context, 'checkout');
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, 'Two order not created: ' . $refused->detail);
+            return $this->refused($orderId, Message::of('note_create_not_built', $refused->detail));
         }
 
         // A re-create (the buyer placed the order again) replaces the earlier
@@ -110,7 +110,7 @@ final class OrderFlow
         if ($earlierId !== '' && self::validTwoOrderId($earlierId) && ($earlier['two_order_state'] ?? '') !== 'CANCELLED') {
             $failure = $this->sendCancel($earlierId, 'order_recreate', $orderId);
             if ($failure !== null && $this->readState($orderId, $earlierId) !== 'CANCELLED') {
-                return $this->refused($orderId, 'Two order not created: the earlier Two order ' . $earlierId . ' for this order could not be cancelled (' . $failure . ').');
+                return $this->refused($orderId, Message::of('note_create_earlier_open', $earlierId, $failure));
             }
         }
 
@@ -133,25 +133,25 @@ final class OrderFlow
         $record = $this->records->get($orderId) ?? [];
         foreach ($stored as $field => $value) {
             if (($record[$field] ?? null) !== $value) {
-                return $this->refused($orderId, 'Two order not created: the two_order table did not store ' . $field . ' as given. Run the extension install again.');
+                return $this->refused($orderId, Message::of('note_create_not_stored', $field));
             }
         }
 
         $response = $this->client->request('POST', '/v1/order', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderCreate($orderId, $stored['token_hash'])));
         $body = $response->json();
         if (!$response->reachedTwo() || $response->status >= 400) {
-            return $this->refused($orderId, 'Two refused the order: ' . $this->errors->reason($response), $this->errors->buyerMessageKeys($response->status, $body));
+            return $this->refused($orderId, Message::of('note_create_refused', $this->errors->reason($response)), $this->errors->buyerMessageKeys($response->status, $body));
         }
         $twoOrderId = is_scalar($body['id'] ?? null) ? (string) $body['id'] : '';
         $paymentUrl = is_string($body['payment_url'] ?? null) ? $body['payment_url'] : '';
         if (!self::validTwoOrderId($twoOrderId)) {
-            return $this->refused($orderId, 'Two answered the order create without an order id (HTTP ' . $response->status . ').');
+            return $this->refused($orderId, Message::of('note_create_no_id', $response->status));
         }
         $this->records->put($orderId, ['two_order_id' => $twoOrderId] + self::stateFields($body));
         if (preg_match('~^https://~', $paymentUrl) !== 1) {
             $this->sendCancel($twoOrderId, 'missing_payment_url', $orderId);
 
-            return $this->refused($orderId, 'Two created order ' . $twoOrderId . ' without a payment URL, so it was cancelled.');
+            return $this->refused($orderId, Message::of('note_create_no_url', $twoOrderId));
         }
 
         return ['ok' => true, 'redirect' => $paymentUrl, 'two_order_id' => $twoOrderId];
@@ -166,17 +166,17 @@ final class OrderFlow
      *        the shop's stored order as create's inputs, given the stored record (company included); null when it is gone
      * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null $rows
      *        the order's own rows, whose hash is kept once Two holds the order as placed, for the check before fulfilment
-     * @return array{outcome: string, reason: string, two_order_id: string}
+     * @return array{outcome: string, reason: string, message: Message, two_order_id: string}
      */
     public function confirm(int $orderId, string $token, \Closure $rebuild, ?array $rows = null): array
     {
         $record = $this->authorised($orderId, $token);
         if ($record === null) {
-            return self::outcome(self::UNAUTHORISED, 'The confirmation callback carried no valid token for this order.', '');
+            return self::outcome(self::UNAUTHORISED, Message::of('note_confirm_token'), '');
         }
         $twoOrderId = $record['two_order_id'];
         if ($twoOrderId === '') {
-            return self::outcome(self::REFUSED, 'No Two order was created for this order, so there is nothing to confirm.', '');
+            return self::outcome(self::REFUSED, Message::of('note_confirm_no_order'), '');
         }
 
         $changed = $this->snapshotMismatch($record, $rebuild);
@@ -184,15 +184,15 @@ final class OrderFlow
             $this->sendCancel($twoOrderId, 'order_changed', $orderId);
             $this->readState($orderId, $twoOrderId);
 
-            return self::outcome($changed[0], 'Two order ' . $twoOrderId . ' not confirmed and cancelled: ' . $changed[1], $twoOrderId);
+            return self::outcome($changed[0], Message::of($changed[1], $twoOrderId, ...$changed[2]), $twoOrderId);
         }
 
         $state = $this->readState($orderId, $twoOrderId);
         if ($state === null) {
-            return self::outcome(self::REFUSED, 'Two could not be asked for the state of order ' . $twoOrderId . '.', $twoOrderId);
+            return self::outcome(self::REFUSED, Message::of('note_confirm_unread', $twoOrderId), $twoOrderId);
         }
         if ($state === 'CANCELLED') {
-            return self::outcome(self::CANCELLED, 'Two holds order ' . $twoOrderId . ' as cancelled.', $twoOrderId);
+            return self::outcome(self::CANCELLED, Message::of('note_confirm_cancelled', $twoOrderId), $twoOrderId);
         }
         $placed = $rows === null ? [] : ['rows_hash' => OrderLifecycle::rowsHash($rows)];
         if (in_array($state, self::PLACED_STATES, true)) {
@@ -200,25 +200,25 @@ final class OrderFlow
                 $this->records->put($orderId, $placed);
             }
 
-            return self::outcome(self::CONFIRMED, 'Two order ' . $twoOrderId . ' is ' . $state . '.', $twoOrderId);
+            return self::outcome(self::CONFIRMED, Message::of('note_confirm_already', $twoOrderId, $state), $twoOrderId);
         }
         if ($state !== 'VERIFIED') {
-            return self::outcome(self::REFUSED, 'Two holds order ' . $twoOrderId . ' as ' . $state . ', so it was not confirmed.', $twoOrderId);
+            return self::outcome(self::REFUSED, Message::of('note_confirm_state', $twoOrderId, $state), $twoOrderId);
         }
 
         $path = '/v1/order/' . $twoOrderId . '/confirm';
         try {
             $body = $this->postprocessing->apply(Postprocessing::ORDER_CONFIRM, 'buyer_return', $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
-            return self::outcome(self::REFUSED, 'Two order ' . $twoOrderId . ' not confirmed: ' . $refused->detail, $twoOrderId);
+            return self::outcome(self::REFUSED, Message::of('note_confirm_not_built', $twoOrderId, $refused->detail), $twoOrderId);
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CONFIRM, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
-            return self::outcome(self::REFUSED, 'Two refused to confirm order ' . $twoOrderId . ': ' . $this->errors->reason($response), $twoOrderId);
+            return self::outcome(self::REFUSED, Message::of('note_confirm_refused', $twoOrderId, $this->errors->reason($response)), $twoOrderId);
         }
         $this->records->put($orderId, self::stateFields($response->json() ?? []) + ['two_order_state' => 'CONFIRMED'] + $placed);
 
-        return self::outcome(self::CONFIRMED, 'Two order ' . $twoOrderId . ' confirmed.', $twoOrderId);
+        return self::outcome(self::CONFIRMED, Message::of('note_confirmed', $twoOrderId), $twoOrderId);
     }
 
     /**
@@ -226,24 +226,24 @@ final class OrderFlow
      * reads it back whatever the cancel answered: the order counts as
      * cancelled once Two says so, including when it already was.
      *
-     * @return array{outcome: string, reason: string, two_order_id: string}
+     * @return array{outcome: string, reason: string, message: Message, two_order_id: string}
      */
     public function cancel(int $orderId, string $token): array
     {
         $record = $this->authorised($orderId, $token);
         if ($record === null) {
-            return self::outcome(self::UNAUTHORISED, 'The cancel callback carried no valid token for this order.', '');
+            return self::outcome(self::UNAUTHORISED, Message::of('note_cancel_token'), '');
         }
         $twoOrderId = $record['two_order_id'];
         if ($twoOrderId === '') {
-            return self::outcome(self::CANCELLED, 'No Two order was created for this order.', '');
+            return self::outcome(self::CANCELLED, Message::of('note_cancel_no_order'), '');
         }
         $this->sendCancel($twoOrderId, 'buyer_cancel', $orderId);
         if ($this->readState($orderId, $twoOrderId) === 'CANCELLED') {
-            return self::outcome(self::CANCELLED, 'The buyer cancelled Two order ' . $twoOrderId . ' at Two.', $twoOrderId);
+            return self::outcome(self::CANCELLED, Message::of('note_cancel_by_buyer', $twoOrderId), $twoOrderId);
         }
 
-        return self::outcome(self::REFUSED, 'Two order ' . $twoOrderId . ' could not be confirmed as cancelled.', $twoOrderId);
+        return self::outcome(self::REFUSED, Message::of('note_cancel_unconfirmed', $twoOrderId), $twoOrderId);
     }
 
     /** Whether the token is the order's own, without asking Two anything. */
@@ -404,7 +404,7 @@ final class OrderFlow
      * @param list<array<string, mixed>> $lines
      * @param list<array<string, mixed>> $totals
      * @param array<string, mixed>       $context
-     * @return array{outcome: string, reason: string, buyer: list<string>}
+     * @return array{outcome: string, reason: string, message: Message, buyer: list<string>}
      */
     public function intent(array $order, array $lines, array $totals, string $sessionHash, array $context = []): array
     {
@@ -412,36 +412,36 @@ final class OrderFlow
         $company = is_array($order['company'] ?? null) ? $order['company'] : [];
         foreach (['company_name', 'organization_number', 'country_code'] as $field) {
             if (trim((string) ($company[$field] ?? '')) === '') {
-                return ['outcome' => self::REFUSED, 'reason' => 'No company was entered.', 'buyer' => [ErrorMapper::COMPANY_REQUIRED]];
+                return self::intentOutcome(self::REFUSED, Message::of('note_no_company'), [ErrorMapper::COMPANY_REQUIRED]);
             }
         }
         if (preg_match('~^[0-9a-f]{16,}\z~', $sessionHash) !== 1) {
-            return ['outcome' => self::UNDECIDED, 'reason' => 'Order intent not sent: no checkout session.', 'buyer' => [self::INTENT_UNPROCESSABLE]];
+            return self::intentOutcome(self::UNDECIDED, Message::of('note_intent_no_session'), [self::INTENT_UNPROCESSABLE]);
         }
         try {
             $payload = $this->payload($order, $lines, $totals, $context, 'checkout', Postprocessing::ORDER_INTENT);
         } catch (OrderRefused $refused) {
             $this->logger->error('Order ' . $orderId . ': order intent not sent: ' . $refused->detail);
 
-            return ['outcome' => self::REFUSED, 'reason' => 'Order intent not sent: ' . $refused->detail, 'buyer' => [ErrorMapper::GENERIC]];
+            return self::intentOutcome(self::REFUSED, Message::of('note_intent_not_built', $refused->detail), [ErrorMapper::GENERIC]);
         }
 
         $response = $this->client->request('POST', '/v1/order_intent', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderIntent($sessionHash, self::payloadHash($payload))));
         $body = $response->json();
         if ($response->reachedTwo() && $response->status < 300 && is_bool($body['approved'] ?? null)) {
             return $body['approved']
-                ? ['outcome' => self::APPROVED, 'reason' => 'Two approved the order intent.', 'buyer' => []]
-                : ['outcome' => self::DECLINED, 'reason' => 'Two declined the order intent.', 'buyer' => []];
+                ? self::intentOutcome(self::APPROVED, Message::of('note_intent_approved'), [])
+                : self::intentOutcome(self::DECLINED, Message::of('note_intent_declined'), []);
         }
-        $reason = $response->reachedTwo() && $response->status < 300 ? 'Two answered the order intent without a decision (HTTP ' . $response->status . ').' : 'Order intent not answered: ' . $this->errors->reason($response);
-        $this->logger->error('Order ' . $orderId . ': ' . $reason);
+        $message = $response->reachedTwo() && $response->status < 300 ? Message::of('note_intent_undecided', $response->status) : Message::of('note_intent_unanswered', $this->errors->reason($response));
+        $this->logger->error('Order ' . $orderId . ': ' . $message->english());
         $buyer = match (true) {
             !$response->reachedTwo() => self::INTENT_CONNECTION,
             $response->status >= 500 => self::INTENT_UNAVAILABLE,
             default => self::INTENT_UNPROCESSABLE,
         };
 
-        return ['outcome' => self::UNDECIDED, 'reason' => $reason, 'buyer' => [$buyer]];
+        return self::intentOutcome(self::UNDECIDED, $message, [$buyer]);
     }
 
     /**
@@ -460,29 +460,30 @@ final class OrderFlow
 
     /**
      * Why the shop's stored order no longer rebuilds the payload Two holds,
-     * as the outcome (CHANGED when it rebuilds to a different payload) and
-     * the reason, or null when it still does.
+     * as the outcome (CHANGED when it rebuilds to a different payload), the
+     * message key and its parameters after the Two order id, or null when it
+     * still does.
      *
      * @param array<string, string> $record
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
-     * @return array{0: string, 1: string}|null
+     * @return array{0: string, 1: string, 2: list<string>}|null
      */
     public function snapshotMismatch(array $record, \Closure $rebuild): ?array
     {
         if (($record['payload_hash'] ?? '') === '') {
-            return [self::REFUSED, 'no payload hash was stored at create.'];
+            return [self::REFUSED, 'note_confirm_no_hash', []];
         }
         $input = $rebuild($record);
         if ($input === null) {
-            return [self::REFUSED, 'the shop order can no longer be read.'];
+            return [self::REFUSED, 'note_confirm_unreadable', []];
         }
         try {
             $payload = $this->payload($input['order'], $input['lines'], $input['totals'], $input['context'] ?? [], 'snapshot_hash');
         } catch (OrderRefused $refused) {
-            return [self::REFUSED, 'the shop order no longer builds: ' . $refused->detail];
+            return [self::REFUSED, 'note_confirm_rebuild_failed', [$refused->detail]];
         }
 
-        return hash_equals($record['payload_hash'], self::payloadHash($payload)) ? null : [self::CHANGED, 'the shop order changed after the Two order was created (cart, amounts or addresses).'];
+        return hash_equals($record['payload_hash'], self::payloadHash($payload)) ? null : [self::CHANGED, 'note_confirm_changed', []];
     }
 
     /**
@@ -558,13 +559,31 @@ final class OrderFlow
 
     /**
      * @param list<string> $buyer
-     * @return array{ok: false, buyer: non-empty-list<string>, reason: string}
+     * @return array{ok: false, buyer: non-empty-list<string>, reason: string, message: Message}
      */
-    private function refused(int $orderId, string $reason, array $buyer = []): array
+    private function refused(int $orderId, Message $message, array $buyer = []): array
     {
-        $this->logger->error('Order ' . $orderId . ': ' . $reason);
+        $this->logger->error('Order ' . $orderId . ': ' . $message->english());
 
-        return ['ok' => false, 'buyer' => $buyer === [] ? [ErrorMapper::GENERIC] : $buyer, 'reason' => $reason];
+        return self::failed($buyer === [] ? [ErrorMapper::GENERIC] : $buyer, $message);
+    }
+
+    /**
+     * @param non-empty-list<string> $buyer
+     * @return array{ok: false, buyer: non-empty-list<string>, reason: string, message: Message}
+     */
+    private static function failed(array $buyer, Message $message): array
+    {
+        return ['ok' => false, 'buyer' => $buyer, 'reason' => $message->english(), 'message' => $message];
+    }
+
+    /**
+     * @param list<string> $buyer
+     * @return array{outcome: string, reason: string, message: Message, buyer: list<string>}
+     */
+    private static function intentOutcome(string $outcome, Message $message, array $buyer): array
+    {
+        return ['outcome' => $outcome, 'reason' => $message->english(), 'message' => $message, 'buyer' => $buyer];
     }
 
     /**
@@ -590,10 +609,10 @@ final class OrderFlow
     }
 
     /**
-     * @return array{outcome: string, reason: string, two_order_id: string}
+     * @return array{outcome: string, reason: string, message: Message, two_order_id: string}
      */
-    private static function outcome(string $outcome, string $reason, string $twoOrderId): array
+    private static function outcome(string $outcome, Message $message, string $twoOrderId): array
     {
-        return ['outcome' => $outcome, 'reason' => $reason, 'two_order_id' => $twoOrderId];
+        return ['outcome' => $outcome, 'reason' => $message->english(), 'message' => $message, 'two_order_id' => $twoOrderId];
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Opencart\System\Library\Extension\Two\Opencart;
 
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderEdit;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
@@ -37,7 +38,7 @@ final class OrderStatusEvent
      * @param \Closure(array<string, mixed>): array{lifecycle: OrderLifecycle, refunds: OrderRefunds, edit: OrderEdit, rebuild: \Closure, fulfil: list<int>, cancel: int|null, refund: int|null} $lifecycleFor
      *        the lifecycle, refunds, edit sync, the order rebuild for an edit, and the status maps of the order's store
      * @param \Closure(int): (array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null) $rows the order's own rows
-     * @param \Closure(int, int, string): void                                                                          $note         adds a history line at a status
+     * @param \Closure(int, int, Message): void                                                                         $note         adds a history line at a status, in the shop's language
      * @param \Closure(string): void                                                                                    $logError
      */
     public function __construct(
@@ -72,7 +73,7 @@ final class OrderStatusEvent
             $rows = ($this->rows)($orderId);
             $edit = $setup['edit']->sync($orderId, $rows, $setup['rebuild']);
             if ($edit !== null) {
-                ($this->note)($orderId, $statusId, $edit['reason']);
+                ($this->note)($orderId, $statusId, $edit['message']);
             }
             if ($action === null) {
                 return;
@@ -83,12 +84,12 @@ final class OrderStatusEvent
                 default => $setup['refunds']->remainder($orderId),
             };
             if ($result['outcome'] !== OrderLifecycle::SKIPPED) {
-                ($this->note)($orderId, $statusId, $result['reason']);
+                ($this->note)($orderId, $statusId, $result['message']);
             }
         } catch (\Throwable $error) {
-            $reason = 'The ' . ($action ?? 'status') . ' at Two failed: ' . get_class($error) . ' at ' . basename($error->getFile()) . ':' . $error->getLine() . '.';
-            ($this->logError)('Two error: order ' . $orderId . ': ' . $reason . ' ' . $error->getMessage());
-            ($this->note)($orderId, $statusId, $reason);
+            $message = Message::of('note_failed_' . ($action ?? 'status'), get_class($error), basename($error->getFile()) . ':' . $error->getLine());
+            ($this->logError)('Two error: order ' . $orderId . ': ' . $message->english() . ' ' . $error->getMessage());
+            ($this->note)($orderId, $statusId, $message);
         } finally {
             self::$running = false;
         }

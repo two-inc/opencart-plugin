@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Opencart\System\Library\Extension\Two\Core\Message;
+
 /**
  * Build Guide section 10: the catalogue completeness gate. Every language
  * file en-gb has exists in every shipped locale with exactly en-gb's keys,
@@ -30,7 +32,10 @@ final class LanguageCatalogueSpec
                 $reference[substr($file, strlen($root . '/'))] = self::load($file);
             }
         }
-        TinyAssert::true(count($reference) === 3, 'en-gb has the admin payment, admin total and catalog payment files');
+        TinyAssert::true(count($reference) === 5, 'en-gb has the payment, total and notes files for the admin, and the payment and notes files for the catalog');
+        foreach (['admin/language/en-gb/payment/two_notes.php', 'catalog/language/en-gb/payment/two_notes.php'] as $notes) {
+            TinyAssert::same(Message::TEMPLATES, $reference[$notes] ?? [], $notes . ' is the core\'s English for every message, key for key');
+        }
 
         $shipped = array_merge(['en-gb'], array_column(self::LOCALES, 'code'));
         foreach (['admin', 'catalog'] as $side) {
@@ -57,6 +62,7 @@ final class LanguageCatalogueSpec
         foreach ($reference as $path => $english) {
             foreach ($english as $key => $value) {
                 TinyAssert::true(!str_contains($value, "\u{2014}"), 'en-gb ' . $path . ' ' . $key . ': no em-dash');
+                TinyAssert::true(!self::barePercent($value) || !self::placeholders($value), 'en-gb ' . $path . ' ' . $key . ': a % is a placeholder or %%, since the string is formatted');
             }
         }
     }
@@ -65,6 +71,8 @@ final class LanguageCatalogueSpec
     {
         TinyAssert::true(trim($translated) !== '' || trim($english) === '', $case . ': filled in');
         TinyAssert::true(!str_contains($translated, "\u{2014}"), $case . ': no em-dash');
+        // sprintf throws on an unknown specifier, so a % is only ever a placeholder or %% where en-gb has no bare one.
+        TinyAssert::true(!self::barePercent($translated) || self::barePercent($english), $case . ': no bare % (write %% or "percent")');
         $expected = self::placeholders($english);
         $actual = self::placeholders($translated);
         $ordered = static fn (array $list): array => array_values(array_filter($list, static fn (string $p): bool => !str_contains($p, '$')));
@@ -72,6 +80,12 @@ final class LanguageCatalogueSpec
         sort($expected);
         sort($actual);
         TinyAssert::same($expected, $actual, $case . ': the same placeholders');
+    }
+
+    /** Whether a % is left once every placeholder and %% is taken out. */
+    private static function barePercent(string $value): bool
+    {
+        return str_contains((string) preg_replace(self::PLACEHOLDER, '', $value), '%');
     }
 
     /** @return list<string> */

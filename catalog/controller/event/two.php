@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Opencart\Catalog\Controller\Extension\Two\Event;
 
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Opencart\NoteText;
 use Opencart\System\Library\Extension\Two\Opencart\OrderStatusEvent;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
@@ -28,6 +30,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
 class Two extends \Opencart\System\Engine\Controller
 {
     private const ROUTE = 'extension/two/payment/two';
+
     private const MODEL_ROUTE = 'checkout/order.addHistory';
 
     /**
@@ -63,10 +66,11 @@ class Two extends \Opencart\System\Engine\Controller
                 ];
             },
             static fn (int $orderId): ?array => $model->orderRows($orderId),
-            function (int $orderId, int $statusId, string $reason) use ($orders): void {
-                // override skips the fraud check a second time.
+            function (int $orderId, int $statusId, Message $message) use ($orders): void {
+                // In the shop's language, whoever changed the status; override skips the fraud check a second time.
                 $this->load->language(self::ROUTE);
-                $orders->addHistory($orderId, $statusId, $this->language->get('text_history_prefix') . $reason, false, true);
+                $note = NoteText::render($message, $this->load, $this->language, (string) ($this->config->get('config_language_catalog') ?: $this->language->get('code')));
+                $orders->addHistory($orderId, $statusId, $this->language->get('text_history_prefix') . $note, false, true);
             },
             fn (string $line) => $this->log->write($line),
             (int) $this->config->get('config_void_status_id'),
