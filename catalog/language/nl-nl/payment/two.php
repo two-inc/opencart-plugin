@@ -102,4 +102,4 @@ $_['text_fee_plus'] = '+%s';
 $_['error_term'] = 'Die betaaltermijn is niet beschikbaar. Kies een andere.';
 $_['error_placement_terms'] = 'Deze betaalmethode is niet beschikbaar.';
 $_['error_placement_fee'] = '%s is op dit moment niet beschikbaar voor deze bestelling. Kies een andere betaalmethode.';
-$_['error_placement_fee_changed'] = 'De toeslag voor je betaaltermijn is gewijzigd. Controleer het totaalbedrag en bevestig opnieuw.';
+$_['error_placement_fee_changed'] = 'De vergoeding voor je betaaltermijn is gewijzigd. Controleer het totaalbedrag en bevestig opnieuw.';
