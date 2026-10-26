@@ -29,8 +29,8 @@ final class CompanyLookup
     public const SOLE_TRADER = 'SOLE_TRADER';
     public const TOKEN_HEADER = 'two-delegated-authority-token';
     public const SIGNUP_PATH = '/soletrader/signup';
-    /** A search result's lookup id, as Two issues it; nothing else is put in a path. */
-    public const LOOKUP_ID = '~^[A-Za-z0-9._:-]{1,128}\z~';
+    /** A search result's lookup id, as Two issues it (URL-safe base64): nothing else, no dot or slash, is put in a path. */
+    public const LOOKUP_ID = '~^[A-Za-z0-9][A-Za-z0-9_-]{0,127}\z~';
 
     /** The two mints, each with the scopes the signup needs. */
     private const MINTS = [
