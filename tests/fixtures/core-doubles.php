@@ -49,6 +49,11 @@ class ScriptedTransport implements Transport
 
         return array_shift($this->responses) ?? HttpResponse::unreachable('script exhausted');
     }
+
+    public function sendAll(array $requests, bool $verifyTls, int $timeoutSeconds): array
+    {
+        return array_map(fn (array $request): HttpResponse => $this->send($request['method'], $request['url'], $request['headers'], $request['body'], $verifyTls, $timeoutSeconds), $requests);
+    }
 }
 
 /** The Logger port recording every line, debug included. */

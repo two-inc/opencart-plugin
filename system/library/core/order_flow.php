@@ -127,6 +127,10 @@ final class OrderFlow
             'organization_number' => trim((string) $company['organization_number']),
             'country_code' => trim((string) $company['country_code']),
             'buyer_fields' => BuyerFields::encode(is_array($order['buyer_fields'] ?? null) ? $order['buyer_fields'] : []),
+            'payment_terms' => is_array($order['terms'] ?? null) ? (string) json_encode($order['terms']) : '',
+            // An edit puts back the fee the order was placed with, and never adds one.
+            'payment_fee' => in_array('two_fee', array_column($totals, 'code'), true) ? '1' : '0',
+            'placed_fee' => FeeQuote::encodePlaced($totals, (float) $order['currency_value'], (string) $order['currency']),
         ];
         $this->records->put($orderId, $stored);
         $record = $this->records->get($orderId) ?? [];
@@ -163,7 +167,7 @@ final class OrderFlow
      *
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
      *        the shop's stored order as create's inputs, given the stored record (company included); null when it is gone
-     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null $rows
+     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null $rows
      *        the order's own rows, whose hash is kept once Two holds the order as placed, for the check before fulfilment
      * @return array{outcome: string, reason: string, two_order_id: string}
      */
@@ -373,12 +377,12 @@ final class OrderFlow
 
     /**
      * The rebuild of a placed order from its record, for the confirm and the
-     * edit sync alike: the company and the optional buyer fields as stored
-     * with the order, so a rebuild hashes to what Two was sent. $orderInput
+     * edit sync alike: the company, the optional buyer fields and the payment
+     * terms as stored with the order, so a rebuild hashes to what Two was sent. $orderInput
      * maps the shop order with that company and those fields, without
      * callback URLs (the payload's identity leaves them out).
      *
-     * @param \Closure(array{company_name: string, organization_number: string, country_code: string}, array<string, string>): (array<string, mixed>|null) $orderInput
+     * @param \Closure(array{company_name: string, organization_number: string, country_code: string}, array<string, string>, array<string, mixed>): (array<string, mixed>|null) $orderInput
      * @return \Closure(array<string, string>): (array<string, mixed>|null)
      */
     public static function rebuildFrom(\Closure $orderInput): \Closure
@@ -387,7 +391,7 @@ final class OrderFlow
             'company_name' => $record['company_name'] ?? '',
             'organization_number' => $record['organization_number'] ?? '',
             'country_code' => $record['country_code'] ?? '',
-        ], BuyerFields::decode($record['buyer_fields'] ?? ''));
+        ], BuyerFields::decode($record['buyer_fields'] ?? ''), PaymentTerms::decode($record['payment_terms'] ?? '') ?? []);
     }
 
     /**

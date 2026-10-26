@@ -14,6 +14,7 @@ use Opencart\System\Library\Extension\Two\Opencart\DbOrderLock;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\PaymentTerms;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
@@ -38,6 +39,8 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Library\Cart\Customer $customer
  * @property-read \Opencart\System\Library\DB $db
  * @property-read \Opencart\System\Library\Log $log
+ * @property-read \Opencart\System\Library\Cart\Tax $tax
+ * @property-read \Opencart\System\Library\Cart\Currency $currency
  * @property-read \Opencart\Catalog\Model\Checkout\Order $model_checkout_order
  * @property-read \Opencart\Catalog\Model\Localisation\Country $model_localisation_country
  * @property-read \Opencart\Catalog\Model\Extension\Two\Payment\Two $model_extension_two_payment_two
@@ -88,8 +91,22 @@ class Two extends \Opencart\System\Engine\Controller
             $fields[] = ['name' => $field, 'label' => $this->language->get('entry_' . $field), 'type' => $field === 'invoice_email' ? 'email' : 'text'];
         }
         $brand = Brand::default()->productName;
+        $model = $this->model_extension_two_payment_two;
+        $terms = $services->paymentTerms();
+        $selected = $terms->selected($model->chosenTerm());
+        $eom = $terms->isEndOfMonth();
+        $chips = array_map(fn (int $days): array => [
+            'days' => $days,
+            'text' => sprintf($this->language->get($eom ? 'text_term_eom' : 'text_term_days'), $days),
+            'name' => $eom ? sprintf($this->language->get('text_term_eom_name'), $days) : '',
+        ], $terms->offered());
 
         return $this->load->view(self::ROUTE, [
+            'terms' => $chips,
+            'selected_term' => $selected,
+            'text_terms_title' => $this->language->get('text_terms_title'),
+            'text_terms_description' => $this->language->get($eom ? 'text_terms_description_eom' : 'text_terms_description'),
+            'text_pay_in' => $selected === null ? '' : sprintf($this->language->get($eom ? 'text_pay_in_eom' : 'text_pay_in'), $selected),
             'language' => $this->config->get('config_language'),
             'in_tile' => $inTile,
             'countries' => $countries,
@@ -147,14 +164,22 @@ class Two extends \Opencart\System\Engine\Controller
     }
 
     /**
-     * One placement, under the order's lock: the intent again, then the
-     * create. The buyer's notice comes back escaped.
+     * One placement, under the order's lock: the term, the intent again,
+     * then the create. The buyer's notice comes back escaped.
      *
      * @param array<string, string> $fields the optional buyer fields
      * @return array{ok: bool, redirect?: string, error?: string}
      */
     private function place(int $orderId, Services $services, array $fields): array
     {
+        $this->load->model(self::ROUTE);
+        $term = $this->model_extension_two_payment_two->placementTermRefusal($orderId);
+        if ($term !== null) {
+            // Section 4: only a term the merchant record offers, at the fee quoted for it.
+            $this->log->write('Two: order ' . $orderId . ' not placed: ' . $term['detail']);
+
+            return ['ok' => false, 'error' => htmlspecialchars(sprintf($this->language->get('error_placement_' . $term['reason']), Brand::default()->productName), ENT_QUOTES, 'UTF-8')];
+        }
         $company = $this->buyerCompany($services->settings->companySearchInAddressArea());
         $token = OrderFlow::newToken();
         $urls = [
@@ -165,7 +190,6 @@ class Two extends \Opencart\System\Engine\Controller
             'merchant_invoice_url' => '',
             'merchant_shipping_document_url' => '',
         ];
-        $this->load->model(self::ROUTE);
         $input = $this->model_extension_two_payment_two->orderInput($orderId, $company, $urls, $fields);
         $flow = $services->orderFlow($this->event);
         // Section 6.3: the intent is asked again at placement.
@@ -235,6 +259,51 @@ class Two extends \Opencart\System\Engine\Controller
             default => '',
         };
         $this->json(['outcome' => $result['outcome'], 'notice' => $notice]);
+    }
+
+    /**
+     * The buyer's term (Build Guide section 4): kept in the session for the
+     * fee total and the order, and refused unless the merchant record
+     * offers it. The script then reloads the totals, so the fee follows.
+     */
+    public function term(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->guarded(true, 'term')) {
+            return;
+        }
+        $days = $this->services()->paymentTerms()->accept($this->request->post['days'] ?? null);
+        if ($days === null) {
+            $this->json(['ok' => false, 'error' => htmlspecialchars($this->language->get('error_term'), ENT_QUOTES, 'UTF-8')]);
+
+            return;
+        }
+        $this->session->data['two_payment_term'] = $days;
+        $this->json(['ok' => true]);
+    }
+
+    /**
+     * The fee each offered term would add to this cart, for the chips: tax
+     * included when the shop shows prices with tax (config_tax), as OpenCart
+     * shows its own totals. A preview only: a term whose quote fails shows
+     * no fee, and never decides what is charged.
+     */
+    public function fees(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->guarded(false, 'fees')) {
+            return;
+        }
+        $this->load->model(self::ROUTE);
+        $model = $this->model_extension_two_payment_two;
+        $currency = $model->sessionCurrency();
+        $taxClass = $this->services()->surcharge()->taxClassId;
+        $fees = [];
+        foreach ($model->previewFees() as $days => $net) {
+            $shown = $this->tax->calculate($net, $taxClass, (bool) $this->config->get('config_tax'));
+            $fees[(string) $days] = htmlspecialchars(sprintf($this->language->get('text_fee_plus'), $this->currency->format($shown, $currency, 1.0)), ENT_QUOTES, 'UTF-8');
+        }
+        $this->json(['fees' => (object) $fees]);
     }
 
     /** The company search, relayed so the API key stays on the server. */
@@ -374,17 +443,21 @@ class Two extends \Opencart\System\Engine\Controller
         $link = fn (string $action): string => str_replace('&amp;', '&', $this->url->link(self::ROUTE . '.' . $action, 'language=' . $this->config->get('config_language')));
         $brand = Brand::default()->productName;
         $copy = [];
-        foreach (['search_label', 'search_hint', 'searching', 'no_matches', 'search_unavailable', 'select_country', 'country_not_covered', 'manual_entry', 'back_to_search', 'sole_trader_entry', 'sole_trader_error', 'sole_trader_popup_blocked', 'change_company', 'organization_number', 'checking', 'selected', 'number_missing', 'settle_timeout', 'confirm_failed'] as $key) {
+        foreach (['pay_in', 'pay_in_eom'] as $key) {
+            $copy[$key] = $this->language->get('text_' . $key);
+        }
+        foreach (['search_label', 'search_hint', 'searching', 'no_matches', 'search_unavailable', 'select_country', 'country_not_covered', 'manual_entry', 'back_to_search', 'sole_trader_entry', 'sole_trader_error', 'sole_trader_popup_blocked', 'change_company', 'organization_number', 'checking', 'selected', 'number_missing', 'settle_timeout', 'confirm_failed', 'totals_failed'] as $key) {
             $copy[$key] = sprintf($this->language->get('js_' . $key), $brand, CompanyLookup::MIN_TERM_LENGTH);
         }
 
         return [
             'token' => $this->csrfToken(),
             'in_address' => $services->settings->companySearchInAddressArea(),
-            'urls' => ['search' => $link('search'), 'countries' => $link('countries'), 'sole_trader' => $link('soleTrader'), 'sole_trader_tokens' => $link('soleTraderTokens'), 'save_company' => $link('saveCompany'), 'intent' => $link('intent'), 'company_details' => $link('companyDetails'), 'confirm' => $link('confirm')],
+            'urls' => ['search' => $link('search'), 'countries' => $link('countries'), 'sole_trader' => $link('soleTrader'), 'sole_trader_tokens' => $link('soleTraderTokens'), 'save_company' => $link('saveCompany'), 'intent' => $link('intent'), 'company_details' => $link('companyDetails'), 'confirm' => $link('confirm'), 'term' => $link('term'), 'fees' => $link('fees'), 'totals' => str_replace('&amp;', '&', $this->url->link('checkout/confirm.confirm', 'language=' . $this->config->get('config_language')))],
             'countries' => $isoById,
             'companies' => $this->state()['companies'] ?? (object) [],
             'min_length' => CompanyLookup::MIN_TERM_LENGTH,
+            'end_of_month' => $services->settings->paymentTermType() === PaymentTerms::END_OF_MONTH,
             'i18n' => $copy,
         ];
     }
@@ -484,7 +557,7 @@ class Two extends \Opencart\System\Engine\Controller
         } else {
             $this->load->model(self::ROUTE);
             $model = $this->model_extension_two_payment_two;
-            $rebuild = OrderFlow::rebuildFrom(static fn (array $company, array $fields): ?array => $model->orderInput($orderId, $company, [], $fields));
+            $rebuild = OrderFlow::rebuildFrom(static fn (array $company, array $fields, array $terms): ?array => $model->orderInput($orderId, $company, [], $fields, $terms));
             $result = $flow->confirm($orderId, $token, $rebuild, $model->orderRows($orderId));
         }
 
@@ -496,6 +569,8 @@ class Two extends \Opencart\System\Engine\Controller
         $after = OrderFlow::afterCallback($kind, $result['outcome'], $order && !$this->unplaced($order));
         if ($after['place']) {
             $this->model_checkout_order->addHistory($orderId, (int) $this->config->get('config_order_status_id'), $this->language->get('text_history_prefix') . $result['reason']);
+            // The buyer's next checkout starts on the default chain again.
+            unset($this->session->data['two_payment_term'], $this->session->data['two_fee_quotes']);
         } elseif ($after['note']) {
             $this->note($orderId, $result['reason']);
         }

@@ -20,7 +20,7 @@ final class DbOrderRecords implements OrderRecords
     public const TABLE = 'two_order';
 
     /** Columns added after the table first shipped, added in place by install() rather than renaming the table aside. */
-    public const ADDED_COLUMNS = ['rows_hash' => "CHAR(64) NOT NULL DEFAULT ''", 'edit_key' => "VARCHAR(100) NOT NULL DEFAULT ''", 'edit_refused_hash' => "CHAR(64) NOT NULL DEFAULT ''", 'buyer_fields' => "TEXT NULL"];
+    public const ADDED_COLUMNS = ['rows_hash' => "CHAR(64) NOT NULL DEFAULT ''", 'edit_key' => "VARCHAR(100) NOT NULL DEFAULT ''", 'edit_refused_hash' => "CHAR(64) NOT NULL DEFAULT ''", 'buyer_fields' => "TEXT NULL", 'payment_terms' => "VARCHAR(255) NOT NULL DEFAULT ''", 'payment_fee' => "CHAR(1) NOT NULL DEFAULT ''", 'placed_fee' => "TEXT NULL"];
 
     /** @var list<string>|null */
     private ?array $columns = null;
@@ -78,6 +78,9 @@ final class DbOrderRecords implements OrderRecords
             . '`country_code` CHAR(2) NOT NULL DEFAULT \'\','
             . '`rows_hash` CHAR(64) NOT NULL DEFAULT \'\','
             . '`buyer_fields` TEXT NULL,'
+            . '`payment_terms` VARCHAR(255) NOT NULL DEFAULT \'\','
+            . '`payment_fee` CHAR(1) NOT NULL DEFAULT \'\','
+            . '`placed_fee` TEXT NULL,'
             . '`edit_key` VARCHAR(100) NOT NULL DEFAULT \'\','
             . '`edit_refused_hash` CHAR(64) NOT NULL DEFAULT \'\','
             . '`date_added` DATETIME NOT NULL,'

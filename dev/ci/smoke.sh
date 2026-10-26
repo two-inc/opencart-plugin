@@ -95,6 +95,11 @@ ok "install() registered the record refresh cron"
 lifecycle() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(\`trigger\`, '|', action, '|', status) FROM oc_event WHERE code = 'two_order_lifecycle'"; }
 [ "$(lifecycle)" = 'catalog/model/checkout/order.addHistory/after|extension/two/event/two.history|1' ] || fail "install() did not register the order lifecycle event (got '$(lifecycle)')"
 ok "install() registered the order lifecycle event"
+feetotal() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(e.extension, '|', (SELECT value FROM oc_setting WHERE \`key\` = 'total_two_fee_status' AND store_id = 0), '|', (SELECT value FROM oc_setting WHERE \`key\` = 'total_two_fee_sort_order' AND store_id = 0)) FROM oc_extension e WHERE e.type = 'total' AND e.code = 'two_fee'"; }
+[ "$(feetotal)" = 'two|1|4' ] || fail "install() did not install and enable the payment terms fee total (got '$(feetotal)')"
+ok "install() installed the payment terms fee total, enabled, before Taxes"
+contains "fee total admin page" "$(admin 'extension/two/total/two_fee')" 'Two payment terms fee'
+contains "Payment terms tab" "$(admin 'extension/two/payment/two')" 'payment_two_surcharge_tax_class_id'
 
 # configure.php: puts the extension back, is idempotent, refuses a bad environment.
 configure > /dev/null
@@ -109,6 +114,10 @@ docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_event WHERE
 configure > /dev/null
 [ "$(lifecycle)" = 'catalog/model/checkout/order.addHistory/after|extension/two/event/two.history|1' ] || fail "configure.php did not register the order lifecycle event"
 ok "configure.php registers the order lifecycle event"
+docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_extension WHERE type = 'total' AND code = 'two_fee'; DELETE FROM oc_setting WHERE code = 'total_two_fee'"
+configure > /dev/null
+[ "$(feetotal)" = 'two|1|4' ] || fail "configure.php did not install the payment terms fee total (got '$(feetotal)')"
+ok "configure.php installs the payment terms fee total"
 if configure -e TWO_ENVIRONMENT=bogus > /dev/null 2>&1; then fail "configure.php accepted TWO_ENVIRONMENT=bogus"; fi
 ok "configure.php refuses an unknown environment"
 
@@ -175,6 +184,14 @@ contains "the checkout page carries the capture settings" "$checkout_page" 'id="
 contains "the checkout page loads the capture script" "$checkout_page" 'two_checkout.js?v='
 contains "the company search refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.search&language=en-gb&q=acme&country=GB&two_token=wrong")" '"error":"forbidden"'
 contains "the token mint refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.soleTraderTokens&language=en-gb")" '"error":"forbidden"'
+two_token=$(printf '%s' "$checkout_page" | grep -o '"token":"[0-9a-f]*"' | head -1 | cut -d'"' -f4)
+# The term and fee relays, with no key so no merchant record is fetched: no term is offered and no surcharge is set.
+store api_key ''
+contains "the term save refuses a request without the session's token" "$(curl -s -b "$shopper" -X POST -d 'days=30' "$base/index.php?route=extension/two/payment/two.term&language=en-gb")" '"error":"forbidden"'
+contains "the term save refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.term&language=en-gb&days=30&two_token=$two_token")" '"error":"forbidden"'
+contains "the term save refuses a term the merchant record does not offer" "$(curl -s -c "$shopper" -b "$shopper" -X POST -d "days=30&two_token=$two_token" "$base/index.php?route=extension/two/payment/two.term&language=en-gb")" '"ok":false'
+contains "the fee preview refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.fees&language=en-gb")" '"error":"forbidden"'
+contains "the fee preview answers with no surcharge set" "$(curl -s -c "$shopper" -b "$shopper" "$base/index.php?route=extension/two/payment/two.fees&language=en-gb&two_token=$two_token")" '"fees":{}'
 rm -f "$shopper"
 store api_key ''
 contains "the health row names why Two is not shown" "$(admin extension/two/payment/two)" 'Not shown at checkout - no API key is saved.'

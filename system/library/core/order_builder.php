@@ -23,7 +23,8 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   order's tax rows, so the adapter reproduces the merchant's own
  *   computation, and the default handler's shop-match check refuses the
  *   order unless the lines add up to the tax and total the shop actually
- *   charged. Tax is never invented;
+ *   charged. Tax is never invented. The payment terms fee (`two_fee`) is
+ *   one of them, at the tax class the merchant selected for it;
  * - discount totals (coupon, reward points) are pre-tax: the shop takes
  *   their tax off its tax rows, so their tax is what the stored tax total
  *   leaves once every other line is counted. A discount cannot add tax,
@@ -41,7 +42,7 @@ namespace Opencart\System\Library\Extension\Two\Core;
 final class OrderBuilder
 {
     /** Totals that add a taxed charge, and the Two line type each becomes. */
-    public const CHARGE_CODES = ['shipping' => 'SHIPPING_FEE', 'handling' => 'SERVICE', 'low_order_fee' => 'SERVICE'];
+    public const CHARGE_CODES = ['shipping' => 'SHIPPING_FEE', 'handling' => 'SERVICE', 'low_order_fee' => 'SERVICE', 'two_fee' => 'SERVICE'];
     public const DISCOUNT_CODES = ['coupon', 'reward'];
     public const POST_TAX_CODES = ['credit', 'voucher'];
     /** Totals the payload already states through its lines. */
@@ -58,7 +59,10 @@ final class OrderBuilder
      *     buyer: array{email: string, first_name: string, last_name: string, phone_number: string},
      *     billing_address: array<string, string>, shipping_address?: array<string, string>|null,
      *     merchant_urls: array<string, string>,
-     *     buyer_fields?: array<string, string>
+     *     buyer_fields?: array<string, string>,
+     *     terms?: array<string, mixed>|null,
+     *     fee_refusal?: string,
+     *     currency_refusal?: string
      * } $order
      * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string}> $lines
      * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool}> $totals
@@ -71,6 +75,10 @@ final class OrderBuilder
         $fx = (float) $order['currency_value'];
         if ($fx <= 0) {
             throw OrderRefused::because('currency_value', 'The order has no usable currency value.');
+        }
+        // A rebuilt order whose currency an edit changed from the one it was placed in (the adapter says why).
+        if (($order['currency_refusal'] ?? '') !== '') {
+            throw OrderRefused::because('currency_changed', $order['currency_refusal']);
         }
         if ($lines === []) {
             throw OrderRefused::because('empty_order', 'The order has no product lines.');
@@ -97,6 +105,10 @@ final class OrderBuilder
             } else {
                 throw OrderRefused::because('unsupported_total', 'The order total "' . $code . '" is not one the plugin can send.');
             }
+        }
+        // A rebuilt order placed with a payment terms fee whose fee line is gone (the adapter says why).
+        if (($order['fee_refusal'] ?? '') !== '') {
+            throw OrderRefused::because('fee_missing', $order['fee_refusal']);
         }
         if ($discounts !== []) {
             $items[] = self::discountLine($discounts, $items, self::cents($order['tax_total'], $fx), $fx);
@@ -147,6 +159,10 @@ final class OrderBuilder
             if (trim((string) ($fields[$field] ?? '')) !== '') {
                 $payload[$key] = trim((string) $fields[$field]);
             }
+        }
+        // Section 4: the term the buyer chose, as the order is booked on it.
+        if (is_array($order['terms'] ?? null) && $order['terms'] !== []) {
+            $payload['terms'] = $order['terms'];
         }
         if (trim((string) ($fields['invoice_email'] ?? '')) !== '') {
             $payload['invoice_details'] = ['invoice_emails' => [trim((string) $fields['invoice_email'])]];

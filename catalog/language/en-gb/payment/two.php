@@ -46,6 +46,7 @@ $_['js_selected'] = 'Selected';
 $_['js_settle_timeout'] = 'We are still saving your company details. Please try again in a moment.';
 $_['js_confirm_failed'] = 'We could not hear back about your order. It may still be processing: please wait a moment and check your order history before trying again.';
 $_['error_order_in_progress'] = 'Your order is still being placed. Please wait a moment and check your order history before trying again.';
+$_['js_totals_failed'] = 'Your payment term is saved, but the order total could not be updated. Please reload the page before you confirm.';
 $_['js_number_missing'] = 'Enter your organisation number to continue.';
 $_['error_too_many'] = 'Too many requests. Please wait and try again.';
 
@@ -83,3 +84,20 @@ $_['error_two_field_city'] = 'Please enter a valid City to pay on invoice';
 $_['error_two_field_country'] = 'Please enter a valid Country to pay on invoice';
 $_['error_two_field_postal_code'] = 'Please enter a valid Postal code to pay on invoice';
 $_['error_two_field_invoice_email'] = 'Please enter a valid Invoice email address to pay on invoice';
+
+// Payment terms and the payment terms fee (Build Guide sections 4 and 5)
+$_['text_terms_title'] = 'Choose your payment terms';
+$_['text_terms_description'] = 'Your payment period starts when your order is fulfilled.';
+$_['text_terms_description_eom'] = 'Payment is due at the end of the month your order is fulfilled in, plus the days you choose.';
+$_['text_term_days'] = '%d days';
+$_['text_term_eom'] = 'EOM+%d';
+$_['text_term_eom_name'] = 'EOM+%1$d: pay %1$d days after the end of the month';
+$_['text_pay_in'] = 'Pay in %d days';
+$_['text_pay_in_eom'] = 'Pay in %d days from end of month';
+$_['text_fee_line'] = 'Payment terms fee - %d days';
+$_['text_fee_line_eom'] = 'Payment terms fee - %d days from end of month';
+$_['text_fee_plus'] = '+%s';
+$_['error_term'] = 'That payment term is not available. Please choose another.';
+$_['error_placement_terms'] = 'This payment method is not available.';
+$_['error_placement_fee'] = '%s is not available for this order right now. Please choose another payment method.';
+$_['error_placement_fee_changed'] = 'Your payment terms fee changed. Please review your order total and confirm again.';

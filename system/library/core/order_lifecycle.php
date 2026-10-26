@@ -97,7 +97,7 @@ final class OrderLifecycle
      * stores them; row ids are left out (OpenCart rewrites the rows on an
      * edit) and rows are sorted, so only a change of content counts.
      *
-     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>} $rows
+     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string} $rows
      */
     public static function rowsHash(array $rows): string
     {
@@ -115,7 +115,7 @@ final class OrderLifecycle
     /**
      * Fulfils the whole Two order.
      *
-     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null $rows
+     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null $rows
      *        the order's own rows now; null when the order is gone
      * @return array{outcome: string, reason: string}
      */
@@ -138,6 +138,11 @@ final class OrderLifecycle
         }
         if (($record['payload_hash'] ?? '') === '') {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: whether Two holds the last edit of this order is unknown. Save the status again to send the order to Two first; if the notes show it still cannot be sent, fulfil the order in the Two merchant portal.');
+        }
+        // Before the rows, which a currency-only edit leaves alike (OpenCart keeps them in the default currency).
+        $currency = FeeQuote::currencyChange($record, (string) ($rows['currency'] ?? ''), 'save the status again');
+        if ($currency !== null) {
+            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: ' . $currency);
         }
         if ($rows === null || !hash_equals($record['rows_hash'], self::rowsHash($rows))) {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: the order was edited after it was placed with Two. Two still holds the order as placed.');

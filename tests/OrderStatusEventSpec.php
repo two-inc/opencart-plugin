@@ -6,10 +6,11 @@ use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
+use Opencart\System\Library\Extension\Two\Core\FeeQuote;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
-use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Core\OrderEdit;
+use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
@@ -62,6 +63,8 @@ final class OrderStatusEventSpec
     {
         $two = static fn (string $state, array $refunds): HttpResponse => new HttpResponse(200, (string) json_encode(['id' => self::ID, 'state' => $state, 'currency' => 'NOK', 'gross_amount' => '250.00', 'refunds' => $refunds]));
         $read = 'GET /v1/order/' . self::ID;
+        $changed = 'the order was placed with Two in NOK and its currency is now EUR. Two keeps an order in the currency it was placed in: set the order\'s currency back to NOK and ';
+        $editNote = 'The edit to this order was not sent to Two: ' . $changed . 'save it again to send the edit.';
         $cases = [
             ['status' => 11, 'stored' => 'FULFILLED', 'edited' => false, 'responses' => [$two('FULFILLED', []), new HttpResponse(201, '{"id":"r1"}'), $two('REFUNDED', [['id' => 'r1', 'total_amount' => '-250.00']])],
                 'calls' => [$read, 'POST /v1/order/' . self::ID . '/refund', $read], 'notes' => ['11|Two refunded 250.00 NOK on order ' . self::ID . '. The credit note is on the order page under Two.'], 'description' => 'the mapped refund status refunds the rest, noted'],
@@ -69,13 +72,23 @@ final class OrderStatusEventSpec
                 'calls' => [$read], 'notes' => ['3|The edit to this order was not sent to Two: the order can no longer be read.', '3|Two order ' . self::ID . ' not fulfilled: the order was edited after it was placed with Two. Two still holds the order as placed.'], 'description' => 'an edit that cannot be sent is noted, and the fulfil then refuses'],
             ['status' => 2, 'stored' => 'FULFILLED', 'edited' => true, 'responses' => [],
                 'calls' => [], 'notes' => ['2|Two has invoiced all or part of order ' . self::ID . ', so this order\'s edit was not sent to Two. Two invoices the order as it holds it; refund any difference from the Two tab.'], 'description' => 'an edit after fulfilment is refused with a note, even at an unmapped status'],
+            ['status' => 3, 'stored' => 'CONFIRMED', 'edited' => false, 'currency' => 'EUR', 'responses' => [],
+                'calls' => [], 'notes' => ['3|' . $editNote, '3|Two order ' . self::ID . ' not fulfilled: ' . $changed . 'save the status again.'], 'description' => 'a currency-only edit (the rows alike, in the default currency): the edit and the fulfil are both refused with the currency, nothing asked'],
+            ['status' => 7, 'stored' => 'CONFIRMED', 'edited' => false, 'currency' => 'EUR', 'responses' => [new HttpResponse(200, '{}'), new HttpResponse(200, '{"state":"CANCELLED"}')],
+                'calls' => ['POST /v1/order/' . self::ID . '/cancel', $read], 'notes' => ['7|' . $editNote, '7|Two order ' . self::ID . ' cancelled.'], 'description' => 'a currency-only edit then the cancel status: the edit is refused, the cancel still goes through'],
+            ['status' => 3, 'stored' => 'CONFIRMED', 'edited' => false, 'currency' => 'NOK', 'responses' => [new HttpResponse(200, '{"state":"CONFIRMED","status":"APPROVED"}'), new HttpResponse(201, '{}'), new HttpResponse(200, '{"state":"FULFILLED","status":"APPROVED"}')],
+                'calls' => [$read, 'POST /v1/order/' . self::ID . '/fulfillments', $read], 'notes' => 'fulfilled', 'description' => 'the currency switched back: no edit to send, and the fulfil goes through'],
         ];
         foreach ($cases as $case) {
-            $shop = self::shop('two.two', $case['status'], $case['stored'], $case['responses'], 7, refundStatus: 11, edited: $case['edited']);
+            $shop = self::shop('two.two', $case['status'], $case['stored'], $case['responses'], 7, refundStatus: 11, edited: $case['edited'], currency: $case['currency'] ?? '');
             $shop['event']->handle(42);
             $d = 'status event: ' . $case['description'];
             TinyAssert::same($case['calls'], self::calls($shop['transport']), $d . ': requests');
-            TinyAssert::same($case['notes'], $shop['notes']->list, $d . ': history notes');
+            if ($case['notes'] === 'fulfilled') {
+                TinyAssert::true(count($shop['notes']->list) === 1 && str_contains($shop['notes']->list[0], 'fulfil') && !str_contains($shop['notes']->list[0], 'not fulfilled'), $d . ': only the fulfilment is noted');
+            } else {
+                TinyAssert::same($case['notes'], $shop['notes']->list, $d . ': history notes');
+            }
         }
     }
 
@@ -106,11 +119,12 @@ final class OrderStatusEventSpec
      * @param list<HttpResponse> $responses
      * @return array{event: OrderStatusEvent, transport: ScriptedTransport, notes: LineLog, errors: LineLog}
      */
-    private static function shop(string $code, int $status, string $stored, array $responses, int $cancelStatus, bool $reenter = false, bool $throwRows = false, ?int $refundStatus = null, bool $edited = false): array
+    private static function shop(string $code, int $status, string $stored, array $responses, int $cancelStatus, bool $reenter = false, bool $throwRows = false, ?int $refundStatus = null, bool $edited = false, string $currency = ''): array
     {
         $placed = ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => []];
-        $rows = $edited ? ['products' => [['product_id' => '7', 'quantity' => '3']], 'totals' => [], 'addresses' => []] : $placed;
-        $records = new MemoryRecords([42 => ['two_order_id' => self::ID, 'two_order_state' => $stored, 'payload_hash' => str_repeat('a', 64), 'rows_hash' => OrderLifecycle::rowsHash($placed)]]);
+        // The order's currency now (placed in NOK); none given leaves it unjudged.
+        $rows = ($edited ? ['products' => [['product_id' => '7', 'quantity' => '3']], 'totals' => [], 'addresses' => []] : $placed) + ($currency === '' ? [] : ['currency' => $currency]);
+        $records = new MemoryRecords([42 => ['two_order_id' => self::ID, 'two_order_state' => $stored, 'payload_hash' => str_repeat('a', 64), 'rows_hash' => OrderLifecycle::rowsHash($placed), 'placed_fee' => FeeQuote::encodePlaced([], 11.5, 'NOK')]]);
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
         $client = new Client(new Environment(false), new SettingsProvider(new MemoryStore(['api_key' => 'key-0123456789', 'environment' => 'sandbox'])), new CustomHeaders(), $transport, $logger, '1.0.0');

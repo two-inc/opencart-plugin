@@ -2,7 +2,7 @@
 
 The Two payment extension for OpenCart 4.1: pay by invoice for business buyers.
 
-**Status: being rewritten.** This branch holds the new OpenCart 4.1 foundation. It installs, appears under Extensions > Payments and offers Two at checkout with company search; payment terms, the surcharge and more languages are still to come. The 1.x releases for OpenCart 3 call API hosts that no longer exist, so they cannot reach Two.
+**Status: being rewritten.** This branch holds the new OpenCart 4.1 foundation. It installs, appears under Extensions > Payments and offers Two at checkout with company search, payment terms and the payment terms fee; more languages are still to come. The 1.x releases for OpenCart 3 call API hosts that no longer exist, so they cannot reach Two.
 
 ## Requirements
 
@@ -26,6 +26,10 @@ make archive           # dist/two.ocmod.zip
 ```
 
 `make help` lists every target. See [AGENTS.md](AGENTS.md) for the layout and conventions.
+
+## Payment terms and the fee
+
+The buyer chooses from the payment terms your Two account offers; the Payment terms tab narrows them and sets the default. To pass Two's fee on to the buyer, set a surcharge per term there and select the tax class it is charged at: the fee is an order total (Extensions > Order Totals > Two payment terms fee), taxed by your shop's own tax rules like any other charge. Keep its sort order before Taxes.
 
 ## Order lifecycle
 

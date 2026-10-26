@@ -16,7 +16,8 @@ declare(strict_types=1);
  * straight against the database, because neither step has a CLI entry point:
  * the extension_install and extension rows, the admin permissions for the
  * extension's route, the payment_two settings (status forced on), the
- * record refresh cron, the order lifecycle event and the two_order table.
+ * record refresh cron, the order lifecycle event, the payment terms fee
+ * order total (installed and enabled) and the two_order table.
  *
  * Environment:
  *   OPENCART_DIR     shop root holding config.php (default /var/www/html)
@@ -45,6 +46,7 @@ require __DIR__ . '/autoload.php';
 
 const TWO_CODE = 'two';
 const TWO_ROUTE = 'extension/two/payment/two';
+const TWO_FEE_ROUTE = 'extension/two/total/two_fee';
 const TWO_SETTING_CODE = 'payment_two';
 
 function say(string $message): void
@@ -122,15 +124,30 @@ foreach (query($db, "SELECT `user_group_id`, `permission` FROM `{$p}user_group`"
         continue;
     }
     $changed = false;
-    foreach (['access', 'modify'] as $type) {
-        if (!in_array(TWO_ROUTE, $permission[$type] ?? [], true)) {
-            $permission[$type][] = TWO_ROUTE;
-            $changed = true;
+    foreach ([TWO_ROUTE, TWO_FEE_ROUTE] as $route) {
+        foreach (['access', 'modify'] as $type) {
+            if (!in_array($route, $permission[$type] ?? [], true)) {
+                $permission[$type][] = $route;
+                $changed = true;
+            }
         }
     }
     if ($changed) {
         query($db, "UPDATE `{$p}user_group` SET `permission` = ? WHERE `user_group_id` = ?", [(string) json_encode($permission), (string) $group['user_group_id']]);
-        say('granted ' . TWO_ROUTE . ' to user group ' . $group['user_group_id']);
+        say('granted ' . TWO_ROUTE . ' and ' . TWO_FEE_ROUTE . ' to user group ' . $group['user_group_id']);
+    }
+}
+
+// 3a. The payment terms fee order total, installed and enabled as install() does; its sort order only where none is stored.
+if (query($db, "SELECT `extension_id` FROM `{$p}extension` WHERE `type` = 'total' AND `code` = ?", [Services::FEE_TOTAL_CODE]) === []) {
+    query($db, "INSERT INTO `{$p}extension` SET `extension` = ?, `type` = 'total', `code` = ?", [TWO_CODE, Services::FEE_TOTAL_CODE]);
+    say('registered total ' . Services::FEE_TOTAL_CODE);
+}
+foreach (['status' => '1', 'sort_order' => Services::FEE_TOTAL_SORT_ORDER] as $key => $value) {
+    $settingKey = 'total_' . Services::FEE_TOTAL_CODE . '_' . $key;
+    if (query($db, "SELECT `value` FROM `{$p}setting` WHERE `store_id` = 0 AND `key` = ?", [$settingKey]) === []) {
+        query($db, "INSERT INTO `{$p}setting` SET `store_id` = 0, `code` = ?, `key` = ?, `value` = ?, `serialized` = 0", ['total_' . Services::FEE_TOTAL_CODE, $settingKey, $value]);
+        say('set ' . $settingKey . ' = ' . $value);
     }
 }
 

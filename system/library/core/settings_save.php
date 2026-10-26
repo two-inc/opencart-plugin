@@ -43,6 +43,10 @@ final class SettingsSave
     public const MINIMUM_INVALID = 'minimum_invalid';
     public const BASIS_INVALID = 'basis_invalid';
     public const PROXY_INVALID = 'proxy_invalid';
+    public const TERM_TYPE_UNKNOWN = 'term_type_unknown';
+    public const TERMS_NONE = 'terms_none';
+    public const TERMS_UNKNOWN = 'terms_unknown';
+    public const DEFAULT_TERM_UNKNOWN = 'default_term_unknown';
 
     /** The on/off settings: the placement switch and the optional field toggles (Checkout fields), and the rate-limit switch (Diagnostics). */
     public const SWITCHES = ['company_search_in_address', 'enable_invoice_email', 'enable_po_number', 'enable_project', 'enable_department', 'disable_rate_limit'];
@@ -62,15 +66,24 @@ final class SettingsSave
      * Validates and writes the submitted settings in one write, then brings
      * the verdict (and, for new credentials, the merchant record) up to date.
      *
-     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string} $submitted
+     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string, payment_term_type?: string, payment_terms?: list<string>, default_payment_term?: string, surcharge_type?: string, surcharge_differential?: string, surcharge_rounding_basis?: string, surcharge_rounding_step?: string, surcharge_line_description?: string, surcharge_tax_class_id?: string, surcharge_grid?: array<int|string, array<string, string>>} $submitted
      * @param list<int> $orderStatusIds the shop's order statuses, which the maps may name
      * @param int       $voidStatusId   the shop's void status (0 for none), which no map may name
+     * @param list<int> $taxClassIds    the shop's tax classes, which the surcharge's tax class must be one of
      * @return array{errors: array<string, string>, credentials: string|null, status: string|null, code: int|null}
      */
-    public function save(array $submitted, array $orderStatusIds, int $voidStatusId): array
+    public function save(array $submitted, array $orderStatusIds, int $voidStatusId, array $taxClassIds = []): array
     {
         $write = [];
         $errors = [];
+
+        // The Payment terms tab reads the merchant record's terms; other saves never ask for it.
+        if (array_intersect_key($submitted, array_flip(['payment_term_type', 'payment_terms', 'default_payment_term', 'surcharge_type'])) !== []) {
+            [$termWrite, $termErrors] = $this->paymentTerms($submitted);
+            $surcharge = Surcharge::validate($submitted, PaymentTerms::recordTerms($this->records->record()), $taxClassIds);
+            $write += $termWrite + $surcharge['write'];
+            $errors += $termErrors + $surcharge['errors'];
+        }
 
         if (isset($submitted['title'])) {
             $titles = array_map('trim', $submitted['title']);
@@ -166,6 +179,57 @@ final class SettingsSave
         }
 
         return ['errors' => $errors, 'credentials' => $credentials, 'status' => $checked['status'], 'code' => $checked['code']];
+    }
+
+    /**
+     * The Payment terms tab: the term type, the ticked terms (at least one of
+     * those the merchant record offers for that type) and the default term
+     * (blank, or one of the ticked terms).
+     *
+     * @param array<string, mixed> $submitted
+     * @return array{0: array<string, string>, 1: array<string, string>}
+     */
+    private function paymentTerms(array $submitted): array
+    {
+        $write = [];
+        $errors = [];
+        $type = $this->settings->paymentTermType();
+        if (isset($submitted['payment_term_type'])) {
+            $type = trim((string) $submitted['payment_term_type']);
+            if (in_array($type, PaymentTerms::TYPES, true)) {
+                $write['payment_term_type'] = $type;
+            } else {
+                $errors['payment_term_type'] = self::TERM_TYPE_UNKNOWN;
+                $type = $this->settings->paymentTermType();
+            }
+        }
+        $record = PaymentTerms::recordTerms($this->records->record());
+        $configurable = (new PaymentTerms($record, [], $type, null, null))->configurable();
+        $ticked = $this->settings->tickedPaymentTerms();
+        if (isset($submitted['payment_terms']) && is_array($submitted['payment_terms'])) {
+            $days = array_values(array_unique(array_map(static fn (mixed $day): string => trim((string) $day), $submitted['payment_terms'])));
+            $days = array_values(array_filter($days, static fn (string $day): bool => $day !== ''));
+            if (array_filter($days, static fn (string $day): bool => !ctype_digit($day) || !in_array((int) $day, $record, true)) !== []) {
+                $errors['payment_terms'] = self::TERMS_UNKNOWN;
+            } elseif ($configurable !== [] && array_intersect(array_map('intval', $days), $configurable) === []) {
+                $errors['payment_terms'] = self::TERMS_NONE;
+            } else {
+                $ticked = array_map('intval', $days);
+                sort($ticked);
+                $write['payment_terms'] = (string) json_encode($ticked);
+            }
+        }
+        if (isset($submitted['default_payment_term'])) {
+            $default = trim((string) $submitted['default_payment_term']);
+            $offered = (new PaymentTerms($record, $ticked, $type, null, null))->offered();
+            if ($default === '' || (ctype_digit($default) && in_array((int) $default, $offered, true))) {
+                $write['default_payment_term'] = $default;
+            } else {
+                $errors['default_payment_term'] = self::DEFAULT_TERM_UNKNOWN;
+            }
+        }
+
+        return [$write, $errors];
     }
 
     /** Whether a key may be sent to Two at all. The live check applies the same rule. */

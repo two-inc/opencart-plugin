@@ -34,6 +34,8 @@ final class OrderBuilderSpec
             ['lines' => [$w], 'totals' => [['rate' => null, 'tax' => 0] + $ship], 'order' => [300, 50], 'items' => [$wl, 'Flat Shipping Rate|SHIPPING_FEE|50.00|0.00|50.00|0'], 'sums' => '250.00|50.00|300.00|0.00', 'subtotals' => '0:50.00:0.00,0.25:200.00:50.00', 'failures' => 0, 'description' => 'untaxed shipping goes as recorded, at 0%'],
             ['lines' => [$w], 'totals' => [$ship], 'order' => [300, 50], 'items' => [$wl, 'Flat Shipping Rate|SHIPPING_FEE|50.00|12.50|62.50|0.25'], 'sums' => '250.00|62.50|312.50|0.00', 'subtotals' => '0.25:250.00:62.50', 'failures' => 2, 'description' => 'shipping tax that disagrees with what the shop charged fails both shop-match checks'],
             ['lines' => [$w], 'totals' => [['code' => 'handling', 'title' => 'Handling Fee', 'value' => 10, 'tax' => 2.5, 'rate' => 0.25]], 'order' => [262.5, 52.5], 'items' => [$wl, 'Handling Fee|SERVICE|10.00|2.50|12.50|0.25'], 'sums' => '210.00|52.50|262.50|0.00', 'subtotals' => '0.25:210.00:52.50', 'failures' => 0, 'description' => 'a handling fee is a taxed service line'],
+            ['lines' => [$w], 'totals' => [['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 2.5, 'rate' => 0.25]], 'order' => [262.5, 52.5], 'items' => [$wl, 'Payment terms fee - 30 days|SERVICE|10.00|2.50|12.50|0.25'], 'sums' => '210.00|52.50|262.50|0.00', 'subtotals' => '0.25:210.00:52.50', 'failures' => 0, 'description' => 'the payment terms fee is a service line at the net, tax and rate the shop gave it'],
+            ['lines' => [$w], 'totals' => [['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 0, 'rate' => 0.0]], 'order' => [260, 50], 'items' => [$wl, 'Payment terms fee - 30 days|SERVICE|10.00|0.00|10.00|0'], 'sums' => '210.00|50.00|260.00|0.00', 'subtotals' => '0:10.00:0.00,0.25:200.00:50.00', 'failures' => 0, 'description' => 'a fee at a 0% tax class goes untaxed, as the merchant set it'],
             ['lines' => [$w], 'totals' => [$coupon], 'order' => [225, 45], 'items' => [$wl, 'Coupon (SAVE10)|DIGITAL|-20.00|-5.00|-25.00|0.25'], 'sums' => '180.00|45.00|225.00|25.00', 'subtotals' => '0.25:180.00:45.00', 'failures' => 0, 'description' => 'a coupon at one rate: its tax is what the stored tax total leaves'],
             ['lines' => [$w], 'totals' => [$coupon, ['code' => 'reward', 'title' => 'Reward Points (100)', 'value' => -10]], 'order' => [212.5, 42.5], 'items' => [$wl, 'Coupon (SAVE10), Reward Points (100)|DIGITAL|-30.00|-7.50|-37.50|0.25'], 'sums' => '170.00|42.50|212.50|37.50', 'subtotals' => '0.25:170.00:42.50', 'failures' => 0, 'description' => 'coupon and reward points combine into one discount line'],
             ['lines' => [$a, $b], 'totals' => [$coupon], 'order' => [216, 36], 'refused' => 'discount_tax_ambiguous', 'description' => 'a discount that reduced tax at mixed rates is refused, never apportioned'],
@@ -67,6 +69,40 @@ final class OrderBuilderSpec
         self::testDeterministic();
         self::testShopMatchSentences();
         self::testRateFormat();
+        self::testTerms();
+    }
+
+    /** Section 4: the order carries the term it is booked on, and none when it has none. */
+    private static function testTerms(): void
+    {
+        $eom = ['type' => 'NET_TERMS', 'duration_days' => 45, 'duration_days_calculated_from' => 'END_OF_MONTH'];
+        $cases = [
+            [['terms' => ['type' => 'NET_TERMS', 'duration_days' => 30]], ['type' => 'NET_TERMS', 'duration_days' => 30], 'a standard term'],
+            [['terms' => $eom], $eom, 'an end-of-month term'],
+            [['terms' => []], null, 'an order placed before terms were kept sends none'],
+            [[], null, 'no terms given sends none'],
+        ];
+        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 2.5, 'rate' => 0.25];
+        $rebuilds = [
+            [['fee_refusal' => 'the order was placed with a payment terms fee but no longer carries one'], [], 'fee_missing', 'an order placed with a fee that lost it is refused, with the adapter\'s reason'],
+            [['fee_refusal' => '', 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order carrying its fee line is built'],
+            [['fee_refusal' => ''], [], null, 'an order placed without a fee needs none'],
+            [['currency_refusal' => 'the order was placed with Two in NOK and its currency is now EUR'], [], 'currency_changed', 'an order whose currency an edit changed is refused, with the adapter\'s reason'],
+            [['currency_refusal' => '', 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order in the currency it was placed in is built'],
+        ];
+        foreach ($rebuilds as [$over, $totals, $refused, $description]) {
+            try {
+                (new OrderBuilder())->build(self::order(250, 50, $over), [self::line('Widget', 2, 100, 25, 0.25)], $totals);
+                $code = null;
+            } catch (OrderRefused $e) {
+                $code = $e->reason;
+            }
+            TinyAssert::same($refused, $code, 'fee expected: ' . $description);
+        }
+        foreach ($cases as [$over, $expected, $description]) {
+            $payload = (new OrderBuilder())->build(self::order(250, 50, $over), [self::line('Widget', 2, 100, 25, 0.25)], []);
+            TinyAssert::same($expected, $payload['terms'] ?? null, 'terms: ' . $description);
+        }
     }
 
     /** @param array<string, mixed> $case */

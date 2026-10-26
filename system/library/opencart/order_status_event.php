@@ -36,7 +36,7 @@ final class OrderStatusEvent
      * @param \Closure(int): (array<string, mixed>|null)                                                                $readOrder    the shop order, as OpenCart's getOrder gives it
      * @param \Closure(array<string, mixed>): array{lifecycle: OrderLifecycle, refunds: OrderRefunds, edit: OrderEdit, rebuild: \Closure, fulfil: list<int>, cancel: int|null, refund: int|null} $lifecycleFor
      *        the lifecycle, refunds, edit sync, the order rebuild for an edit, and the status maps of the order's store
-     * @param \Closure(int): (array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null) $rows the order's own rows
+     * @param \Closure(int): (array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null) $rows the order's own rows
      * @param \Closure(int, int, string): void                                                                          $note         adds a history line at a status
      * @param \Closure(string): void                                                                                    $logError
      */
