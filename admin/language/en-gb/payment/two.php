@@ -123,4 +123,6 @@ $_['text_refund_state_not_applied'] = 'Not applied';
 $_['button_retry'] = 'Retry';
 $_['text_refund_blocked'] = 'A refund below has an unknown outcome. Retry it before sending another refund: it is sent again under the same key, so Two refunds it at most once.';
 $_['column_left'] = 'Left to refund';
+$_['text_panel_loading'] = 'Asking Two for this order...';
+$_['error_panel'] = 'The Two tab could not be loaded. Open the tab again to retry, or reload the page.';
 $_['error_ajax'] = 'The shop did not answer as expected. Check the order history and the Two tab before trying again.';

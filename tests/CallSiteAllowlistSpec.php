@@ -158,6 +158,11 @@ final class CallSiteAllowlistSpec
             TinyAssert::true(!$writesHere || isset($writes[$name]), 'admin writes: ' . $name . ' sends a write but is not in the table');
         }
         TinyAssert::true(preg_match('~function catalogEvent\([^{]*\{[^}]*createStoreInstance\(~s', $code) === 1, 'admin writes: catalogEvent is the store instance\'s event registry');
+        $order = $methods['order'] ?? '';
+        TinyAssert::true(str_contains($order, '_order_tab') && preg_match('~panelHtml|new Services|orderRefunds|->read\(~', $order) === 0, 'order page: the Two tab renders only its shell and never asks Two inline');
+        $shell = (string) file_get_contents(dirname(__DIR__) . '/admin/view/template/payment/two_order_tab.twig');
+        TinyAssert::true(str_contains($shell, 'show.bs.tab') && str_contains($shell, 'panel.load(') && str_contains($shell, "data('error')"), 'order page: the shell loads two.panel when the tab is opened and shows an error when it fails');
+        TinyAssert::true(str_contains($methods['catalogEvent'] ?? '','$config->set(\'config_store_id\', $storeId);'), 'admin writes: the store instance holds the order\'s store id, as OpenCart\'s own order edit sets it');
     }
 
     private static function testLoadable(): void
