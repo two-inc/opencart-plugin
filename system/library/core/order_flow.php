@@ -38,6 +38,12 @@ final class OrderFlow
     /** The intent could not be asked (no answer, an error, an answer without a decision). */
     public const UNDECIDED = 'undecided';
 
+    /** The buyer's sentences when placement is refused on the intent (language keys). */
+    public const INTENT_DECLINED = 'text_intent_declined';
+    public const INTENT_CONNECTION = 'error_intent_connection';
+    public const INTENT_UNAVAILABLE = 'error_intent_unavailable';
+    public const INTENT_UNPROCESSABLE = 'error_intent_unprocessable';
+
     /** What the order intent asks about: the create payload without what only an order needs. */
     public const INTENT_KEYS = ['gross_amount', 'net_amount', 'tax_amount', 'discount_amount', 'currency', 'invoice_type', 'buyer', 'billing_address', 'shipping_address', 'line_items'];
 
@@ -340,10 +346,32 @@ final class OrderFlow
     }
 
     /**
+     * Whether placement goes on after the intent (section 6.3): only an
+     * approval lets the order be created. Anything else (a decline, no
+     * answer, an error, an answer without a decision, a refused build)
+     * refuses it, with the buyer's sentences; null to go on.
+     *
+     * @param array{outcome: string, reason: string, buyer: list<string>} $intent
+     * @return list<string>|null never empty
+     */
+    public static function afterIntent(array $intent): ?array
+    {
+        if ($intent['outcome'] === self::APPROVED) {
+            return null;
+        }
+        if ($intent['outcome'] === self::DECLINED) {
+            return [self::INTENT_DECLINED];
+        }
+
+        return $intent['buyer'] === [] ? [self::INTENT_UNPROCESSABLE] : $intent['buyer'];
+    }
+
+    /**
      * Asks Two whether it would take this order (Build Guide section 6.3),
      * built server-side from the shop's stored order by the same builder as
-     * the create, through the hook as `order_intent`. Only a decision counts:
-     * an outage or an error is UNDECIDED, and the order create decides.
+     * the create, through the hook as `order_intent`. An outage or an error
+     * is UNDECIDED, with the buyer's sentence for its cause; afterIntent says
+     * what placement does with each outcome.
      *
      * $sessionHash names the buyer's checkout session (a hex hash, never the
      * session id itself); without one nothing is sent, since the key must
@@ -365,7 +393,7 @@ final class OrderFlow
             }
         }
         if (preg_match('~^[0-9a-f]{16,}\z~', $sessionHash) !== 1) {
-            return ['outcome' => self::UNDECIDED, 'reason' => 'Order intent not sent: no checkout session.', 'buyer' => []];
+            return ['outcome' => self::UNDECIDED, 'reason' => 'Order intent not sent: no checkout session.', 'buyer' => [self::INTENT_UNPROCESSABLE]];
         }
         try {
             $payload = $this->payload($order, $lines, $totals, $context, 'checkout', Postprocessing::ORDER_INTENT);
@@ -384,8 +412,13 @@ final class OrderFlow
         }
         $reason = $response->reachedTwo() && $response->status < 300 ? 'Two answered the order intent without a decision (HTTP ' . $response->status . ').' : 'Order intent not answered: ' . $this->errors->reason($response);
         $this->logger->error('Order ' . $orderId . ': ' . $reason);
+        $buyer = match (true) {
+            !$response->reachedTwo() => self::INTENT_CONNECTION,
+            $response->status >= 500 => self::INTENT_UNAVAILABLE,
+            default => self::INTENT_UNPROCESSABLE,
+        };
 
-        return ['outcome' => self::UNDECIDED, 'reason' => $reason, 'buyer' => []];
+        return ['outcome' => self::UNDECIDED, 'reason' => $reason, 'buyer' => [$buyer]];
     }
 
     /**
