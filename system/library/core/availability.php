@@ -18,11 +18,12 @@ final class Availability
 {
     public const DISABLED = 'disabled';
     public const NO_API_KEY = 'no_api_key';
+    public const MERCHANT_UNIDENTIFIED = 'merchant_unidentified';
     public const KEY_REJECTED = 'key_rejected';
     public const BUYER_COUNTRIES_EMPTY = 'buyer_countries_empty';
     public const BUYER_COUNTRIES_MALFORMED = 'buyer_countries_malformed';
-    public const BUYER_COUNTRY = 'buyer_country';
     public const CURRENCY = 'currency';
+    public const BUYER_COUNTRY = 'buyer_country';
     public const NO_COUNTRY = 'no_country';
     public const BELOW_MINIMUM = 'below_minimum';
 
@@ -49,24 +50,20 @@ final class Availability
      */
     public function withholdReason(array $checkout, \Closure $convert): ?array
     {
-        $shop = $this->shopReason($checkout['enabled'], $checkout['shop_currency']);
-        if ($shop !== null && $shop !== self::CURRENCY) {
+        $shop = $this->shopReason($checkout['enabled']);
+        if ($shop !== null) {
             return ['reason' => $shop, 'detail' => $shop];
         }
-        $record = $this->records->record();
-        $country = $checkout['buyer_country'] === null || $checkout['buyer_country'] === '' ? null : strtoupper($checkout['buyer_country']);
-        $countries = BuyerCountries::fromRecord($record);
-        if (!$countries->allows($country)) {
-            return ['reason' => self::BUYER_COUNTRY, 'detail' => 'buyer country ' . ($country ?? 'unresolved') . ', supported buyer country list ' . $countries->state];
+        $placement = $this->placementReason($checkout);
+        if ($placement !== null) {
+            return $placement;
         }
-        $currency = strtoupper(trim($checkout['currency']));
-        if (!in_array($currency, self::SUPPORTED_CURRENCIES, true)) {
-            return ['reason' => self::CURRENCY, 'detail' => 'cart currency ' . ($currency === '' ? 'unresolved' : $currency) . ' is not one Two invoices in'];
-        }
+        $country = self::country($checkout['buyer_country']);
         if (!$this->settings->companySearchInAddressArea() && $country === null) {
             return ['reason' => self::NO_COUNTRY, 'detail' => 'no country resolves from the billing or shipping address, so the tile\'s search could not run'];
         }
-        $shortfall = MinimumOrder::from($record, $this->settings, $checkout['shop_currency'])->shortfall($checkout['gross'], $checkout['net'], $checkout['value_currency'] ?? $currency, $convert);
+        $currency = strtoupper(trim($checkout['currency']));
+        $shortfall = MinimumOrder::from($this->records->record(), $this->settings, $checkout['shop_currency'])->shortfall($checkout['gross'], $checkout['net'], $checkout['value_currency'] ?? $currency, $convert);
         if ($shortfall !== null) {
             return ['reason' => self::BELOW_MINIMUM, 'detail' => $shortfall];
         }
@@ -75,11 +72,33 @@ final class Availability
     }
 
     /**
-     * The withhold reasons that hold for every cart, in chain order: the
-     * health row names the first. CURRENCY here means the shop's default
-     * currency is one Two does not invoice in.
+     * The checks placement repeats, since the page may be stale (the buyer
+     * switched currency or address after picking Two): the cart currency,
+     * then the buyer country.
+     *
+     * @param array{currency: string, buyer_country: string|null} $checkout
+     * @return array{reason: string, detail: string}|null
      */
-    public function shopReason(bool $enabled, string $shopCurrency): ?string
+    public function placementReason(array $checkout): ?array
+    {
+        $currency = strtoupper(trim($checkout['currency']));
+        if (!in_array($currency, self::SUPPORTED_CURRENCIES, true)) {
+            return ['reason' => self::CURRENCY, 'detail' => 'cart currency ' . ($currency === '' ? 'unresolved' : $currency) . ' is not one Two invoices in'];
+        }
+        $country = self::country($checkout['buyer_country']);
+        $countries = BuyerCountries::fromRecord($this->records->record());
+        if (!$countries->allows($country)) {
+            return ['reason' => self::BUYER_COUNTRY, 'detail' => 'buyer country ' . ($country ?? 'unresolved') . ', supported buyer country list ' . $countries->state];
+        }
+
+        return null;
+    }
+
+    /**
+     * The withhold reasons that hold for every cart, in chain order: the
+     * health row names the first.
+     */
+    public function shopReason(bool $enabled): ?string
     {
         if (!$enabled) {
             return self::DISABLED;
@@ -87,19 +106,21 @@ final class Availability
         if ($this->settings->apiKey() === '') {
             return self::NO_API_KEY;
         }
+        $record = $this->records->record();
+        if (!is_scalar($record['short_name'] ?? null) || trim((string) $record['short_name']) === '') {
+            // No merchant record names the merchant yet: every restriction it carries is unknown.
+            return self::MERCHANT_UNIDENTIFIED;
+        }
         // The heartbeat: the cached verdict, checked live once it is due.
         if (ApiKeyVerdict::isDefinitive($this->verdict->status())) {
             return self::KEY_REJECTED;
         }
-        $state = BuyerCountries::fromRecord($this->records->record())->state;
+        $state = BuyerCountries::fromRecord($record)->state;
         if ($state === BuyerCountries::EMPTY) {
             return self::BUYER_COUNTRIES_EMPTY;
         }
         if ($state === BuyerCountries::MALFORMED) {
             return self::BUYER_COUNTRIES_MALFORMED;
-        }
-        if (!in_array(strtoupper(trim($shopCurrency)), self::SUPPORTED_CURRENCIES, true)) {
-            return self::CURRENCY;
         }
 
         return null;
@@ -107,30 +128,39 @@ final class Availability
 
     /**
      * The admin's health row: why Two is not shown, or that it is, with the
-     * per-cart constraints that may still withhold it.
+     * per-cart constraints that may still withhold it. Not shown for the
+     * currency only when none of the shop's enabled currencies is one Two
+     * invoices in; otherwise the others are a per-cart constraint.
      *
      * @param list<string> $shopCurrencies the shop's enabled currencies
-     * @return array{shown: bool, reason: string|null, record_known: bool, floors: list<array{amount: float, currency: string, basis: string}>, buyer_countries: list<string>, refused_currencies: list<string>}
+     * @return array{shown: bool, reason: string|null, floors: list<array{amount: float, currency: string, basis: string}>, buyer_countries: list<string>, refused_currencies: list<string>}
      */
     public function health(bool $enabled, string $shopCurrency, array $shopCurrencies): array
     {
-        $reason = $this->shopReason($enabled, $shopCurrency);
-        $record = $reason === null ? $this->records->record() : null;
         $refused = [];
+        $usable = false;
         foreach ($shopCurrencies as $code) {
             $code = strtoupper(trim($code));
-            if ($code !== '' && !in_array($code, self::SUPPORTED_CURRENCIES, true) && !in_array($code, $refused, true)) {
+            if (in_array($code, self::SUPPORTED_CURRENCIES, true)) {
+                $usable = true;
+            } elseif ($code !== '' && !in_array($code, $refused, true)) {
                 $refused[] = $code;
             }
         }
+        $reason = $this->shopReason($enabled) ?? ($usable ? null : self::CURRENCY);
+        $record = $reason === null ? $this->records->record() : null;
 
         return [
             'shown' => $reason === null,
             'reason' => $reason,
-            'record_known' => $record !== null,
             'floors' => $reason === null ? MinimumOrder::from($record, $this->settings, $shopCurrency)->bindingFloors() : [],
             'buyer_countries' => $reason === null ? BuyerCountries::fromRecord($record)->allowed : [],
             'refused_currencies' => $reason === null ? $refused : [],
         ];
+    }
+
+    private static function country(?string $country): ?string
+    {
+        return $country === null || trim($country) === '' ? null : strtoupper(trim($country));
     }
 }

@@ -33,6 +33,9 @@ final class AvailabilitySpec
             [[], [], [$ok], ['enabled' => false], Availability::DISABLED, 'a disabled extension'],
             [[], ['api_key' => ''], [], [], Availability::NO_API_KEY, 'no API key'],
             [[], [], [new HttpResponse(401, '')], [], Availability::KEY_REJECTED, 'a key Two rejects'],
+            [['short_name' => ''], [], [$ok], [], Availability::MERCHANT_UNIDENTIFIED, 'a record that does not name the merchant'],
+            [['short_name' => null], [], [$ok], [], Availability::MERCHANT_UNIDENTIFIED, 'a record with no short name'],
+            [['supported_buyer_countries' => ['NO']], [], [$ok], ['currency' => 'CHF'], Availability::CURRENCY, 'the currency is checked before the buyer country'],
             [[], [], [HttpResponse::unreachable('timeout')], [], null, 'an unreachable Two does not withhold'],
             [[], [], [new HttpResponse(503, '')], [], null, 'a Two error does not withhold'],
             [['supported_buyer_countries' => []], [], [$ok], [], Availability::BUYER_COUNTRIES_EMPTY, 'a record naming no buyer country'],
@@ -65,8 +68,24 @@ final class AvailabilitySpec
             TinyAssert::same($expected, $reason['reason'] ?? null, 'availability: ' . $description . ($reason === null ? '' : ' (' . $reason['detail'] . ')'));
         }
 
+        self::testPlacement();
         self::testBuyerCountryStates();
         self::testHealth();
+    }
+
+    /** What placement re-checks, since the page may be stale: the currency, then the buyer country. */
+    private static function testPlacement(): void
+    {
+        $cases = [
+            [[], ['currency' => 'GBP', 'buyer_country' => 'GB'], null, 'unchanged since the method list'],
+            [[], ['currency' => 'CHF', 'buyer_country' => 'GB'], Availability::CURRENCY, 'switched to a currency Two does not invoice in'],
+            [['supported_buyer_countries' => ['NO']], ['currency' => 'NOK', 'buyer_country' => 'GB'], Availability::BUYER_COUNTRY, 'changed to an address outside the allowlist'],
+            [['supported_buyer_countries' => ['NO']], ['currency' => 'CHF', 'buyer_country' => 'GB'], Availability::CURRENCY, 'both: the currency is named first'],
+        ];
+        foreach ($cases as [$record, $checkout, $expected, $description]) {
+            [$availability] = self::availability($record, [], []);
+            TinyAssert::same($expected, $availability->placementReason($checkout)['reason'] ?? null, 'placement re-check: ' . $description);
+        }
     }
 
     private static function testBuyerCountryStates(): void
@@ -91,7 +110,9 @@ final class AvailabilitySpec
         $cases = [
             [[], [], ['GBP'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'shown, no constraints'],
             [[], ['api_key' => ''], ['GBP'], ['shown' => false, 'reason' => Availability::NO_API_KEY, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'no key names the reason'],
-            [[], [], ['CHF'], ['shown' => false, 'reason' => Availability::CURRENCY, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'a default currency Two does not invoice in'],
+            [[], [], ['CHF'], ['shown' => false, 'reason' => Availability::CURRENCY, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'no enabled currency Two invoices in'],
+            [[], [], ['CHF', 'EUR'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => ['CHF']], 'a default currency Two does not invoice in, but another it does: shown, the default named as a constraint'],
+            [['short_name' => ''], [], ['GBP'], ['shown' => false, 'reason' => Availability::MERCHANT_UNIDENTIFIED, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'a merchant not yet identified'],
             [
                 ['supported_buyer_countries' => ['GB'], 'min_order_amount' => 50, 'min_order_currency' => 'GBP', 'min_order_basis' => 'gross'],
                 ['min_order_amount' => '80', 'min_order_basis' => 'gross'],
@@ -103,7 +124,6 @@ final class AvailabilitySpec
         foreach ($cases as [$record, $settings, $currencies, $expected, $description]) {
             [$availability] = self::availability($record, $settings, [new HttpResponse(200, '{"id":"m1"}')]);
             $health = $availability->health(true, $currencies[0], $currencies);
-            unset($health['record_known']);
             TinyAssert::same($expected, $health, 'health row: ' . $description);
         }
         TinyAssert::same(
@@ -123,7 +143,7 @@ final class AvailabilitySpec
     {
         $store = new MemoryStore($settings + ['api_key' => 'k']);
         $provider = new SettingsProvider($store);
-        $store->values[RecordProvider::CACHE_KEY] = (string) json_encode(['fingerprint' => $provider->credentialFingerprint(), 'fetched_at' => self::NOW - 60, 'record' => ['id' => 'm1'] + $record]);
+        $store->values[RecordProvider::CACHE_KEY] = (string) json_encode(['fingerprint' => $provider->credentialFingerprint(), 'fetched_at' => self::NOW - 60, 'record' => $record + ['id' => 'm1', 'short_name' => 'acme']]);
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
         $client = new Client(new Environment(false), $provider, new CustomHeaders(), $transport, $logger, '1.0.0');
