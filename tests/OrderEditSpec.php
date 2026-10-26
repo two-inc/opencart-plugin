@@ -56,6 +56,8 @@ final class OrderEditSpec
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'responses' => [self::get('CONFIRMED'), self::json(400, ['error_code' => 'X'])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $put], 'after' => 'placed', 'description' => 'Two refuses the edit: nothing stored, fulfil stays blocked'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'responses' => [self::get('CONFIRMED'), HttpResponse::unreachable('timeout')], 'outcome' => OrderEdit::UNKNOWN, 'calls' => [$read, $put], 'after' => 'cleared', 'description' => 'a timeout: the payload hash is cleared so the next save sends it'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'responses' => [self::get('CONFIRMED'), self::json(503, [])], 'outcome' => OrderEdit::UNKNOWN, 'calls' => [$read, $put], 'after' => 'cleared', 'description' => 'a 5xx: unknown, hash cleared'],
+            ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'responses' => [self::get('CONFIRMED'), self::json(429, [])], 'outcome' => OrderEdit::UNKNOWN, 'calls' => [$read, $put], 'after' => 'cleared', 'description' => 'a 429: unknown, hash cleared'],
+            ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'responses' => [self::get('CONFIRMED'), self::json(401, [])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $put], 'after' => 'placed', 'description' => 'a 401: refused for now, nothing stored'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'handlers' => $refuses, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the hook refuses the update: nothing sent'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => null, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the order can no longer be read: refused'],
             ['stored' => 'CONFIRMED', 'unhashed' => true, 'rows' => 3, 'input' => 3, 'responses' => [], 'outcome' => null, 'calls' => [], 'after' => 'unhashed', 'description' => 'no rows hash kept: nothing to compare, the fulfil check refuses instead'],
@@ -121,7 +123,15 @@ final class OrderEditSpec
             [[[3, $timeout], [3, $ok]], [3, 3], 3, 'a timeout, then the same order: sent again'],
             [[[3, self::json(400, ['error_code' => 'X'])], [3, null]], [3], 2, 'an edit Two refused: the same edit is not sent or noted again'],
             [[[3, self::json(400, ['error_code' => 'X'])], [4, $ok]], [3, 4], 4, 'an edit Two refused, then another edit: the new one is sent'],
+            [[[3, self::json(422, ['error_code' => 'X'])], [3, null]], [3], 2, '422, a validation refusal: the same edit is not sent again'],
+            [[[3, self::json(401, [])], [3, $ok]], [3, 3], 3, '401 (a key being changed): nothing recorded, the next save sends it'],
+            [[[3, self::json(403, [])], [3, $ok]], [3, 3], 3, '403: nothing recorded, the next save sends it'],
+            [[[3, self::json(409, [])], [3, $ok]], [3, 3], 3, '409, a conflict: nothing recorded, the next save sends it'],
+            [[[3, self::json(429, [])], [3, $ok]], [3, 3], 3, '429, a rate limit: like no answer, the next save sends it'],
+            [[[3, self::json(408, [])], [3, $ok]], [3, 3], 3, '408, a timeout at Two: like no answer, the next save sends it'],
+            [[[3, self::json(429, [])], [2, $ok]], [3, 2], 2, '429, then back to 2 as placed: 2 is sent, since Two may hold 3'],
         ];
+        $refusedKept = ['an edit Two refused: the same edit is not sent or noted again', '422, a validation refusal: the same edit is not sent again'];
         foreach ($cases as [$steps, $sent, $accepted, $description]) {
             $responses = [];
             foreach ($steps as [, $answer]) {
@@ -140,6 +150,7 @@ final class OrderEditSpec
             TinyAssert::same($sent, array_map(static fn (array $call): int => (int) json_decode((string) $call['body'], true)['line_items'][0]['quantity'], $puts), $d . ': the quantities sent');
             TinyAssert::same(OrderLifecycle::rowsHash(self::rows($accepted)), $records->rows[42]['rows_hash'], $d . ': the rows Two last accepted');
             TinyAssert::same(count(array_filter($outcomes)), count($puts), $d . ': a note only for an edit sent');
+            TinyAssert::same($records->rows[42]['edit_refused_hash'] ?? '', in_array($description, $refusedKept, true) ? OrderLifecycle::rowsHash(self::rows(3)) : '', $d . ': a refused rows hash only for a refusal of the edit itself');
         }
     }
 

@@ -22,8 +22,10 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   hash is cleared, so the next save always sends the order as it then is,
  *   even edited back to what Two last accepted, and fulfil waits until Two
  *   has accepted it. The key repeats as long as the order is unchanged.
- * - An edit Two refuses keeps its rows hash, so the same edit is not sent
- *   or noted again; a different edit is.
+ * - An edit Two refuses as such (400, 422) keeps its rows hash, so the same
+ *   edit is not sent or noted again; a different edit is. A 408 or 429 is
+ *   handled like no answer, and any other 4xx (a key being changed, a
+ *   conflict) records nothing, so the next save sends the edit again.
  * - After fulfilment an edit is refused with a note, never sent: Two has
  *   invoiced the order as it was.
  */
@@ -36,6 +38,12 @@ final class OrderEdit
     public const PARTIAL_STATUS = 'PARTIAL';
 
     public const UNKNOWN = 'unknown';
+
+    /** Two's answers that refuse the edit itself: the same edit would be refused again. */
+    public const DEFINITIVE_REFUSALS = [400, 422];
+
+    /** Answers that say nothing about the edit (a timeout, a rate limit): handled like no answer. */
+    public const TRANSIENT = [408, 429];
 
     public function __construct(
         private readonly OrderFlow $flow,
@@ -116,11 +124,15 @@ final class OrderEdit
 
             return ['outcome' => OrderLifecycle::DONE, 'reason' => 'Two order ' . $twoOrderId . ' updated with this order\'s changes.'];
         }
-        if ($response->reachedTwo() && $response->status < 500) {
+        if (in_array($response->status, self::DEFINITIVE_REFUSALS, true) && $response->reachedTwo()) {
             // Kept so the same refused edit is not resent and noted on every status save; another edit is still tried.
             $this->records->put($orderId, ['edit_refused_hash' => $rowsHash]);
 
-            return $this->refused($orderId, 'Two refused the edit to order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' Two still holds the order as before, so it will not be fulfilled until the order matches.');
+            return $this->refused($orderId, 'Two refused the edit to order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' Two still holds the order as before, so it will not be fulfilled until the order matches. Edit the order to what Two can accept, or fulfil it in the Two merchant portal.');
+        }
+        if ($response->reachedTwo() && $response->status < 500 && !in_array($response->status, self::TRANSIENT, true)) {
+            // Not about the edit itself (an API key being changed, a conflict): nothing recorded, so the next save sends it again.
+            return $this->refused($orderId, 'Two did not take the edit to order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' It is sent again on the next status save.');
         }
         // Two may or may not hold the edit: the next save must send it whatever the hash says.
         $this->records->put($orderId, ['payload_hash' => '']);
