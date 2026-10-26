@@ -571,7 +571,8 @@ final class OrderRefunds
         if ($retry && $answered && $answeredId !== '' && in_array($answeredId, $beforeIds, true)) {
             return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, $done . ' Two had applied the earlier attempt.'));
         }
-        if ($retry && $first !== null && $after !== null && self::refundedCents($after) - $first >= $amount) {
+        // Only with an answer from Two to this retry: a rise alone could be a refund made in the merchant portal.
+        if ($retry && $answered && $first !== null && $after !== null && self::refundedCents($after) - $first >= $amount) {
             return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, $done . ' Two\'s refunded total has risen by the amount since the first attempt, so that attempt was applied.'));
         }
         if ($answered && $after !== null) {
