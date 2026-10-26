@@ -99,6 +99,33 @@ describe('saving a term', () => {
     });
 });
 
+describe('arrow keys and Confirm', () => {
+    test('a run of arrow keys saves the last term once, and holds the queue from the first key, so Confirm waits for it', async () => {
+        jest.useFakeTimers();
+        const { instance, calls } = chips({}, [14, 30, 60], 14);
+        const group = document.querySelector('[data-two-term-chips]');
+        document.querySelector('[data-two-term="14"]').focus();
+        group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        let confirmed = null;
+        // Confirm, pressed inside the debounce window, queues behind the held save.
+        instance.api.serial('confirm', () => {
+            confirmed = calls.filter(([route]) => route === 'term').map(([, params]) => params.days);
+            return Promise.resolve();
+        });
+        jest.advanceTimersByTime(100);
+        await Promise.resolve();
+        expect(confirmed).toBeNull();
+        jest.advanceTimersByTime(300);
+        jest.useRealTimers();
+        for (let i = 0; i < 6; i += 1) {
+            await flush();
+        }
+        expect(confirmed).toEqual(['60']);
+        expect(calls.map(([route]) => route)).toEqual(['fees', 'term', 'totals']);
+    });
+});
+
 describe('a single term', () => {
     test('is shown but not chosen: no click or key saves it', async () => {
         const { calls } = chips({}, [30], 30);

@@ -923,10 +923,7 @@
 
         start() {
             if (this.chips.length > 1) {
-                this.chips.forEach((chip) => chip.addEventListener('click', () => {
-                    clearTimeout(this.timer);
-                    this.choose(Number(chip.dataset.twoTerm));
-                }));
+                this.chips.forEach((chip) => chip.addEventListener('click', () => this.choose(Number(chip.dataset.twoTerm))));
                 this.group.addEventListener('keydown', (event) => this.key(event));
             }
             this.fees();
@@ -945,11 +942,8 @@
             }
             event.preventDefault();
             const chip = this.chips[(next + this.chips.length) % this.chips.length];
-            const days = Number(chip.dataset.twoTerm);
-            this.select(days);
             chip.focus();
-            clearTimeout(this.timer);
-            this.timer = setTimeout(() => this.save(days), TERM_SAVE_DELAY_MS);
+            this.schedule(Number(chip.dataset.twoTerm), TERM_SAVE_DELAY_MS);
         }
 
         /** One predicate sets the tick, the state and the tab stop, so they cannot drift apart. */
@@ -968,13 +962,42 @@
         }
 
         choose(days) {
-            this.select(days);
-            return this.save(days);
+            return this.schedule(days, 0);
         }
 
-        /** Saves the term, then reloads the totals; a refused term puts the last saved one back. */
+        /**
+         * Shows the term at once and saves it after $delay (a run of arrow
+         * keys saves once). The save takes its place in the call queue the
+         * moment the choice is made, holding it until the delay ends, so a
+         * Confirm pressed meanwhile waits and places the term on screen.
+         */
+        schedule(days, delay) {
+            this.select(days);
+            this.next = days;
+            clearTimeout(this.timer);
+            if (!this.pending) {
+                let release;
+                const held = new Promise((resolve) => {
+                    release = resolve;
+                });
+                this.release = release;
+                this.pending = this.api.serial('term', () => held.then(() => {
+                    this.pending = null;
+                    return this.save(this.next);
+                }));
+            }
+            this.timer = setTimeout(() => this.release(), delay);
+            return this.pending;
+        }
+
+        /**
+         * Saves the term, then reloads the totals, from inside the queue
+         * (calls made here go straight to the shop, not to the back of the
+         * queue). A refused term puts the last saved one back.
+         */
         save(days) {
-            return this.api.post('term', { days: String(days) }).then((json) => {
+            const body = new URLSearchParams({ two_token: this.config.token, days: String(days) }).toString();
+            return this.api.timed('term', this.config.urls.term, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body }).then((json) => {
                 if (!json || !json.ok) {
                     if (this.saved !== null) {
                         this.select(this.saved);
@@ -997,13 +1020,14 @@
          * Rewrites the order's totals for the new term: the checkout's own
          * confirm view writes the order and renders its totals, of which only
          * the totals rows are swapped in, so nothing the buyer typed is lost.
+         * Runs inside the term save's place in the queue.
          */
         totals() {
             const url = this.config.urls.totals;
             if (!url) {
                 return Promise.resolve();
             }
-            return this.api.serial('totals', () => this.api.fetch(url, { credentials: 'same-origin' }).then((response) => response.text())).then((html) => {
+            return this.api.fetch(url, { credentials: 'same-origin' }).then((response) => response.text()).then((html) => {
                 const parsed = this.doc.createElement('template');
                 parsed.innerHTML = html;
                 const fresh = parsed.content.querySelector('tfoot');

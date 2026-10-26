@@ -82,6 +82,21 @@ final class OrderBuilderSpec
             [['terms' => []], null, 'an order placed before terms were kept sends none'],
             [[], null, 'no terms given sends none'],
         ];
+        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 2.5, 'rate' => 0.25];
+        $rebuilds = [
+            [['fee_expected' => true], [], 'fee_missing', 'an edit whose fee could not be quoted is refused, not sent without its fee'],
+            [['fee_expected' => true, 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an edit carrying its fee line is built'],
+            [['fee_expected' => false], [], null, 'no fee expected, none needed'],
+        ];
+        foreach ($rebuilds as [$over, $totals, $refused, $description]) {
+            try {
+                (new OrderBuilder())->build(self::order(250, 50, $over), [self::line('Widget', 2, 100, 25, 0.25)], $totals);
+                $code = null;
+            } catch (OrderRefused $e) {
+                $code = $e->reason;
+            }
+            TinyAssert::same($refused, $code, 'fee expected: ' . $description);
+        }
         foreach ($cases as [$over, $expected, $description]) {
             $payload = (new OrderBuilder())->build(self::order(250, 50, $over), [self::line('Widget', 2, 100, 25, 0.25)], []);
             TinyAssert::same($expected, $payload['terms'] ?? null, 'terms: ' . $description);

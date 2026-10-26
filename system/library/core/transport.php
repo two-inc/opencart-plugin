@@ -24,4 +24,13 @@ interface Transport
         bool $verifyTls,
         int $timeoutSeconds,
     ): HttpResponse;
+
+    /**
+     * Several calls at once, each answered as send() answers it, in the
+     * order given. Every call shares the one timeout.
+     *
+     * @param list<array{method: string, url: string, headers: array<string, string>, body: string|null}> $requests
+     * @return list<HttpResponse>
+     */
+    public function sendAll(array $requests, bool $verifyTls, int $timeoutSeconds): array;
 }

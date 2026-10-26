@@ -131,7 +131,7 @@ class Two extends \Opencart\System\Engine\Controller
         $terms = $services->paymentTerms();
         $surcharge = $services->surcharge();
         $data['record_terms'] = $terms->recordTerms;
-        $data['ticked_terms'] = $settings->tickedPaymentTerms() ?? $terms->recordTerms;
+        $data['ticked_terms'] = $settings->tickedPaymentTerms();
         $data['payment_term_type'] = $terms->type;
         $data['default_payment_term'] = $settings->defaultPaymentTerm();
         $data['surcharge_types'] = [];
@@ -341,7 +341,13 @@ class Two extends \Opencart\System\Engine\Controller
             foreach (['access', 'modify'] as $permission) {
                 $this->model_user_user_group->addPermission($this->user->getGroupId(), $permission, 'extension/two/total/two_fee');
             }
-            $this->model_setting_setting->editSetting('total_two_fee', ['total_two_fee_status' => '1', 'total_two_fee_sort_order' => Services::FEE_TOTAL_SORT_ORDER]);
+            // Before the Taxes total, which lists the taxes added so far: the fee's tax is charged only then.
+            $taxSort = (int) $this->config->get('total_tax_sort_order');
+            $sort = $taxSort > (int) Services::FEE_TOTAL_SORT_ORDER || $taxSort <= 0 ? (int) Services::FEE_TOTAL_SORT_ORDER : $taxSort - 1;
+            $this->model_setting_setting->editSetting('total_two_fee', ['total_two_fee_status' => '1', 'total_two_fee_sort_order' => (string) $sort]);
+            if ($taxSort <= 0) {
+                $this->log->write('Two: the Taxes order total has sort order ' . $taxSort . ', so the payment terms fee total (sort order ' . $sort . ') cannot sort before it and its tax would not be charged. Give Taxes a higher sort order in Extensions > Order Totals.');
+            }
         }
     }
 
@@ -735,7 +741,9 @@ class Two extends \Opencart\System\Engine\Controller
     {
         $this->load->model('localisation/currency');
         $currencies = array_values(array_map(static fn (array $row): string => (string) $row['code'], array_filter($this->model_localisation_currency->getCurrencies(), static fn (array $row): bool => (bool) $row['status'])));
-        $health = $services->availability->health((bool) $this->config->get(self::CODE . '_status'), $shopCurrency, $currencies);
+        $this->load->model('setting/extension');
+        $feeTotal = (bool) $this->config->get('total_two_fee_status') && $this->model_setting_extension->getExtensionByCode('total', 'two_fee') !== [];
+        $health = $services->availability->health((bool) $this->config->get(self::CODE . '_status'), $shopCurrency, $currencies, $feeTotal);
         $brand = Brand::default();
         if (!$health['shown']) {
             return ['ok' => false, 'text' => $this->language->get('text_health_hidden') . ' - ' . sprintf($this->language->get('text_withheld_' . $health['reason']), $brand->providerFullName, $shopCurrency)];

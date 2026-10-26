@@ -10,12 +10,13 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * Two applies, not the shop's. The table is EUR-pivot: rates[CCY] is one CCY
  * in EUR.
  *
- * Cached through the SettingsStore. A stale table is still served (the last
- * known good); a refresh is due after TTL and is stamped before the call, so
- * concurrent requests share one. A failed refresh keeps the table and retries
- * after BACKOFF. A fresh table is merged over the cached one, so a currency
- * that drops out of one answer keeps its last rate. Each caller decides what
- * a missing rate means: the charge paths fail closed.
+ * Cached through the SettingsStore. Every conversion refreshes the table
+ * once it is older than TTL; the attempt is stamped before the call, so
+ * concurrent requests share one, and a failed one is retried after BACKOFF.
+ * Meanwhile the last good table is served, but only for STALE_GRACE after it
+ * was fetched: past that a rate is missing, and the charge paths fail
+ * closed. A fresh table is merged over the cached one, so a currency that
+ * drops out of one answer keeps its last rate.
  */
 final class FxRates
 {
@@ -25,6 +26,8 @@ final class FxRates
     public const TTL = 21_600;
     public const BACKOFF = 300;
     public const TIMEOUT_SECONDS = 5;
+    /** How long after its fetch a table is still served while refreshes fail. */
+    public const STALE_GRACE = 259_200;
 
     /** @var \Closure(): int */
     private readonly \Closure $clock;
@@ -53,23 +56,20 @@ final class FxRates
         if ($from === $to) {
             return round($amount, 2);
         }
-        foreach ([false, true] as $refreshed) {
-            if ($refreshed && !$this->refreshIfDue()) {
-                return null;
-            }
-            $rates = $this->table()['rates'] ?? [];
-            if (($rates[$from] ?? 0) > 0 && ($rates[$to] ?? 0) > 0) {
-                return round($amount * $rates[$from] / $rates[$to], 2);
-            }
+        $this->refreshIfDue();
+        $table = $this->table();
+        if ($table === null || ($this->clock)() - $table['fetched_at'] > self::STALE_GRACE) {
+            return null;
         }
+        $rates = $table['rates'];
 
-        return null;
+        return ($rates[$from] ?? 0) > 0 && ($rates[$to] ?? 0) > 0 ? round($amount * $rates[$from] / $rates[$to], 2) : null;
     }
 
     /**
      * The cached table, stale or not, or null when none was ever stored.
      *
-     * @return array{base: string, as_of: string, rates: array<string, float>}|null
+     * @return array{base: string, as_of: string, fetched_at: int, rates: array<string, float>}|null
      */
     public function table(): ?array
     {
@@ -79,7 +79,7 @@ final class FxRates
             return null;
         }
 
-        return ['base' => is_string($decoded['base'] ?? null) ? $decoded['base'] : 'EUR', 'as_of' => is_string($decoded['as_of'] ?? null) ? $decoded['as_of'] : '', 'rates' => $rates];
+        return ['base' => is_string($decoded['base'] ?? null) ? $decoded['base'] : 'EUR', 'as_of' => is_string($decoded['as_of'] ?? null) ? $decoded['as_of'] : '', 'fetched_at' => is_int($decoded['fetched_at'] ?? null) ? $decoded['fetched_at'] : 0, 'rates' => $rates];
     }
 
     /** Fetches the table when the last attempt is older than TTL (BACKOFF after a failure). Whether a fresh table was stored. */
@@ -108,6 +108,7 @@ final class FxRates
         $this->settings->store()->setMany([self::CACHE_KEY => (string) json_encode([
             'base' => is_string($body['base'] ?? null) ? $body['base'] : 'EUR',
             'as_of' => is_scalar($body['as_of'] ?? null) ? (string) $body['as_of'] : '',
+            'fetched_at' => $now,
             'rates' => array_merge($this->table()['rates'] ?? [], $rates),
         ])]);
 

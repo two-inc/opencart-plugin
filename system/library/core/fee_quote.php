@@ -20,8 +20,14 @@ final class FeeQuote
     /** One ceiling for the gate and the charge, so the gate never gives up on a quote the charge could price. */
     public const TIMEOUT_SECONDS = 30;
 
-    /** @var array<string, array{net: float, currency: string}|null> */
+    /** The longest the chips' preview of every term may take, all terms together. */
+    public const PREVIEW_SECONDS = 10;
+
+    /** @var array<string, array{net: float, currency: string}|null> answers this request, by payload hash */
     private array $answers = [];
+
+    /** @var array<string, array{net: float, currency: string}> quotes Two gave in this request, by payload hash, for the adapter to keep */
+    private array $fresh = [];
 
     /** Why the last quote failed, for the log and the health row. */
     public string $failure = '';
@@ -34,6 +40,27 @@ final class FeeQuote
     }
 
     /**
+     * Quotes the adapter kept from earlier requests (the same payload has the
+     * same answer), by payload hash.
+     *
+     * @param array<string, array{net: float, currency: string}> $known
+     */
+    public function remember(array $known): void
+    {
+        $this->answers = $known + $this->answers;
+    }
+
+    /**
+     * The quotes Two gave in this request, by payload hash.
+     *
+     * @return array<string, array{net: float, currency: string}>
+     */
+    public function fresh(): array
+    {
+        return $this->fresh;
+    }
+
+    /**
      * The fee's net in $currency, or null when it cannot be quoted. $gross
      * is the order's gross without the fee, in $currency. Fixed fees and
      * caps are in $shopCurrency and converted at Two's rates; no rate fails
@@ -43,35 +70,112 @@ final class FeeQuote
      */
     public function quote(Surcharge $surcharge, PaymentTerms $terms, int $days, float $gross, string $buyerCountry, string $currency, string $shopCurrency): ?array
     {
+        return $this->quoteAll($surcharge, $terms, [$days], $gross, $buyerCountry, $currency, $shopCurrency, self::TIMEOUT_SECONDS)[$days];
+    }
+
+    /**
+     * Quotes for several terms at once: what this request or the adapter
+     * already holds is reused, the rest are asked of Two in parallel, all
+     * within $timeoutSeconds. A term that cannot be quoted maps to null.
+     *
+     * @param list<int> $days
+     * @return array<int, array{net: float, currency: string}|null>
+     */
+    public function quoteAll(Surcharge $surcharge, PaymentTerms $terms, array $days, float $gross, string $buyerCountry, string $currency, string $shopCurrency, int $timeoutSeconds): array
+    {
         $this->failure = '';
-        $payload = $this->payload($surcharge, $terms, $days, $gross, $buyerCountry, $currency, $shopCurrency);
-        if ($payload === null) {
-            return null;
+        $quotes = [];
+        $ask = [];
+        foreach ($days as $term) {
+            $payload = $this->payload($surcharge, $terms, $term, $gross, $buyerCountry, $currency, $shopCurrency);
+            if ($payload === null) {
+                $quotes[$term] = null;
+                continue;
+            }
+            $hash = hash('sha256', (string) json_encode($payload));
+            if (array_key_exists($hash, $this->answers)) {
+                $this->failure = $this->answers[$hash] === null ? 'the fee quote for the ' . $term . '-day term failed earlier in this request' : '';
+                $quotes[$term] = $this->answers[$hash];
+                continue;
+            }
+            $ask[$term] = ['hash' => $hash, 'payload' => $payload];
         }
-        $hash = hash('sha256', (string) json_encode($payload));
-        if (array_key_exists($hash, $this->answers)) {
-            $this->failure = $this->answers[$hash] === null ? 'the fee quote for the ' . $days . '-day term failed earlier in this request' : '';
-
-            return $this->answers[$hash];
+        $calls = array_map(static fn (array $one): array => ['method' => 'POST', 'path' => self::PATH, 'body' => $one['payload'], 'headers' => IdempotencyKey::header(IdempotencyKey::feeQuote($one['hash']))], array_values($ask));
+        $responses = $this->client->requestAll($calls, $timeoutSeconds);
+        foreach (array_keys($ask) as $index => $term) {
+            $quotes[$term] = $this->answer($term, $ask[$term]['hash'], $ask[$term]['payload']['currency'], $responses[$index]);
         }
 
-        $response = $this->client->request('POST', self::PATH, $payload, self::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::feeQuote($hash)));
+        return $quotes;
+    }
+
+    /** @return array{net: float, currency: string}|null */
+    private function answer(int $days, string $hash, string $currency, HttpResponse $response): ?array
+    {
         $body = $response->json();
         $share = $body['buyer_fee_share'] ?? null;
-        $answered = is_scalar($body['currency'] ?? null) ? strtoupper((string) $body['currency']) : $payload['currency'];
+        $answered = is_scalar($body['currency'] ?? null) ? strtoupper((string) $body['currency']) : $currency;
+        $failure = '';
         if ($response->status < 200 || $response->status >= 300 || !is_numeric($share)) {
-            $this->failure = 'the fee quote for the ' . $days . '-day term failed (HTTP ' . $response->status . ')';
-        } elseif ($answered !== $payload['currency']) {
+            $failure = 'the fee quote for the ' . $days . '-day term failed (HTTP ' . $response->status . ')';
+        } elseif ($answered !== $currency) {
             // Two prices in the currency asked for; another is a contract breach, never converted again.
-            $this->failure = 'the fee quote for the ' . $days . '-day term came back in ' . $answered . ', not ' . $payload['currency'];
+            $failure = 'the fee quote for the ' . $days . '-day term came back in ' . $answered . ', not ' . $currency;
         }
-        if ($this->failure !== '') {
-            $this->logger->error('Two ' . $this->failure . '.');
+        if ($failure !== '') {
+            $this->failure = $failure;
+            $this->logger->error('Two ' . $failure . '.');
 
             return $this->answers[$hash] = null;
         }
 
-        return $this->answers[$hash] = ['net' => round(max(0.0, (float) $share), 2), 'currency' => $payload['currency']];
+        return $this->answers[$hash] = $this->fresh[$hash] = ['net' => round(max(0.0, (float) $share), 2), 'currency' => $currency];
+    }
+
+    /**
+     * The fee line's value in the shop's default currency, as OpenCart keeps
+     * every total: only while Two is the chosen method ($paymentCode) and a
+     * fee applies and was quoted above zero. The quote is in the session
+     * currency, whose value against the default is $currencyValue.
+     *
+     * @param array{applies: bool, days: int|null, net: float|null} $charged
+     */
+    public static function lineValue(array $charged, string $paymentCode, float $currencyValue): ?float
+    {
+        if ($paymentCode !== 'two.two' || !$charged['applies'] || $charged['days'] === null || $charged['net'] === null || $charged['net'] <= 0 || $currencyValue <= 0) {
+            return null;
+        }
+
+        return $charged['net'] / $currencyValue;
+    }
+
+    /**
+     * Placement's term and fee check (Build Guide sections 4 and 5): why the
+     * order may not be placed on its term, or null. Refused when no term is
+     * offered, when the chosen term is not offered, when the fee cannot be
+     * quoted, and when the order's stored fee (in cents of the order's
+     * currency) is not the fee quoted for the term.
+     *
+     * @param array{applies: bool, days: int|null, net: float|null} $charged
+     * @return array{reason: string, detail: string}|null
+     */
+    public static function placementRefusal(PaymentTerms $terms, ?int $chosen, array $charged, string $failure, int $storedCents): ?array
+    {
+        if ($terms->offered() === []) {
+            return ['reason' => 'terms', 'detail' => 'the merchant record offers no payment term'];
+        }
+        if ($chosen !== null && !$terms->offers($chosen)) {
+            return ['reason' => 'terms', 'detail' => 'the chosen ' . $chosen . '-day term is not one the merchant record offers'];
+        }
+        if ($charged['applies'] && $charged['net'] === null) {
+            return ['reason' => 'fee', 'detail' => $failure];
+        }
+        $expected = $charged['applies'] ? (int) round((float) $charged['net'] * 100) : 0;
+        if ($storedCents !== $expected) {
+            return ['reason' => 'fee_changed', 'detail' => 'the order\'s payment terms fee is not the fee for the ' . (int) $charged['days'] . '-day term'];
+        }
+
+        return null;
     }
 
     /**

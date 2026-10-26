@@ -29,6 +29,8 @@ final class Availability
     public const NO_COUNTRY = 'no_country';
     public const BELOW_MINIMUM = 'below_minimum';
     public const FEE_QUOTE = 'fee_quote';
+    public const NO_TERMS = 'no_terms';
+    public const FEE_TOTAL_OFF = 'fee_total_off';
 
     /** The last fee-quote withhold, for the health row. */
     public const FEE_FAILURE_KEY = 'fee_quote_failure';
@@ -56,14 +58,14 @@ final class Availability
      * The cart's gross and net are in value_currency when given (a shop that
      * keeps its amounts in its default currency), else in the cart's currency.
      *
-     * @param array{enabled: bool, currency: string, shop_currency: string, gross: float, net: float, buyer_country: string|null, value_currency?: string} $checkout
+     * @param array{enabled: bool, currency: string, shop_currency: string, gross: float, net: float, buyer_country: string|null, value_currency?: string, fee_total?: bool} $checkout
      * @param \Closure(float, string, string): ?float $convert puts an amount from one currency into another, null when it cannot
      * @param (\Closure(): ?string)|null $feeQuote why the fee this cart would be charged cannot be quoted, null when it can (or no fee applies)
      * @return array{reason: string, detail: string}|null
      */
     public function withholdReason(array $checkout, \Closure $convert, ?\Closure $feeQuote = null): ?array
     {
-        $shop = $this->shopReason($checkout['enabled']);
+        $shop = $this->shopReason($checkout['enabled'], $checkout['fee_total'] ?? true);
         if ($shop !== null) {
             return ['reason' => $shop, 'detail' => $shop];
         }
@@ -83,7 +85,10 @@ final class Availability
         $unquotable = $feeQuote === null ? null : $feeQuote();
         $stored = $this->settings->store()->get(self::FEE_FAILURE_KEY);
         if ($unquotable !== null) {
-            $this->settings->store()->setMany([self::FEE_FAILURE_KEY => (string) json_encode(['at' => ($this->clock)(), 'detail' => $unquotable])]);
+            // Written when the reason changes, not on every withheld render: the time is when this failure began.
+            if (($this->feeFailure()['detail'] ?? null) !== $unquotable) {
+                $this->settings->store()->setMany([self::FEE_FAILURE_KEY => (string) json_encode(['at' => ($this->clock)(), 'detail' => $unquotable])]);
+            }
 
             return ['reason' => self::FEE_QUOTE, 'detail' => $unquotable];
         }
@@ -119,9 +124,11 @@ final class Availability
 
     /**
      * The withhold reasons that hold for every cart, in chain order: the
-     * health row names the first.
+     * health row names the first. $feeTotalEnabled is whether the shop runs
+     * the payment terms fee order total: a surcharge it would not charge
+     * withholds Two rather than refuse every placement.
      */
-    public function shopReason(bool $enabled): ?string
+    public function shopReason(bool $enabled, bool $feeTotalEnabled = true): ?string
     {
         if (!$enabled) {
             return self::DISABLED;
@@ -145,6 +152,13 @@ final class Availability
         if ($state === BuyerCountries::MALFORMED) {
             return self::BUYER_COUNTRIES_MALFORMED;
         }
+        if (PaymentTerms::from($record, $this->settings)->offered() === []) {
+            return self::NO_TERMS;
+        }
+        $surcharge = Surcharge::from($this->settings);
+        if (!$feeTotalEnabled && (!$surcharge->isKnown() || $surcharge->enabled())) {
+            return self::FEE_TOTAL_OFF;
+        }
 
         return null;
     }
@@ -158,7 +172,7 @@ final class Availability
      * @param list<string> $shopCurrencies the shop's enabled currencies
      * @return array{shown: bool, reason: string|null, floors: list<array{amount: float, currency: string, basis: string}>, buyer_countries: list<string>, refused_currencies: list<string>, fee_quote_failure: array{at: int, detail: string}|null}
      */
-    public function health(bool $enabled, string $shopCurrency, array $shopCurrencies): array
+    public function health(bool $enabled, string $shopCurrency, array $shopCurrencies, bool $feeTotalEnabled = true): array
     {
         $refused = [];
         $usable = false;
@@ -170,7 +184,7 @@ final class Availability
                 $refused[] = $code;
             }
         }
-        $reason = $this->shopReason($enabled) ?? ($usable ? null : self::CURRENCY);
+        $reason = $this->shopReason($enabled, $feeTotalEnabled) ?? ($usable ? null : self::CURRENCY);
         $record = $reason === null ? $this->records->record() : null;
 
         return [
