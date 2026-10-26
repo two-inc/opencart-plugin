@@ -78,6 +78,7 @@ final class CallSiteAllowlistSpec
 
         self::testTriggers();
         self::testOrderStore();
+        self::testAdminWrites();
         self::testLoadable();
     }
 
@@ -127,6 +128,36 @@ final class CallSiteAllowlistSpec
             TinyAssert::true(preg_match('~new Services\(\$this->db, \$this->log, \(int\) \(?\$order\[\'store_id\'\]~', $body) === 1, 'order store: ' . $description . ' (' . $name . ') uses the order\'s store');
             TinyAssert::same(1, substr_count($body, 'new Services('), 'order store: ' . $description . ' (' . $name . ') builds its services once');
         }
+    }
+
+    /**
+     * The order postprocessing subscribers are registered on the store
+     * front's events only (OpenCart's admin registers admin/ and system/
+     * triggers), so every write the admin sends runs on the order's store
+     * instance's events. The table lists the admin methods that write; any
+     * other admin method that calls a write fails the second check.
+     */
+    private static function testAdminWrites(): void
+    {
+        $code = (string) file_get_contents(dirname(__DIR__) . '/admin/controller/payment/two.php');
+        $methods = [];
+        foreach (preg_split('~\n    (?:public|private) (?:static )?function ~', $code) ?: [] as $method) {
+            $methods[(string) strtok($method, '(')] = $method;
+        }
+        $writes = [
+            'refund' => 'the partial refund',
+            'refundRetry' => 'the retry (it resends the body the hook returned, on the same events)',
+        ];
+        foreach ($writes as $name => $description) {
+            $body = $methods[$name] ?? '';
+            TinyAssert::true(str_contains($body, '$this->catalogEvent((int) $order[\'store_id\'])'), 'admin writes: ' . $description . ' (' . $name . ') runs on the order\'s store front events');
+            TinyAssert::true(!str_contains($body, '($this->event)'), 'admin writes: ' . $description . ' (' . $name . ') never uses the admin\'s own events');
+        }
+        foreach ($methods as $name => $body) {
+            $writesHere = preg_match('~->(partial|retry|remainder|fulfil|cancel|sync)\(~', $body) === 1;
+            TinyAssert::true(!$writesHere || isset($writes[$name]), 'admin writes: ' . $name . ' sends a write but is not in the table');
+        }
+        TinyAssert::true(preg_match('~function catalogEvent\([^{]*\{[^}]*createStoreInstance\(~s', $code) === 1, 'admin writes: catalogEvent is the store instance\'s event registry');
     }
 
     private static function testLoadable(): void
