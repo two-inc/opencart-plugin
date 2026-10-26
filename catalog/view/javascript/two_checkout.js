@@ -65,6 +65,12 @@
      * parsed as markup: any other angle bracket reads as itself.
      */
     function highlight(doc, html) {
+        // The register escapes its text (&amp; and the like): decoded as text, never as markup.
+        const decoder = doc.createElement('textarea');
+        const text = (token) => {
+            decoder.innerHTML = token;
+            return doc.createTextNode(decoder.value);
+        };
         const fragment = doc.createDocumentFragment();
         const stack = [fragment];
         String(html || '').split(/(<\/?(?:mark|b)>)/).forEach((token) => {
@@ -72,7 +78,7 @@
             const host = stack[stack.length - 1];
             if (!tag) {
                 if (token) {
-                    host.appendChild(doc.createTextNode(token));
+                    host.appendChild(text(token));
                 }
             } else if (!tag[1]) {
                 const element = doc.createElement(tag[2]);
@@ -81,7 +87,7 @@
             } else if (stack.length > 1 && host.tagName.toLowerCase() === tag[2]) {
                 stack.pop();
             } else {
-                host.appendChild(doc.createTextNode(token));
+                host.appendChild(text(token));
             }
         });
         return fragment;

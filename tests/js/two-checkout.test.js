@@ -196,12 +196,14 @@ describe('company search', () => {
     test.each([
         ['<mark>Acme</mark> Ltd', 'MARK:Acme| Ltd', 'the register highlight kept'],
         ['<script>x</script>', '<script>x</script>', 'any other markup reads as text'],
+        ['<mark><b>ACME</b></mark> &amp; I LTD', 'MARK:ACME| & I LTD', 'nested marks kept, the register\'s escaping decoded as text'],
+        ['&lt;img src=x onerror=alert(1)&gt;', '<img src=x onerror=alert(1)>', 'decoded markup stays text'],
         ['</mark>Acme', '</mark>|Acme', 'a close tag that opens nothing reads as itself'],
     ])('highlight %p', (html, expected, description) => {
         const holder = document.createElement('span');
         holder.appendChild(highlight(document, html));
         const shape = Array.from(holder.childNodes).map((node) => (node.nodeType === 1 ? node.tagName + ':' + node.textContent : node.textContent)).join('|');
-        expect([shape, holder.querySelector('script')]).toEqual([expected, null]);
+        expect([shape, holder.querySelector('script, img')]).toEqual([expected, null]);
     });
 });
 
