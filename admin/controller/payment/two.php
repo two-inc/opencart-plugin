@@ -276,18 +276,26 @@ class Two extends \Opencart\System\Engine\Controller
 
     /**
      * The Two tab on the admin order page (Sales > Orders > the order),
-     * which OpenCart shows for orders paid with this extension: the Two
-     * order, the invoice and credit note downloads, and once Two has
-     * invoiced the order, the partial refund form and the refunds sent.
+     * which OpenCart shows for orders paid with this extension. OpenCart
+     * renders it inline with the page, so it is only a shell: its content
+     * (the Two order, the downloads, the refund form and the refunds sent)
+     * reads Two, and is loaded from `two.panel` when the tab is opened, so
+     * a slow or unreachable Two never holds up the order page.
      */
     public function order(): string
     {
-        return '<div id="two-order-panel">' . $this->panelHtml() . '</div>';
+        $this->load->language(self::ROUTE);
+
+        return $this->load->view(self::ROUTE . '_order_tab', [
+            'panel_action' => $this->orderLink('panel', (int) ($this->request->get['order_id'] ?? 0)),
+            'text_panel_loading' => $this->language->get('text_panel_loading'),
+            'error_panel' => $this->language->get('error_panel'),
+        ]);
     }
 
     /**
-     * The Two tab's content again, for the reload after a refund or retry.
-     * Same guard as the downloads.
+     * The Two tab's content, loaded when the tab is opened and again after
+     * a refund or retry. Same guard as the downloads.
      */
     public function panel(): void
     {
@@ -309,7 +317,7 @@ class Two extends \Opencart\System\Engine\Controller
         $services = new Services($this->db, $this->log, (int) ($order['store_id'] ?? 0));
         $record = $services->orders->get($orderId) ?? [];
         ['two' => $two, 'state' => $state, 'refundable' => $refundable] = $services->orderRefunds($this->event)->panel($orderId);
-        $link = fn (string $action): string => $this->url->link(self::ROUTE . '.' . $action, 'user_token=' . $this->session->data['user_token'] . '&order_id=' . $orderId, true);
+        $link = fn (string $action): string => $this->orderLink($action, $orderId);
 
         $remaining = $two === null ? null : OrderRefunds::remainingCents($two);
         $refunds = $services->refunds->forOrder($orderId);
@@ -350,6 +358,11 @@ class Two extends \Opencart\System\Engine\Controller
             'rates' => $two === null ? [] : OrderRefunds::rates($two),
             'refunds' => $refunds,
         ]);
+    }
+
+    private function orderLink(string $action, int $orderId): string
+    {
+        return $this->url->link(self::ROUTE . '.' . $action, 'user_token=' . $this->session->data['user_token'] . '&order_id=' . $orderId, true);
     }
 
     /**
@@ -457,10 +470,15 @@ class Two extends \Opencart\System\Engine\Controller
     private function catalogEvent(int $storeId): \Opencart\System\Engine\Event
     {
         $this->load->model('setting/store');
-        $event = $this->model_setting_store->createStoreInstance($storeId, (string) $this->config->get('config_language'))->get('event');
-        if (!$event instanceof \Opencart\System\Engine\Event) {
-            throw new \RuntimeException('The store instance has no event registry.');
+        $store = $this->model_setting_store->createStoreInstance($storeId, (string) $this->config->get('config_language'));
+        $config = $store->get('config');
+        $event = $store->get('event');
+        if (!$config instanceof \Opencart\System\Engine\Config || !$event instanceof \Opencart\System\Engine\Event) {
+            throw new \RuntimeException('The store instance has no config or event registry.');
         }
+        // The instance takes its store from the admin's host name (so store 0);
+        // set the order's store, as OpenCart's own order edit does.
+        $config->set('config_store_id', $storeId);
 
         return $event;
     }

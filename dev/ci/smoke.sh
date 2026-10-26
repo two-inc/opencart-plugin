@@ -175,7 +175,10 @@ notes=$(sql "SELECT CONCAT(order_status_id, '|', comment) FROM oc_order_history 
 expected=$(printf '%s\n' "${shipped}|" "${shipped}|Two: Not fulfilled: no Two order is linked to this order." "1|" "${canceled}|" "${canceled}|Two: Not cancelled: no Two order is linked to this order.")
 [ "$notes" = "$expected" ] || fail "the order lifecycle did not note its refusals at the merchant's status (got '${notes}')"
 ok "an admin status change runs the order lifecycle and notes the outcome"
-contains "the Two tab on the admin order page" "$(admin 'sale/order.info&order_id=9001')" 'No Two order is linked to this order.'
+# The order page carries only the Two tab's shell, which loads the content from two.panel when opened.
+info=$(admin 'sale/order.info&order_id=9001')
+contains "the Two tab's shell on the admin order page" "$info" 'Asking Two for this order...'
+contains "the Two tab loads from its own route" "$info" 'extension/two/payment/two.panel'
 # Refunds: the table and the edit key column exist, and the refund action refuses an order with no Two order.
 [ "$(sql "SHOW TABLES LIKE 'oc_two_refund'")" = "oc_two_refund" ] || fail "install did not create the two_refund table"
 [ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'edit_key'" | cut -f1)" = "edit_key" ] || fail "install did not add the edit_key column"

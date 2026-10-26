@@ -41,7 +41,7 @@ Every order request the extension sends to Two (order create, update, confirm, c
 public function handle(array &$payload, array $context): void
 ```
 
-Your subscriber runs for requests sent from the admin too (the refund form on the order page): the extension fires the event on the order's store front, the way OpenCart's own admin order edits run, so a `catalog/` subscriber sees every request whichever side sends it.
+Your subscriber runs for requests sent from the admin too (the refund form on the order page): the extension fires the event on the order's store front (with the order's store as `config_store_id`), the way OpenCart's own admin order edits run, so a `catalog/` subscriber sees every request whichever side sends it.
 
 - `context` carries `request_type` (`order_intent`, `order_create`, `order_update`, `order_confirm`, `capture`, `refund`, `cancel`), `trigger`, `endpoint`, `order_id`, the shop's `order`, `shipping_tax_rate`, `fallback_shipping_tax_rate` and `contract_version` (1). Confirm, cancel and capture carry an empty payload, and so does a refund of a whole order nothing has been refunded from yet; what your handler returns is what is sent. A refund that waits for a retry is resent exactly as your handler returned it the first time, without running the handlers again.
 - Handlers run in the event's sort order. The extension never recomputes after them: a handler that edits a line also updates the totals it affects, for example with the totals helper `\Opencart\System\Library\Extension\Two\Core\Postprocessing::recomputeTotals($payload)`.
