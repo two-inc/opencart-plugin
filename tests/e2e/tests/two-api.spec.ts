@@ -76,21 +76,32 @@ test("Two refuses a wrong API key, an order whose amounts do not add up and a ma
     line_items: [item],
     tax_subtotals: [{ tax_rate: item.tax_rate, taxable_amount: item.net_amount, tax_amount: item.tax_amount }],
   };
+  // Part prepaid, less a 1.00 surcharge at 20%: the subtotals add up to the amount plus the prepaid amount.
+  const surcharged = {
+    ...refund,
+    amount: add(refund.amount, -220),
+    prepaid_amount: "1.00",
+    buyer_refund_surcharges: [{ surcharge_type: "processing_fee", amount: "1.00", tax_rate: "0.2" }],
+    tax_subtotals: [{ tax_rate: item.tax_rate, taxable_amount: add(item.net_amount, -100), tax_amount: add(item.tax_amount, -20) }],
+    note: "a field Two ignores",
+  };
   const refunds: [string, object, string][] = [
     ["the amount is a penny over its lines", { ...refund, amount: add(refund.amount, 1) }, "REFUND_AMOUNT_INCONSISTENT"],
     ["the currency is not the order's", { ...refund, currency: order.currency === "EUR" ? "GBP" : "EUR" }, "REFUND_CURRENCY_ERROR"],
     // Two allows a refund line two pence either way.
     ["a line's tax is a pound over its rate, its net a pound under", { ...refund, line_items: [{ ...item, net_amount: add(item.net_amount, -100), tax_amount: add(item.tax_amount, 100) }] }, "REFUND_LINE_ITEMS_INVALID"],
     ["a full refund names a currency", { currency: order.currency }, "SCHEMA_ERROR"],
-    ["the amount and prepaid amount leave out a surcharge", { ...refund, amount: add(refund.amount, -100), prepaid_amount: "1.00", buyer_refund_surcharges: [{ surcharge_type: "processing_fee", amount: "1.00", tax_rate: "0.2" }] }, "REFUND_AMOUNT_INCONSISTENT"],
+    ["the amount and prepaid amount leave out a surcharge", { ...surcharged, amount: add(surcharged.amount, 120) }, "REFUND_AMOUNT_INCONSISTENT"],
+    ["the subtotals add up to the lines, not to the amount less the surcharge", { ...surcharged, tax_subtotals: refund.tax_subtotals }, "REFUND_AMOUNT_INCONSISTENT"],
+    // Two takes a rounded unit price as exact on a refund only when it makes the subtotals itself.
+    ["100 at a rounded 0.33, with subtotals", { amount: "40.00", currency: order.currency, line_items: [pens], tax_subtotals: [{ tax_rate: "0.2", taxable_amount: "33.33", tax_amount: "6.67" }] }, "REFUND_LINE_ITEMS_INVALID"],
   ];
   for (const [what, body, code] of refunds) {
     const refused = callTwo("POST", `/v1/order/${twoId}/refund`, body, STUB_API_KEY);
     expect([refused.status, refused.json.error_code], what).toEqual([400, code]);
   }
   expect((await stubOrder(twoId)).refunds, "no refused refund is applied").toHaveLength(0);
-  const partial = { ...refund, amount: add(refund.amount, -220), prepaid_amount: "1.00", buyer_refund_surcharges: [{ surcharge_type: "processing_fee", amount: "1.00", tax_rate: "0.2" }], note: "a field Two ignores" };
-  expect(callTwo("POST", `/v1/order/${twoId}/refund`, partial, STUB_API_KEY).status, "the lines less a surcharge with its tax, part prepaid, are accepted").toBe(201);
+  expect(callTwo("POST", `/v1/order/${twoId}/refund`, surcharged, STUB_API_KEY).status, "the lines less a surcharge with its tax, part prepaid, are accepted").toBe(201);
   const full = { order_revision: "6f1c2e44-1d5a-4c1e-9a43-0c6f1f1b6a10", note: "a field Two ignores" };
   expect(callTwo("POST", `/v1/order/${twoId}/refund`, full, STUB_API_KEY).status, "a full refund with a revision and an unknown field is accepted").toBe(201);
   await expectState(twoId, "REFUNDED");
