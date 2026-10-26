@@ -30,6 +30,7 @@ final class OrderEditSpec
     {
         self::testSync();
         self::testKeyChain();
+        self::testSequences();
     }
 
     private static function testSync(): void
@@ -103,6 +104,43 @@ final class OrderEditSpec
         $body = json_decode((string) end($transport->calls)['body'], true);
         TinyAssert::same(IdempotencyKey::edit(self::ID, $keys[1], OrderFlow::payloadHash($body)), $keys[2], 'key chain: the next edit chains on the last accepted key');
         TinyAssert::same($keys[2], $records->rows[42]['edit_key'], 'key chain: the latest accepted key is stored');
+    }
+
+    /**
+     * Edits in a row against one stored order. Each step is the Widgets the
+     * order holds then and Two's answer to the edit (null: nothing should
+     * be sent); every step also reads Two's state first when it sends.
+     */
+    private static function testSequences(): void
+    {
+        $ok = self::get('CONFIRMED');
+        $timeout = HttpResponse::unreachable('timeout');
+        $cases = [
+            [[[3, $timeout], [2, $ok]], [3, 2], 2, 'a timeout (Two may hold 3), then back to 2 as placed: 2 is sent, not skipped'],
+            [[[3, self::json(502, [])], [2, $ok]], [3, 2], 2, 'a 5xx, then back to 2 as placed: 2 is sent'],
+            [[[3, $timeout], [3, $ok]], [3, 3], 3, 'a timeout, then the same order: sent again'],
+            [[[3, self::json(400, ['error_code' => 'X'])], [3, null]], [3], 2, 'an edit Two refused: the same edit is not sent or noted again'],
+            [[[3, self::json(400, ['error_code' => 'X'])], [4, $ok]], [3, 4], 4, 'an edit Two refused, then another edit: the new one is sent'],
+        ];
+        foreach ($cases as [$steps, $sent, $accepted, $description]) {
+            $responses = [];
+            foreach ($steps as [, $answer]) {
+                if ($answer !== null) {
+                    $responses[] = $ok;
+                    $responses[] = $answer;
+                }
+            }
+            [$edit, $transport, $records] = self::edit($responses, 'CONFIRMED');
+            $outcomes = [];
+            foreach ($steps as [$quantity]) {
+                $outcomes[] = $edit->sync(42, self::rows($quantity), static fn (array $record): array => self::input($quantity))['outcome'] ?? null;
+            }
+            $d = 'edit sequence: ' . $description;
+            $puts = array_values(array_filter($transport->calls, static fn (array $call): bool => $call['method'] === 'PUT'));
+            TinyAssert::same($sent, array_map(static fn (array $call): int => (int) json_decode((string) $call['body'], true)['line_items'][0]['quantity'], $puts), $d . ': the quantities sent');
+            TinyAssert::same(OrderLifecycle::rowsHash(self::rows($accepted)), $records->rows[42]['rows_hash'], $d . ': the rows Two last accepted');
+            TinyAssert::same(count(array_filter($outcomes)), count($puts), $d . ': a note only for an edit sent');
+        }
     }
 
     /**

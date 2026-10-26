@@ -110,7 +110,7 @@ final class OrderStatusEventSpec
     {
         $placed = ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => []];
         $rows = $edited ? ['products' => [['product_id' => '7', 'quantity' => '3']], 'totals' => [], 'addresses' => []] : $placed;
-        $records = new MemoryRecords([42 => ['two_order_id' => self::ID, 'two_order_state' => $stored, 'rows_hash' => OrderLifecycle::rowsHash($placed)]]);
+        $records = new MemoryRecords([42 => ['two_order_id' => self::ID, 'two_order_state' => $stored, 'payload_hash' => str_repeat('a', 64), 'rows_hash' => OrderLifecycle::rowsHash($placed)]]);
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
         $client = new Client(new Environment(false), new SettingsProvider(new MemoryStore(['api_key' => 'key-0123456789', 'environment' => 'sandbox'])), new CustomHeaders(), $transport, $logger, '1.0.0');

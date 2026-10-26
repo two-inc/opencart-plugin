@@ -19,8 +19,11 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   key (the create key for the first edit). Each accepted edit stores its
  *   key, payload hash and rows hash, so the later fulfil check passes.
  * - When the outcome is unknown (no answer, or a 5xx) the stored payload
- *   hash is cleared, so the next save always sends the edit, under the same
- *   key as long as the order is unchanged.
+ *   hash is cleared, so the next save always sends the order as it then is,
+ *   even edited back to what Two last accepted, and fulfil waits until Two
+ *   has accepted it. The key repeats as long as the order is unchanged.
+ * - An edit Two refuses keeps its rows hash, so the same edit is not sent
+ *   or noted again; a different edit is.
  * - After fulfilment an edit is refused with a note, never sent: Two has
  *   invoiced the order as it was.
  */
@@ -62,7 +65,10 @@ final class OrderEdit
         }
         $rowsHash = OrderLifecycle::rowsHash($rows);
         $stored = $record['two_order_state'] ?? '';
-        if (hash_equals($record['rows_hash'], $rowsHash) || $stored === 'CANCELLED') {
+        // An edit whose outcome is unknown cleared payload_hash: whatever the rows are now, even back as
+        // they were, Two may hold something else, so the order is always sent.
+        $unknown = ($record['payload_hash'] ?? '') === '';
+        if ($stored === 'CANCELLED' || (!$unknown && (hash_equals($record['rows_hash'], $rowsHash) || hash_equals($record['edit_refused_hash'] ?? '', $rowsHash)))) {
             return null;
         }
         if (in_array($stored, OrderLifecycle::FULFILLED_STATES, true)) {
@@ -105,12 +111,15 @@ final class OrderEdit
         $key = IdempotencyKey::edit($twoOrderId, $previous, OrderFlow::payloadHash($body));
         $response = $this->client->request('PUT', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header($key));
         if ($response->reachedTwo() && $response->status < 300) {
-            $this->records->put($orderId, ['payload_hash' => $snapshot, 'rows_hash' => $rowsHash, 'edit_key' => $key] + OrderFlow::stateFields($response->json() ?? []));
+            $this->records->put($orderId, ['payload_hash' => $snapshot, 'rows_hash' => $rowsHash, 'edit_key' => $key, 'edit_refused_hash' => ''] + OrderFlow::stateFields($response->json() ?? []));
             $this->logger->info('Order ' . $orderId . ': Two order ' . $twoOrderId . ' updated, idempotency key ' . $key . '.');
 
             return ['outcome' => OrderLifecycle::DONE, 'reason' => 'Two order ' . $twoOrderId . ' updated with this order\'s changes.'];
         }
         if ($response->reachedTwo() && $response->status < 500) {
+            // Kept so the same refused edit is not resent and noted on every status save; another edit is still tried.
+            $this->records->put($orderId, ['edit_refused_hash' => $rowsHash]);
+
             return $this->refused($orderId, 'Two refused the edit to order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' Two still holds the order as before, so it will not be fulfilled until the order matches.');
         }
         // Two may or may not hold the edit: the next save must send it whatever the hash says.

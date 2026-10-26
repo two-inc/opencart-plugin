@@ -136,6 +136,9 @@ final class OrderLifecycle
         if (($record['rows_hash'] ?? '') === '') {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: no record of the order as placed was kept, so it cannot be checked. Fulfil it in the Two merchant portal.');
         }
+        if (($record['payload_hash'] ?? '') === '') {
+            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: whether Two holds the last edit of this order is unknown. Save the status again to send the order to Two first.');
+        }
         if ($rows === null || !hash_equals($record['rows_hash'], self::rowsHash($rows))) {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: the order was edited after it was placed with Two. Two still holds the order as placed.');
         }

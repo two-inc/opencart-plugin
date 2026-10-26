@@ -9,11 +9,12 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * row per shop order id, holding what later requests need after the checkout
  * session is gone: the Two order id and state, the callback token's hash, the create payload's hash,
  * the company the buyer entered, the hash of the order's own rows as Two last
- * accepted them and the last accepted edit's idempotency key.
+ * accepted them, the last accepted edit's idempotency key and the rows hash
+ * of the last edit Two refused.
  */
 interface OrderRecords
 {
-    public const FIELDS = ['two_order_id', 'two_order_state', 'two_order_status', 'token_hash', 'payload_hash', 'company_name', 'organization_number', 'country_code', 'rows_hash', 'edit_key'];
+    public const FIELDS = ['two_order_id', 'two_order_state', 'two_order_status', 'token_hash', 'payload_hash', 'company_name', 'organization_number', 'country_code', 'rows_hash', 'edit_key', 'edit_refused_hash'];
 
     /** Column widths of the buyer's fields: longer values are refused at entry, never truncated. */
     public const MAX_LENGTHS = ['company_name' => 255, 'organization_number' => 64, 'country_code' => 2];

@@ -101,6 +101,7 @@ final class OrderLifecycleSpec
             ['stored' => 'VERIFIED', 'responses' => [$get('VERIFIED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'VERIFIED', 'description' => 'not confirmed at Two: refused'],
             ['stored' => 'CONFIRMED', 'rows' => self::rows(['quantity' => '3']), 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'edited after it was placed', 'description' => 'the order was edited after it was placed: refused, nothing asked'],
             ['stored' => 'CONFIRMED', 'rows' => null, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'description' => 'the shop order is gone: refused'],
+            ['stored' => 'CONFIRMED', 'unknown_edit' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'last edit of this order is unknown', 'description' => 'an edit with an unknown outcome: refused until Two has the order, even with the rows back as placed'],
             ['stored' => 'CONFIRMED', 'unhashed' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'merchant portal', 'description' => 'no rows hash kept (placed before it was stored): refused, never fulfilled unchecked'],
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), self::json(400, ['error_code' => 'X'])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $post], 'state' => 'CONFIRMED', 'description' => 'Two refuses the fulfil: refused, state kept so a re-save retries'],
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), HttpResponse::unreachable('timeout')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $post], 'state' => 'CONFIRMED', 'description' => 'Two not reached: refused'],
@@ -108,6 +109,9 @@ final class OrderLifecycleSpec
         ];
         foreach ($cases as $case) {
             [$lifecycle, $transport, $records, $logger] = self::lifecycle($case['responses'], $case['stored'], $case['handlers'] ?? [], !empty($case['unhashed']));
+            if (!empty($case['unknown_edit'])) {
+                $records->rows[42]['payload_hash'] = '';
+            }
             $result = $lifecycle->fulfil(42, array_key_exists('rows', $case) ? $case['rows'] : self::rows());
             $d = 'fulfil: ' . $case['description'];
             self::check($d, $case, $result, $transport, $records, $logger);
