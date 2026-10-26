@@ -56,7 +56,7 @@ class Two extends \Opencart\System\Engine\Controller
                     'refunds' => $services->orderRefunds($this->event),
                     'edit' => $services->orderEdit($this->event),
                     // The payload's identity leaves out the callback URLs, so an edit rebuilds without them.
-                    'rebuild' => OrderFlow::rebuildFrom(static fn (array $company, array $fields): ?array => $model->orderInput((int) $order['order_id'], $company, [], $fields)),
+                    'rebuild' => OrderFlow::rebuildFrom(static fn (array $company, array $fields, array $terms): ?array => $model->orderInput((int) $order['order_id'], $company, [], $fields, $terms)),
                     'fulfil' => $services->settings->fulfilStatusIds(),
                     'cancel' => $services->settings->cancelStatusId(),
                     'refund' => $services->settings->refundStatusId(),

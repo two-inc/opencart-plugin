@@ -28,6 +28,20 @@
     </div>
   {% endfor %}
   <div id="two-intent-notice" role="status" aria-live="polite"></div>
+  {% if terms %}
+    <div class="mb-3" data-two-terms>
+      <h4 class="h6" id="two-terms-title">{{ text_terms_title|e }}</h4>
+      <p class="form-text" id="two-terms-description">{{ text_terms_description|e }}</p>
+      <div class="d-flex flex-wrap gap-2" role="radiogroup" aria-labelledby="two-terms-title" aria-describedby="two-terms-description" data-two-term-chips>
+        {% for term in terms %}
+          <button type="button" role="radio" class="btn btn-sm {{ term.days == selected_term ? 'btn-primary' : 'btn-outline-primary' }}" data-two-term="{{ term.days }}" aria-checked="{{ term.days == selected_term ? 'true' : 'false' }}" tabindex="{{ term.days == selected_term ? '0' : '-1' }}"{% if term.name %} aria-label="{{ term.name|e }}"{% endif %}{% if terms|length == 1 %} aria-disabled="true"{% endif %}>
+            <span>{{ term.text|e }}</span> <span class="small" data-two-term-fee></span>
+          </button>
+        {% endfor %}
+      </div>
+      <p class="form-text mb-0" data-two-pay-in aria-live="polite">{{ text_pay_in|e }}</p>
+    </div>
+  {% endif %}
 </form>
 <div class="text-end">
   <button type="button" id="button-two-confirm" class="btn btn-primary">{{ button_confirm|e }}</button>

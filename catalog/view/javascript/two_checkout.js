@@ -8,6 +8,10 @@
  *   work independently and whatever else is on the page.
  * - The order intent, asked from the tile once Two is the chosen method and
  *   the company is known; never while the method list renders.
+ * - The payment term chips in the tile (section 4), an ARIA radiogroup: a
+ *   choice is saved to the shop and the order totals reloaded, so the
+ *   payment terms fee follows the term. Both go through the call queue, so
+ *   Confirm waits for them.
  *
  * Settings come from the JSON island the checkout page event adds
  * (`#two-checkout-config`). Every call goes to the shop, which relays it to
@@ -833,6 +837,18 @@
         /** The payment tile has rendered (Two is the chosen method). */
         tileReady(form) {
             this.tile = form;
+            const group = form.querySelector('[data-two-term-chips]');
+            if (group) {
+                this.terms = new TermChips({
+                    group: group,
+                    api: this.api,
+                    config: this.config,
+                    doc: this.doc,
+                    alert: (message, escaped) => this.alert(message, escaped),
+                    payIn: form.querySelector('[data-two-pay-in]'),
+                    endOfMonth: Boolean(this.config.end_of_month)
+                }).start();
+            }
             if (form.getAttribute('data-two-tile') === 'search') {
                 const select = form.querySelector('[data-two-country]');
                 const instance = this.mount('tile', form.querySelector('[data-two-company]'), () => (select ? select.value : ''), form.querySelector('[data-two-organization]'));
@@ -880,7 +896,148 @@
         }
     }
 
-    const api = { Api: Api, CompanySearch: CompanySearch, Checkout: Checkout, highlight: highlight, labelFor: labelFor, readConfig: readConfig };
+    /** How long arrow-key traversal waits before saving, so a run of keystrokes saves once. */
+    const TERM_SAVE_DELAY_MS = 250;
+
+    /**
+     * The payment term chips (Build Guide section 4): one radio per offered
+     * term in a radiogroup, one tab stop on the chosen chip, arrow keys,
+     * Home and End moving the choice (the W3C radio group pattern). A single
+     * term is shown, not chosen. Each chip shows the fee its term would add,
+     * once the shop has quoted it; a term whose quote fails shows none.
+     */
+    class TermChips {
+        constructor(options) {
+            this.group = options.group;
+            this.api = options.api;
+            this.config = options.config;
+            this.doc = options.doc;
+            this.alert = options.alert || (() => {});
+            this.payIn = options.payIn || null;
+            this.endOfMonth = Boolean(options.endOfMonth);
+            this.timer = null;
+            this.chips = Array.prototype.slice.call(this.group.querySelectorAll('[data-two-term]'));
+            const checked = this.chips.find((chip) => chip.getAttribute('aria-checked') === 'true');
+            this.saved = checked ? Number(checked.dataset.twoTerm) : null;
+        }
+
+        start() {
+            if (this.chips.length > 1) {
+                this.chips.forEach((chip) => chip.addEventListener('click', () => {
+                    clearTimeout(this.timer);
+                    this.choose(Number(chip.dataset.twoTerm));
+                }));
+                this.group.addEventListener('keydown', (event) => this.key(event));
+            }
+            this.fees();
+            return this;
+        }
+
+        key(event) {
+            if (event.altKey || event.ctrlKey || event.metaKey) {
+                return;
+            }
+            const current = Math.max(this.chips.indexOf(this.doc.activeElement), 0);
+            const last = this.chips.length - 1;
+            const next = { ArrowRight: current + 1, ArrowDown: current + 1, ArrowLeft: current - 1, ArrowUp: current - 1, Home: 0, End: last }[event.key];
+            if (next === undefined) {
+                return;
+            }
+            event.preventDefault();
+            const chip = this.chips[(next + this.chips.length) % this.chips.length];
+            const days = Number(chip.dataset.twoTerm);
+            this.select(days);
+            chip.focus();
+            clearTimeout(this.timer);
+            this.timer = setTimeout(() => this.save(days), TERM_SAVE_DELAY_MS);
+        }
+
+        /** One predicate sets the tick, the state and the tab stop, so they cannot drift apart. */
+        select(days) {
+            this.chips.forEach((chip) => {
+                const on = Number(chip.dataset.twoTerm) === days;
+                chip.setAttribute('aria-checked', on ? 'true' : 'false');
+                chip.tabIndex = on ? 0 : -1;
+                chip.classList.toggle('btn-primary', on);
+                chip.classList.toggle('btn-outline-primary', !on);
+            });
+            if (this.payIn) {
+                const copy = this.endOfMonth ? this.config.i18n.pay_in_eom : this.config.i18n.pay_in;
+                this.payIn.textContent = (copy || '').replace('%d', String(days));
+            }
+        }
+
+        choose(days) {
+            this.select(days);
+            return this.save(days);
+        }
+
+        /** Saves the term, then reloads the totals; a refused term puts the last saved one back. */
+        save(days) {
+            return this.api.post('term', { days: String(days) }).then((json) => {
+                if (!json || !json.ok) {
+                    if (this.saved !== null) {
+                        this.select(this.saved);
+                    }
+                    if (json && json.error) {
+                        this.alert(json.error, true);
+                    }
+                    return null;
+                }
+                this.saved = days;
+                return this.totals();
+            }).catch(() => {
+                if (this.saved !== null) {
+                    this.select(this.saved);
+                }
+            });
+        }
+
+        /**
+         * Rewrites the order's totals for the new term: the checkout's own
+         * confirm view writes the order and renders its totals, of which only
+         * the totals rows are swapped in, so nothing the buyer typed is lost.
+         */
+        totals() {
+            const url = this.config.urls.totals;
+            if (!url) {
+                return Promise.resolve();
+            }
+            return this.api.serial('totals', () => this.api.fetch(url, { credentials: 'same-origin' }).then((response) => response.text())).then((html) => {
+                const parsed = this.doc.createElement('template');
+                parsed.innerHTML = html;
+                const fresh = parsed.content.querySelector('tfoot');
+                const host = this.doc.getElementById('checkout-confirm');
+                const stale = host ? host.querySelector('tfoot') : null;
+                if (fresh && stale) {
+                    stale.replaceWith(this.doc.importNode(fresh, true));
+                }
+            });
+        }
+
+        /** Fills each chip's fee from the shop's quotes; the shop escapes them. */
+        fees() {
+            if (!this.config.urls.fees) {
+                return Promise.resolve();
+            }
+            return this.api.get('fees').then((json) => {
+                const fees = (json && json.fees) || {};
+                this.chips.forEach((chip) => {
+                    const slot = chip.querySelector('[data-two-term-fee]');
+                    const fee = fees[chip.dataset.twoTerm];
+                    if (slot) {
+                        slot.innerHTML = fee || '';
+                    }
+                    const name = chip.getAttribute('aria-label');
+                    if (fee && name && slot) {
+                        chip.setAttribute('aria-label', name + ', ' + slot.textContent);
+                    }
+                });
+            }).catch(() => null);
+        }
+    }
+
+    const api = { Api: Api, TermChips: TermChips, CompanySearch: CompanySearch, Checkout: Checkout, highlight: highlight, labelFor: labelFor, readConfig: readConfig };
 
     if (typeof module === 'object' && module.exports) {
         module.exports = api;

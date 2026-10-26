@@ -127,6 +127,7 @@ final class OrderFlow
             'organization_number' => trim((string) $company['organization_number']),
             'country_code' => trim((string) $company['country_code']),
             'buyer_fields' => BuyerFields::encode(is_array($order['buyer_fields'] ?? null) ? $order['buyer_fields'] : []),
+            'payment_terms' => is_array($order['terms'] ?? null) ? (string) json_encode($order['terms']) : '',
         ];
         $this->records->put($orderId, $stored);
         $record = $this->records->get($orderId) ?? [];
@@ -373,12 +374,12 @@ final class OrderFlow
 
     /**
      * The rebuild of a placed order from its record, for the confirm and the
-     * edit sync alike: the company and the optional buyer fields as stored
-     * with the order, so a rebuild hashes to what Two was sent. $orderInput
+     * edit sync alike: the company, the optional buyer fields and the payment
+     * terms as stored with the order, so a rebuild hashes to what Two was sent. $orderInput
      * maps the shop order with that company and those fields, without
      * callback URLs (the payload's identity leaves them out).
      *
-     * @param \Closure(array{company_name: string, organization_number: string, country_code: string}, array<string, string>): (array<string, mixed>|null) $orderInput
+     * @param \Closure(array{company_name: string, organization_number: string, country_code: string}, array<string, string>, array<string, mixed>): (array<string, mixed>|null) $orderInput
      * @return \Closure(array<string, string>): (array<string, mixed>|null)
      */
     public static function rebuildFrom(\Closure $orderInput): \Closure
@@ -387,7 +388,7 @@ final class OrderFlow
             'company_name' => $record['company_name'] ?? '',
             'organization_number' => $record['organization_number'] ?? '',
             'country_code' => $record['country_code'] ?? '',
-        ], BuyerFields::decode($record['buyer_fields'] ?? ''));
+        ], BuyerFields::decode($record['buyer_fields'] ?? ''), PaymentTerms::decode($record['payment_terms'] ?? '') ?? []);
     }
 
     /**

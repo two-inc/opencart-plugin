@@ -75,6 +75,52 @@ final class FeeQuote
     }
 
     /**
+     * The fee this cart is charged: for the buyer's term when offered, else
+     * the default. `applies` is false when no fee applies (no surcharge, no
+     * offered term, a term that prices nothing, an empty cart); `net` is
+     * null when one applies but cannot be quoted (the failure says why).
+     *
+     * @return array{applies: bool, days: int|null, net: float|null}
+     */
+    public function charged(Surcharge $surcharge, PaymentTerms $terms, ?int $chosen, float $gross, string $buyerCountry, string $currency, string $shopCurrency): array
+    {
+        $this->failure = '';
+        $days = $terms->selected($chosen);
+        if (!$surcharge->isKnown()) {
+            $this->failure = 'the stored surcharge method "' . $surcharge->type . '" is not one the plugin knows';
+
+            return ['applies' => true, 'days' => $days, 'net' => null];
+        }
+        if (!$surcharge->enabled() || $days === null || $gross <= 0 || !$surcharge->pricesFee($days, $terms->defaultTerm(), $terms->isEndOfMonth())) {
+            return ['applies' => false, 'days' => $days, 'net' => null];
+        }
+        $quote = $this->quote($surcharge, $terms, $days, $gross, $buyerCountry, $currency, $shopCurrency);
+
+        return ['applies' => true, 'days' => $days, 'net' => $quote['net'] ?? null];
+    }
+
+    /**
+     * The availability gate's currency half (Build Guide section 18): a fixed
+     * fee or cap with no FX rate into the cart currency fails every term
+     * alike, so it is checked across them. Null when every term converts.
+     * The other half is charged(): a failed quote is judged for the one term
+     * the cart would be charged, since another term may still quote.
+     */
+    public function currencyFailure(Surcharge $surcharge, PaymentTerms $terms, string $currency, string $shopCurrency): ?string
+    {
+        if (!$surcharge->isKnown() || !$surcharge->enabled() || strtoupper(trim($currency)) === strtoupper(trim($shopCurrency))) {
+            return null;
+        }
+        foreach ($terms->offered() as $days) {
+            if ($this->payload($surcharge, $terms, $days, 1.0, '', $currency, $shopCurrency) === null) {
+                return $this->failure;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * The quote request, or null (with the failure set) when the grid row
      * cannot be put in the quote currency.
      *

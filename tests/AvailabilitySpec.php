@@ -71,6 +71,24 @@ final class AvailabilitySpec
         self::testPlacement();
         self::testBuyerCountryStates();
         self::testHealth();
+        self::testFeeGate();
+    }
+
+    /** The fee-quote gate closes the chain, records its failure for the health row, and a later quote clears it. */
+    private static function testFeeGate(): void
+    {
+        $convert = static fn (float $amount, string $from, string $to): ?float => null;
+        $cases = [
+            [null, '', null, '', 'no fee gate passed (no surcharge) offers Two'],
+            [static fn (): ?string => null, 'x', null, '', 'a fee that quotes offers Two and clears the stored failure'],
+            [static fn (): string => 'the fee quote failed (HTTP 503)', '', Availability::FEE_QUOTE, '{"at":1800000000,"detail":"the fee quote failed (HTTP 503)"}', 'a fee that cannot be quoted withholds Two and is recorded'],
+        ];
+        foreach ($cases as [$gate, $stored, $expected, $after, $description]) {
+            [$availability, , $store] = self::availability([], [Availability::FEE_FAILURE_KEY => $stored], [new HttpResponse(200, '{"id":"m1"}')]);
+            $reason = $availability->withholdReason(self::CART, $convert, $gate);
+            TinyAssert::same($expected, $reason['reason'] ?? null, 'fee gate: ' . $description);
+            TinyAssert::same($after, $gate === null ? '' : (string) $store->values[Availability::FEE_FAILURE_KEY], 'fee gate stored failure: ' . $description);
+        }
     }
 
     /** What placement re-checks, since the page may be stale: the currency, then the buyer country. */
@@ -108,18 +126,20 @@ final class AvailabilitySpec
     private static function testHealth(): void
     {
         $cases = [
-            [[], [], ['GBP'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'shown, no constraints'],
-            [[], ['api_key' => ''], ['GBP'], ['shown' => false, 'reason' => Availability::NO_API_KEY, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'no key names the reason'],
-            [[], [], ['CHF'], ['shown' => false, 'reason' => Availability::CURRENCY, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'no enabled currency Two invoices in'],
-            [[], [], ['CHF', 'EUR'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => ['CHF']], 'a default currency Two does not invoice in, but another it does: shown, the default named as a constraint'],
-            [['short_name' => ''], [], ['GBP'], ['shown' => false, 'reason' => Availability::MERCHANT_UNIDENTIFIED, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => []], 'a merchant not yet identified'],
+            [[], [], ['GBP'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => [], 'fee_quote_failure' => null], 'shown, no constraints'],
+            [[], ['api_key' => ''], ['GBP'], ['shown' => false, 'reason' => Availability::NO_API_KEY, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => [], 'fee_quote_failure' => null], 'no key names the reason'],
+            [[], [], ['CHF'], ['shown' => false, 'reason' => Availability::CURRENCY, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => [], 'fee_quote_failure' => null], 'no enabled currency Two invoices in'],
+            [[], [], ['CHF', 'EUR'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => ['CHF'], 'fee_quote_failure' => null], 'a default currency Two does not invoice in, but another it does: shown, the default named as a constraint'],
+            [['short_name' => ''], [], ['GBP'], ['shown' => false, 'reason' => Availability::MERCHANT_UNIDENTIFIED, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => [], 'fee_quote_failure' => null], 'a merchant not yet identified'],
             [
                 ['supported_buyer_countries' => ['GB'], 'min_order_amount' => 50, 'min_order_currency' => 'GBP', 'min_order_basis' => 'gross'],
                 ['min_order_amount' => '80', 'min_order_basis' => 'gross'],
                 ['GBP', 'CHF', 'EUR'],
-                ['shown' => true, 'reason' => null, 'floors' => [['amount' => 80.0, 'currency' => 'GBP', 'basis' => 'gross']], 'buyer_countries' => ['GB'], 'refused_currencies' => ['CHF']],
+                ['shown' => true, 'reason' => null, 'floors' => [['amount' => 80.0, 'currency' => 'GBP', 'basis' => 'gross']], 'buyer_countries' => ['GB'], 'refused_currencies' => ['CHF'], 'fee_quote_failure' => null],
                 'the constraints, with the higher of two floors in one currency and basis',
             ],
+            [[], [Availability::FEE_FAILURE_KEY => '{"at":1800000000,"detail":"the fee quote failed (HTTP 503)"}'], ['GBP'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => [], 'fee_quote_failure' => ['at' => 1_800_000_000, 'detail' => 'the fee quote failed (HTTP 503)']], 'the last fee-quote withhold is named'],
+            [[], [Availability::FEE_FAILURE_KEY => ''], ['GBP'], ['shown' => true, 'reason' => null, 'floors' => [], 'buyer_countries' => [], 'refused_currencies' => [], 'fee_quote_failure' => null], 'a cleared fee-quote failure is not'],
         ];
         foreach ($cases as [$record, $settings, $currencies, $expected, $description]) {
             [$availability] = self::availability($record, $settings, [new HttpResponse(200, '{"id":"m1"}')]);
@@ -137,7 +157,7 @@ final class AvailabilitySpec
      * @param array<string, mixed>  $record
      * @param array<string, string> $settings
      * @param list<HttpResponse>    $responses
-     * @return array{0: Availability, 1: ScriptedTransport}
+     * @return array{0: Availability, 1: ScriptedTransport, 2: MemoryStore}
      */
     private static function availability(array $record, array $settings, array $responses): array
     {
@@ -150,6 +170,6 @@ final class AvailabilitySpec
         $clock = static fn (): int => self::NOW;
         $verdict = new ApiKeyVerdict($client, $provider, $clock);
 
-        return [new Availability($provider, new RecordProvider($client, $provider, $verdict, $logger, $clock), $verdict), $transport];
+        return [new Availability($provider, new RecordProvider($client, $provider, $verdict, $logger, $clock), $verdict, $clock), $transport, $store];
     }
 }

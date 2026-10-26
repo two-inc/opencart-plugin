@@ -66,7 +66,7 @@ final class SettingsSave
      * Validates and writes the submitted settings in one write, then brings
      * the verdict (and, for new credentials, the merchant record) up to date.
      *
-     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string} $submitted
+     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string, payment_term_type?: string, payment_terms?: list<string>, default_payment_term?: string, surcharge_type?: string, surcharge_differential?: string, surcharge_rounding_basis?: string, surcharge_rounding_step?: string, surcharge_line_description?: string, surcharge_tax_class_id?: string, surcharge_grid?: array<int|string, array<string, string>>} $submitted
      * @param list<int> $orderStatusIds the shop's order statuses, which the maps may name
      * @param int       $voidStatusId   the shop's void status (0 for none), which no map may name
      * @param list<int> $taxClassIds    the shop's tax classes, which the surcharge's tax class must be one of

@@ -13,6 +13,7 @@ use Opencart\System\Library\Extension\Two\Core\RefundRecords;
 use Opencart\System\Library\Extension\Two\Core\RateLimiter;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
+use Opencart\System\Library\Extension\Two\Core\Surcharge;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\DbRefundRecords;
@@ -46,6 +47,9 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\Admin\Model\Localisation\Language $model_localisation_language
  * @property-read \Opencart\Admin\Model\Localisation\OrderStatus $model_localisation_order_status
  * @property-read \Opencart\Admin\Model\Localisation\Currency $model_localisation_currency
+ * @property-read \Opencart\Admin\Model\Localisation\TaxClass $model_localisation_tax_class
+ * @property-read \Opencart\Admin\Model\Setting\Extension $model_setting_extension
+ * @property-read \Opencart\Admin\Model\User\UserGroup $model_user_user_group
  */
 class Two extends \Opencart\System\Engine\Controller
 {
@@ -123,6 +127,44 @@ class Two extends \Opencart\System\Engine\Controller
         // The health row (section 18): why Two is not offered, or the constraints that may still withhold it.
         $data['health'] = $this->healthRow($services, $shopCurrency);
 
+        // Payment terms: the record's terms, the merchant's narrowing, and the surcharge.
+        $terms = $services->paymentTerms();
+        $surcharge = $services->surcharge();
+        $data['record_terms'] = $terms->recordTerms;
+        $data['ticked_terms'] = $settings->tickedPaymentTerms() ?? $terms->recordTerms;
+        $data['payment_term_type'] = $terms->type;
+        $data['default_payment_term'] = $settings->defaultPaymentTerm();
+        $data['surcharge_types'] = [];
+        foreach (Surcharge::TYPES as $type) {
+            $data['surcharge_types'][$type] = $this->language->get('text_surcharge_' . $type);
+        }
+        $data['rounding_bases'] = ['none' => $this->language->get('text_rounding_none')];
+        foreach (array_keys(Surcharge::ROUNDING) as $basis) {
+            $data['rounding_bases'][$basis] = $this->language->get('text_rounding_' . $basis);
+        }
+        $data['rounding_steps'] = Surcharge::ROUNDING_STEPS;
+        $store = $settings->store();
+        $data['surcharge'] = [
+            'type' => $surcharge->type,
+            'differential' => $surcharge->differential,
+            'line_description' => $surcharge->lineDescription,
+            'rounding_basis' => trim((string) $store->get('surcharge_rounding_basis')),
+            'rounding_step' => trim((string) $store->get('surcharge_rounding_step')),
+            'tax_class_id' => trim((string) $store->get('surcharge_tax_class_id')),
+        ];
+        $grid = json_decode((string) $store->get('surcharge_grid'), true);
+        $data['surcharge_grid'] = [];
+        foreach ($terms->recordTerms as $days) {
+            $row = is_array($grid[$days] ?? null) ? $grid[$days] : [];
+            $data['surcharge_grid'][] = ['days' => $days] + array_map(static fn (string $column): string => is_scalar($row[$column] ?? null) ? (string) $row[$column] : '', array_combine(Surcharge::COLUMNS, Surcharge::COLUMNS));
+        }
+        $data['column_labels'] = ['percentage' => $this->language->get('column_percentage'), 'fixed' => $this->language->get('column_fixed'), 'cap' => $this->language->get('column_cap')];
+        $this->load->model('localisation/tax_class');
+        $data['tax_classes'] = $this->model_localisation_tax_class->getTaxClasses();
+        $data['help_payment_terms'] = sprintf($this->language->get('help_payment_terms'), $brand);
+        $data['help_surcharge_type'] = sprintf($this->language->get('help_surcharge_type'), $brand);
+        $data['help_surcharge_grid'] = sprintf($this->language->get('help_surcharge_grid'), $shopCurrency, $brand);
+
         // Order management.
         $this->load->model('localisation/order_status');
         $data['order_statuses'] = $this->model_localisation_order_status->getOrderStatuses();
@@ -177,10 +219,12 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         $services = new Services($this->db, $this->log);
-        $result = $services->save->save($this->submitted($post), $this->orderStatusIds(), (int) $this->config->get('config_void_status_id'));
+        $this->load->model('localisation/tax_class');
+        $taxClassIds = array_map(static fn (array $row): int => (int) $row['tax_class_id'], $this->model_localisation_tax_class->getTaxClasses());
+        $result = $services->save->save($this->submitted($post), $this->orderStatusIds(), (int) $this->config->get('config_void_status_id'), $taxClassIds);
 
         foreach ($result['errors'] as $field => $code) {
-            $json['error'][$field] = $this->language->get('error_' . $code);
+            $json['error'][$field] = $field === 'surcharge_grid' ? $this->gridMessage($code) : $this->language->get('error_' . $code);
         }
         if (isset($result['errors']['trusted_proxies'])) {
             // Name the first entry that is not an IP or a range, as the reference plugin does.
@@ -288,6 +332,17 @@ class Two extends \Opencart\System\Engine\Controller
 
             return is_object($result) ? $result->rows : [];
         }, DB_PREFIX);
+
+        // The payment terms fee total, which charges the surcharge: installed and enabled with the method.
+        $this->load->model('setting/extension');
+        if (!$this->model_setting_extension->getExtensionByCode('total', 'two_fee')) {
+            $this->model_setting_extension->install('total', 'two', 'two_fee');
+            $this->load->model('user/user_group');
+            foreach (['access', 'modify'] as $permission) {
+                $this->model_user_user_group->addPermission($this->user->getGroupId(), $permission, 'extension/two/total/two_fee');
+            }
+            $this->model_setting_setting->editSetting('total_two_fee', ['total_two_fee_status' => '1', 'total_two_fee_sort_order' => Services::FEE_TOTAL_SORT_ORDER]);
+        }
     }
 
     public function uninstall(): void
@@ -301,6 +356,10 @@ class Two extends \Opencart\System\Engine\Controller
         $this->load->model('setting/event');
         $this->model_setting_event->deleteEventByCode(Services::EVENT_CODE);
         $this->model_setting_event->deleteEventByCode(Services::CHECKOUT_EVENT_CODE);
+
+        $this->load->model('setting/extension');
+        $this->model_setting_extension->uninstall('total', 'two_fee');
+        $this->model_setting_setting->deleteSetting('total_two_fee');
     }
 
     /**
@@ -605,7 +664,7 @@ class Two extends \Opencart\System\Engine\Controller
     {
         $field = static fn (string $key): mixed => $post[self::CODE . '_' . $key] ?? null;
         $submitted = [];
-        foreach (array_merge(['api_key', 'environment', 'cancel_status_id', 'refund_status_id', 'min_order_amount', 'min_order_basis', 'trusted_proxies'], SettingsSave::SWITCHES) as $key) {
+        foreach (array_merge(['api_key', 'environment', 'cancel_status_id', 'refund_status_id', 'min_order_amount', 'min_order_basis', 'trusted_proxies', 'payment_term_type', 'default_payment_term', 'surcharge_type', 'surcharge_differential', 'surcharge_line_description', 'surcharge_rounding_basis', 'surcharge_rounding_step', 'surcharge_tax_class_id'], SettingsSave::SWITCHES) as $key) {
             if (is_scalar($field($key))) {
                 $submitted[$key] = self::raw($field($key));
             }
@@ -620,11 +679,35 @@ class Two extends \Opencart\System\Engine\Controller
             }
             $submitted['title'] = $titles;
         }
+        if (is_array($field('payment_terms'))) {
+            $submitted['payment_terms'] = array_values(array_map(static fn (mixed $days): string => self::raw($days), $field('payment_terms')));
+        }
+        if (is_array($field('surcharge_grid'))) {
+            $grid = [];
+            foreach ($field('surcharge_grid') as $days => $row) {
+                foreach (is_array($row) ? $row : [] as $column => $value) {
+                    $grid[(string) $days][(string) $column] = self::raw($value);
+                }
+            }
+            $submitted['surcharge_grid'] = $grid;
+        }
         if (is_array($field('fulfil_status_ids'))) {
             $submitted['fulfil_status_ids'] = array_values(array_map(static fn (mixed $id): string => self::raw($id), $field('fulfil_status_ids')));
         }
 
         return $submitted;
+    }
+
+    /** The grid's refusals (code:column:days, comma separated) as one sentence per cell. */
+    private function gridMessage(string $codes): string
+    {
+        $sentences = [];
+        foreach (explode(',', $codes) as $refusal) {
+            [$code, $column, $days] = array_pad(explode(':', $refusal), 3, '');
+            $sentences[] = sprintf($this->language->get('error_' . $code), $this->language->get('column_' . $column), (int) $days);
+        }
+
+        return htmlspecialchars(implode(' ', $sentences), ENT_QUOTES, 'UTF-8');
     }
 
     /** A posted value as typed: Request::clean ran htmlspecialchars (ENT_COMPAT) on it, which this undoes exactly. */
@@ -667,6 +750,9 @@ class Two extends \Opencart\System\Engine\Controller
         }
         if ($health['refused_currencies'] !== []) {
             $clauses[] = sprintf($this->language->get('text_health_currencies'), implode(', ', $health['refused_currencies']));
+        }
+        if ($health['fee_quote_failure'] !== null) {
+            $clauses[] = sprintf($this->language->get('text_health_fee_quote'), gmdate('Y-m-d H:i', $health['fee_quote_failure']['at']) . 'Z', $health['fee_quote_failure']['detail'], $brand->productName);
         }
 
         return ['ok' => true, 'text' => $this->language->get('text_health_shown') . ($clauses === [] ? '' : ' - ' . implode('; ', $clauses))];

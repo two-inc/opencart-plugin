@@ -30,6 +30,8 @@ final class RateLimiter
         'companyDetails' => [60, 60],
         'countries' => [60, 60],
         'search' => [300, 60],
+        'term' => [60, 60],
+        'fees' => [30, 60],
     ];
     /** Rows older than this are pruned: twice the longest window. */
     public const PRUNE_AFTER = 120;
