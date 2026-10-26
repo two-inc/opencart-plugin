@@ -26,6 +26,8 @@ final class IdempotencyKey
     public const CONFIRM = 'confirm';
     public const FULFIL = 'fulfil';
     public const CANCEL = 'cancel';
+    public const EDIT = 'edit';
+    public const REFUND = 'refund';
 
     private const SHAPE = '~^[a-z0-9_-]{1,100}\z~';
 
@@ -79,6 +81,47 @@ final class IdempotencyKey
     public static function soleTraderAttempt(string $sessionHash, int $attempt): string
     {
         return self::part($sessionHash) . '_' . max(1, $attempt);
+    }
+
+    /**
+     * Order edit (PUT on the order): chained on the last accepted edit's key,
+     * or the create key for the first edit, plus this payload's hash. Every
+     * edit in a sequence gets its own key (A to B to A gives three), so Two
+     * can never answer an edit with an earlier one, and a retry of the same
+     * edit repeats its key because the last accepted key has not moved.
+     */
+    public static function edit(string $twoOrderId, string $previousKey, string $payloadHash): string
+    {
+        if ($previousKey === '' || $payloadHash === '') {
+            throw new \InvalidArgumentException('An edit key needs the previous key and the payload hash.');
+        }
+
+        return self::checked(self::EDIT . '_' . strtolower($twoOrderId) . '_' . substr(hash('sha256', $previousKey . '|' . $payloadHash), 0, 16));
+    }
+
+    /** A refund with its own record: the plugin's refund row, created before the call. */
+    public static function refund(string $twoOrderId, int $refundRowId): string
+    {
+        if ($refundRowId <= 0) {
+            throw new \InvalidArgumentException('A refund key needs a stored refund row id.');
+        }
+
+        return self::checked(self::REFUND . '_' . strtolower($twoOrderId) . '_' . $refundRowId);
+    }
+
+    /**
+     * A refund with no record of its own (the rest of the order, from a
+     * status change): the refunds Two already holds plus the amount. The
+     * same rest after the same refunds gets the same key, so a repeated
+     * status event cannot refund it twice.
+     *
+     * @param list<string> $priorRefundIds Two's ids of the refunds already made
+     */
+    public static function refundRemainder(string $twoOrderId, array $priorRefundIds, string $amount): string
+    {
+        sort($priorRefundIds);
+
+        return self::checked(self::REFUND . '_remainder_' . strtolower($twoOrderId) . '_' . substr(hash('sha256', implode(',', $priorRefundIds) . '|' . $amount), 0, 16));
     }
 
     /**

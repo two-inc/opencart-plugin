@@ -48,7 +48,7 @@ final class SettingsSaveSpec
             [$save, $store] = self::save(['api_key' => self::GOOD, 'environment' => 'sandbox'], $case['definitive'], [$case['answer']]);
             $fingerprint = (new SettingsProvider($store))->credentialFingerprint();
             $store->values[ApiKeyVerdict::CACHE_KEY] = (string) json_encode(['status' => $case['heartbeat'], 'code' => null, 'fingerprint' => $fingerprint, 'claim' => false, 'verified_on' => self::NOW, 'checked_on' => self::NOW]);
-            $result = $save->save(['api_key' => 'new-key', 'environment' => 'sandbox'], self::STATUSES);
+            $result = $save->save(['api_key' => 'new-key', 'environment' => 'sandbox'], self::STATUSES, 0);
             TinyAssert::same([$case['outcome'], $case['key']], [$result['credentials'], $store->get('api_key')], 'outage: ' . $case['description']);
         }
 
@@ -69,7 +69,7 @@ final class SettingsSaveSpec
         $verdict = new ApiKeyVerdict($client, $settings, $clock);
         TinyAssert::same(ApiKeyVerdict::UNREACHABLE, $verdict->status(), 'repro: the render sees the outage');
         $save = new SettingsSave($settings, $environment, $verdict, new RecordProvider($client, $settings, $verdict, $logger, $clock));
-        $result = $save->save(['api_key' => 'new-key', 'environment' => 'sandbox'], self::STATUSES);
+        $result = $save->save(['api_key' => 'new-key', 'environment' => 'sandbox'], self::STATUSES, 0);
         TinyAssert::same([SettingsSave::KEPT_UNVERIFIED, self::GOOD], [$result['credentials'], $store->get('api_key')], 'repro: the good key survives an outage save');
     }
 
@@ -108,7 +108,7 @@ final class SettingsSaveSpec
             if ($environment !== null) {
                 $submitted += ['api_key' => (string) $key, 'environment' => $environment];
             }
-            $result = $save->save($submitted, self::STATUSES);
+            $result = $save->save($submitted, self::STATUSES, 0);
             TinyAssert::same($outcome, $result['credentials'], $description);
             TinyAssert::same($after, [$store->get('api_key'), $store->get('environment')], $description . ' (stored pair)');
             TinyAssert::same($calls, count($transport->calls), $description . ' (calls)');

@@ -290,7 +290,7 @@ final class CheckoutCaptureSpec
             $client = self::client(new ScriptedTransport(), new RecordingLogger());
             $verdict = new ApiKeyVerdict($client, $settings);
             $save = new SettingsSave($settings, new Environment(false), $verdict, new RecordProvider($client, $settings, $verdict, new RecordingLogger()));
-            $result = $save->save($submitted, []);
+            $result = $save->save($submitted, [], 0);
             TinyAssert::same([$written, $errors], [$store->values, $result['errors']], 'checkout settings save: ' . $description);
         }
     }

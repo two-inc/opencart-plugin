@@ -280,9 +280,11 @@ final class OrderBuilder
     }
 
     /**
+     * One Two line from amounts in cents, as the order, an edit and a refund send it.
+     *
      * @return array<string, mixed>
      */
-    private static function line(string $name, string $type, int $quantity, int $unitPrice, int $net, int $tax, float $rate, string $unit): array
+    public static function line(string $name, string $type, int $quantity, int $unitPrice, int $net, int $tax, float $rate, string $unit): array
     {
         $percent = rtrim(rtrim(number_format($rate * 100, 2, '.', ''), '0'), '.');
 

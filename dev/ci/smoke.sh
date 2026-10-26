@@ -195,8 +195,15 @@ expected=$(printf '%s\n' "${shipped}|" "${shipped}|Two: Not fulfilled: no Two or
 [ "$notes" = "$expected" ] || fail "the order lifecycle did not note its refusals at the merchant's status (got '${notes}')"
 ok "an admin status change runs the order lifecycle and notes the outcome"
 contains "the Two tab on the admin order page" "$(admin 'sale/order.info&order_id=9001')" 'No Two order is linked to this order.'
+# Refunds: the table and the edit key column exist, and the refund action refuses an order with no Two order.
+[ "$(sql "SHOW TABLES LIKE 'oc_two_refund'")" = "oc_two_refund" ] || fail "install did not create the two_refund table"
+[ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'edit_key'" | cut -f1)" = "edit_key" ] || fail "install did not add the edit_key column"
+[ "$(sql "SHOW COLUMNS FROM oc_two_order LIKE 'edit_refused_hash'" | cut -f1)" = "edit_refused_hash" ] || fail "install did not add the edit_refused_hash column"
+[ "$(sql "SHOW COLUMNS FROM oc_two_refund LIKE 'refunded_before'" | cut -f1)" = "refunded_before" ] || fail "install did not add the refunded_before column"
+contains "the Two tab reloads on its own route" "$(admin 'extension/two/payment/two.panel&order_id=9001')" 'No Two order is linked to this order.'
+contains "the refund action refuses an order with no Two order" "$(curl -s -b "$jar" -X POST -d "two_refund_net=10.00&two_refund_tax=2.50&two_refund_rate=0.25" "$base/admin/index.php?route=extension/two/payment/two.refund&order_id=9001&${user_token}")" 'Not refunded: no Two order is linked to this order.'
 # The two refusals are expected in the log; anything else still fails the check below.
-docker exec "$app" sed -i '/Two error: Order 9001: Not \(fulfilled\|cancelled\): no Two order is linked/d' /var/www/html/system/storage/logs/error.log
+docker exec "$app" sed -i '/Two error: Order 9001: Not \(fulfilled\|cancelled\|refunded\): no Two order is linked/d' /var/www/html/system/storage/logs/error.log
 
 # The Installer's Uninstall deletes extension/two; the checkout mount must not allow it.
 if docker exec "$app" touch /var/www/html/extension/two/.smoke-probe 2> /dev/null; then fail "extension/two is writable from the shop"; fi

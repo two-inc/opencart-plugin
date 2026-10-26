@@ -42,9 +42,14 @@ final class OrderLifecycleSpec
             [2, [3, 5], 7, null, 'an unmapped status asks nothing'],
             [7, [3], null, null, 'no cancel status mapped'],
             [0, [0], 0, null, 'status 0, an unplaced order, never acts'],
+            [11, [3], 7, OrderLifecycle::REFUND, 'the mapped refund status refunds the rest', 11],
+            [7, [3], 7, OrderLifecycle::CANCEL, 'a status in the cancel and refund maps cancels', 7],
+            [3, [3], 7, OrderLifecycle::FULFIL, 'a status in the fulfil and refund maps fulfils', 3],
+            [11, [3], 7, null, 'no refund status mapped', null],
         ];
-        foreach ($cases as [$status, $fulfil, $cancel, $expected, $description]) {
-            TinyAssert::same($expected, OrderLifecycle::action($status, $fulfil, $cancel), 'action: ' . $description);
+        foreach ($cases as $case) {
+            [$status, $fulfil, $cancel, $expected, $description] = $case;
+            TinyAssert::same($expected, OrderLifecycle::action($status, $fulfil, $cancel, $case[5] ?? null), 'action: ' . $description);
         }
     }
 
@@ -96,6 +101,7 @@ final class OrderLifecycleSpec
             ['stored' => 'VERIFIED', 'responses' => [$get('VERIFIED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'VERIFIED', 'description' => 'not confirmed at Two: refused'],
             ['stored' => 'CONFIRMED', 'rows' => self::rows(['quantity' => '3']), 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'edited after it was placed', 'description' => 'the order was edited after it was placed: refused, nothing asked'],
             ['stored' => 'CONFIRMED', 'rows' => null, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'description' => 'the shop order is gone: refused'],
+            ['stored' => 'CONFIRMED', 'unknown_edit' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'fulfil the order in the Two merchant portal', 'description' => 'an edit with an unknown outcome: refused until Two has the order, even with the rows back as placed'],
             ['stored' => 'CONFIRMED', 'unhashed' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'merchant portal', 'description' => 'no rows hash kept (placed before it was stored): refused, never fulfilled unchecked'],
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), self::json(400, ['error_code' => 'X'])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $post], 'state' => 'CONFIRMED', 'description' => 'Two refuses the fulfil: refused, state kept so a re-save retries'],
             ['stored' => 'CONFIRMED', 'responses' => [$get('CONFIRMED'), HttpResponse::unreachable('timeout')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $post], 'state' => 'CONFIRMED', 'description' => 'Two not reached: refused'],
@@ -103,6 +109,9 @@ final class OrderLifecycleSpec
         ];
         foreach ($cases as $case) {
             [$lifecycle, $transport, $records, $logger] = self::lifecycle($case['responses'], $case['stored'], $case['handlers'] ?? [], !empty($case['unhashed']));
+            if (!empty($case['unknown_edit'])) {
+                $records->rows[42]['payload_hash'] = '';
+            }
             $result = $lifecycle->fulfil(42, array_key_exists('rows', $case) ? $case['rows'] : self::rows());
             $d = 'fulfil: ' . $case['description'];
             self::check($d, $case, $result, $transport, $records, $logger);
