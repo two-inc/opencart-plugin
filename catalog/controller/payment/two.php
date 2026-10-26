@@ -612,7 +612,7 @@ class Two extends \Opencart\System\Engine\Controller
      */
     private function historyNote(int $orderId, int $statusId, Message $message): void
     {
-        $text = $this->language->get('text_history_prefix') . NoteText::render($message, $this->load, $this->language, (string) ($this->config->get('config_language_catalog') ?: $this->language->get('code')));
+        $text = $this->language->get('text_history_prefix') . NoteText::render($message, $this->load, $this->language, NoteText::shopCode($this->config));
         $this->db->query('INSERT INTO `' . DB_PREFIX . "order_history` SET `order_id` = '" . $orderId . "', `order_status_id` = '" . $statusId . "', `notify` = '0', `comment` = '"
             . $this->db->escape($text) . "', `date_added` = NOW()");
     }

@@ -69,7 +69,7 @@ class Two extends \Opencart\System\Engine\Controller
             function (int $orderId, int $statusId, Message $message) use ($orders): void {
                 // In the shop's language, whoever changed the status; override skips the fraud check a second time.
                 $this->load->language(self::ROUTE);
-                $note = NoteText::render($message, $this->load, $this->language, (string) ($this->config->get('config_language_catalog') ?: $this->language->get('code')));
+                $note = NoteText::render($message, $this->load, $this->language, NoteText::shopCode($this->config));
                 $orders->addHistory($orderId, $statusId, $this->language->get('text_history_prefix') . $note, false, true);
             },
             fn (string $line) => $this->log->write($line),

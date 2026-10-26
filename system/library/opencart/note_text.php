@@ -34,6 +34,22 @@ final class NoteText
         });
     }
 
+    /**
+     * The admin user's language folder (en-gb, nb-no), which OpenCart's admin
+     * startup sets from the admin's cookie or the default. Not default.php's
+     * `code`: that is the HTML lang (en, nb) and names no folder.
+     */
+    public static function adminCode(\Opencart\System\Engine\Config $config): string
+    {
+        return (string) $config->get('config_language_admin') ?: 'en-gb';
+    }
+
+    /** The shop's language folder: its default storefront language, else the one the request runs in. */
+    public static function shopCode(\Opencart\System\Engine\Config $config): string
+    {
+        return (string) ($config->get('config_language_catalog') ?: $config->get('config_language')) ?: 'en-gb';
+    }
+
     /** A refund row's stored outcome: a Message rendered, or text stored before messages, as it stands. */
     public static function stored(string $stored, \Opencart\System\Engine\Loader $load, \Opencart\System\Library\Language $language, string $code): string
     {
