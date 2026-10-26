@@ -58,6 +58,8 @@ services:
     command: ["node", "/stub/two-api-stub.mjs"]
     environment:
       TWO_API_STUB_PORT: ${TWO_API_STUB_PORT:?TWO_API_STUB_PORT must be set}
+      # The key tests/e2e/bin/prepare.sh gives the shop (and config.ts the specs).
+      TWO_API_STUB_KEY: e2e-stub-key
       TLS_KEY: /tls/stub.key
       TLS_CERT: /tls/stub.crt
     ports:

@@ -5,6 +5,7 @@ import { placeOrder } from "../pages/storefront";
 import { expectState, requests, stubOrder } from "../pages/stub";
 
 test("a buyer finds their company, places the order with Two and sees the confirmation", async ({ page }) => {
+  const seen = (await requests("")).length;
   const orderId = await placeOrder(page);
 
   const twoId = twoOrderId(orderId);
@@ -14,6 +15,10 @@ test("a buyer finds their company, places the order with Two and sees the confir
 
   const created = await stubOrder(twoId);
   expect((created as any).buyer.company.organization_number, "the searched company's number is sent").toBe("12345678");
-  const writes = (await requests("/v1/order")).filter((r) => r.method !== "GET");
-  expect(writes.every((r) => r.key), "every write carries an Idempotency-Key").toBeTruthy();
+  const sent = (await requests("")).slice(seen);
+  const writes = sent.filter((r) => r.path.startsWith("/v1/order") && r.method !== "GET");
+  expect(writes.map((r) => r.path), "the order is created and confirmed").toEqual(expect.arrayContaining(["/v1/order", `/v1/order/${twoId}/confirm`]));
+  expect(writes.filter((r) => !r.key), "every write carries an Idempotency-Key").toEqual([]);
+  // The stub refuses a wrong API key and amounts that do not add up as Two does.
+  expect(sent.filter((r) => r.status !== 200 && r.status !== 201), "Two accepts every call the shop makes").toEqual([]);
 });

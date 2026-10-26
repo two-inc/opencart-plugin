@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { addHistory, addOneMore, openOrder, refundLine, retryRefund } from "../pages/admin";
 import { twoOrderId } from "../pages/shop";
 import { placeOrder } from "../pages/storefront";
-import { cents, expectState, failNext, refundedCents, requests, stubOrder } from "../pages/stub";
+import { cents, dropNext, expectState, failNext, refundedCents, requests, stubOrder } from "../pages/stub";
 
 // The status maps dev/configure.php installs: fulfil on Shipped, cancel on
 // Canceled, refund the rest on Refunded.
@@ -60,6 +60,26 @@ test("a refund with no answer from Two is retried from the Two tab and applied o
   const sent = (await requests(`/v1/order/${twoId}/refund`)).map((r) => r.key);
   expect(sent, "the retry resends under the first attempt's key").toHaveLength(2);
   expect(sent[1]).toBe(sent[0]);
+});
+
+test("a refund Two applied but whose answer was lost is retried from the Two tab and not refunded twice", async ({ page }) => {
+  const orderId = await placeOrder(page, 2);
+  const twoId = twoOrderId(orderId);
+  await openOrder(page, orderId);
+  await addHistory(page, "Shipped");
+  await expectState(twoId, "FULFILLED");
+
+  // Two applies the refund and the connection drops; the read-back after it fails too, so the shop cannot tell.
+  await dropNext("POST", `^/v1/order/${twoId}/refund$`, [{ method: "GET", path: `^/v1/order/${twoId}$` }]);
+  expect(await refundLine(page, 1)).toContain("unknown");
+  expect((await stubOrder(twoId)).refunds, "Two applied the first attempt").toHaveLength(1);
+
+  expect(await retryRefund(page)).toContain("Two had applied the earlier attempt");
+  expect((await stubOrder(twoId)).refunds, "the retry refunds nothing more").toHaveLength(1);
+  const sent = await requests(`/v1/order/${twoId}/refund`);
+  expect(sent.map((r) => r.status), "the first attempt went unanswered, the retry was answered").toEqual(["dropped", 201]);
+  expect(sent[1].key, "the retry resends under the first attempt's key").toBe(sent[0].key);
+  expect(sent[1].replayed, "Two answered the retry with the first attempt's refund").toBe(true);
 });
 
 test("Canceled cancels the Two order", async ({ page }) => {

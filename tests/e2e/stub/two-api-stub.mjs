@@ -16,17 +16,22 @@
 //     not trust the throwaway CA, so the suite ignores certificate errors.
 //
 // It keeps orders in memory and answers with the fields the extension reads:
-// state, the totals and lines it was sent, and the refunds it holds. A write
-// repeated under the same Idempotency-Key gets the first answer back and
-// changes nothing, as Two does. /__stub/fault makes the next matching request
-// fail, so the specs can reach the refund-unknown path.
+// state, the totals and lines it was sent, and the refunds it holds. It
+// refuses what Two refuses, with Two's status and error codes: a merchant call
+// without the shop's API key (TWO_API_STUB_KEY) is 401, and an order, edit or
+// refund whose amounts do not add up is 400, by the checks Two's API applies.
+// A write repeated under the same Idempotency-Key gets the first answer back
+// and changes nothing, as Two does. /__stub/fault makes the next matching
+// request fail without applying it, or apply it and drop the connection with
+// no answer at all, so the specs reach both halves of the refund-unknown path.
 import fs from "node:fs";
 import https from "node:https";
 import { randomUUID } from "node:crypto";
 
 const PORT = process.env.TWO_API_STUB_PORT;
-if (!PORT) {
-  console.error("TWO_API_STUB_PORT must be set: the payment_url is built from it.");
+const API_KEY = process.env.TWO_API_STUB_KEY;
+if (!PORT || !API_KEY) {
+  console.error("TWO_API_STUB_PORT and TWO_API_STUB_KEY must be set: the payment_url is built from the port, and the key is the shop's.");
   process.exit(1);
 }
 const PUBLIC_URL = `https://localhost:${PORT}`;
@@ -40,9 +45,68 @@ let checkoutOutcome = "verify";
 
 const cents = (value) => Math.round(Math.abs(Number(value || 0)) * 100);
 const money = (c) => (c / 100).toFixed(2);
+const within = (a, b, tolerance) => Math.abs(a - b) <= tolerance;
+const sum = (items, field) => (items || []).reduce((total, item) => total + cents(item[field]), 0);
+
+// Two's error body.
+const error = (status, code, message, details) => [status, { error_code: code, error_message: message, error_details: details }];
+
+// What Two checks of an order or an edit, in cents with Two's tolerances: the
+// lines add up to the order's net and tax, net and tax to its gross, each line
+// to its own gross, tax rate and unit price, and the tax subtotals to the tax.
+// Two's 400 naming every failed check, or null.
+function orderAmountsError(body) {
+  const lines = body?.line_items || [];
+  const failures = [];
+  if (!within(cents(body?.net_amount), sum(lines, "net_amount"), 2)) failures.push("Order net amount is not equal to total line item net amounts");
+  if (!within(cents(body?.tax_amount), sum(lines, "tax_amount"), 99)) failures.push("Order tax amount is not equal to total line item tax amounts");
+  if (cents(body?.gross_amount) !== cents(body?.net_amount) + cents(body?.tax_amount)) failures.push("Order invoice total is not equal to tax + net amount");
+  if (!lines.every((l) => cents(l.gross_amount) === cents(l.net_amount) + cents(l.tax_amount))) failures.push("Line item gross amount is not equal to net + tax amount");
+  if (!lines.every((l) => within(cents(l.tax_amount), cents(l.net_amount) * Number(l.tax_rate), 2))) failures.push("Line item tax amount differs from tax rate * net amount");
+  if (Array.isArray(body?.tax_subtotals) && sum(body.tax_subtotals, "tax_amount") !== cents(body?.tax_amount)) failures.push("Order tax amount mismatch with tax subtotals");
+  if (!lines.every((l) => within(cents(l.net_amount), Math.round(cents(l.unit_price) * Number(l.quantity)) - cents(l.discount_amount), 2))) {
+    failures.push("Line item net amount is not equal to (quantity * unit price) - discount amount");
+  }
+  return failures.length ? error(400, "INVALID_ORDER_AMOUNT_DATA", "Invalid data found in order/line amounts", failures.join(", ")) : null;
+}
+
+// What Two checks of a refund body: a full refund (no amount) carries no
+// amounts or currency; a partial one has an amount and the order's currency,
+// lines that each add up, an amount equal to its lines' gross, and tax
+// subtotals that agree with the lines. Two's 400, or null.
+const FULL_REFUND_FIELDS = ["reason", "refund_reference", "buyer_refund_surcharges", "upload_references"];
+function refundBodyError(order, body) {
+  if (!body || body.amount == null) {
+    const extra = Object.keys(body || {}).filter((k) => !FULL_REFUND_FIELDS.includes(k) && body[k] != null);
+    return extra.length ? error(400, "SCHEMA_ERROR", "Error parsing schema", `A refund without an amount takes no ${extra.join(", ")}.`) : null;
+  }
+  if (!/^-?\d+(\.\d{1,2})?$/.test(String(body.amount)) || !body.currency) {
+    return error(400, "SCHEMA_ERROR", "Error parsing schema", "A partial refund needs an amount with at most two decimals and a currency.");
+  }
+  if (body.currency !== order.currency) {
+    return error(400, "REFUND_CURRENCY_ERROR", "Refund currency should be same as Order currency", `${body.currency} is not the order's ${order.currency}.`);
+  }
+  const lines = body.line_items || [];
+  for (const l of lines) {
+    const ok = within(cents(l.gross_amount), cents(l.net_amount) + cents(l.tax_amount), 2)
+      && within(cents(l.tax_amount), cents(l.net_amount) * Number(l.tax_rate), 2)
+      && within(cents(l.net_amount), Math.round(cents(l.unit_price) * Number(l.quantity)) - cents(l.discount_amount), 2);
+    if (!ok) return error(400, "REFUND_LINE_ITEMS_INVALID", "Refund line item amounts are invalid.", `Line ${l.name} does not add up.`);
+  }
+  if (lines.length && cents(body.amount) !== sum(lines, "gross_amount")) {
+    return error(400, "REFUND_AMOUNT_INCONSISTENT", "Refund amount is inconsistent with original invoice", `Refund amount ${body.amount} does not equal sum of line items ${money(sum(lines, "gross_amount"))}.`);
+  }
+  if (Array.isArray(body.tax_subtotals) && lines.length) {
+    const given = body.tax_subtotals.reduce((t, s) => t + cents(s.taxable_amount) + cents(s.tax_amount), 0);
+    if (!within(given, sum(lines, "gross_amount"), 100)) {
+      return error(400, "REFUND_AMOUNT_INCONSISTENT", "Refund amount is inconsistent with original invoice", `Inconsistent refund tax subtotals: ${money(given)}.`);
+    }
+  }
+  return null;
+}
 
 function refundedCents(order) {
-  return order.refunds.reduce((sum, refund) => sum + cents(refund.total_amount), 0);
+  return order.refunds.reduce((total, refund) => total + cents(refund.total_amount), 0);
 }
 
 // What is left per tax rate: the order's subtotals less every refund's.
@@ -63,11 +127,13 @@ function remainingSubtotals(order) {
 }
 
 function refund(order, body) {
-  const full = !body || Object.keys(body).length === 0;
+  const refused = refundBodyError(order, body);
+  if (refused) return refused;
+  const full = !body || body.amount == null;
   const remaining = cents(order.gross_amount) - refundedCents(order);
   const amount = full ? remaining : cents(body.amount);
   if (amount <= 0 || amount > remaining) {
-    return [400, { error_code: "INVALID_REFUND", error_message: `Refund of ${money(amount)} exceeds the ${money(remaining)} left.` }];
+    return error(400, "INVALID_REFUND", "Invalid refund", `Refund of ${money(amount)} exceeds the ${money(remaining)} left.`);
   }
   const item = {
     id: randomUUID(),
@@ -95,7 +161,7 @@ const STATES_FOR = {
 
 function orderAction(order, action, body) {
   if (!STATES_FOR[action].includes(order.state)) {
-    return [400, { error_code: "INVALID_STATE", error_message: `Order is ${order.state}.` }];
+    return error(400, "INVALID_STATE", "Invalid order state", `Order is ${order.state}.`);
   }
   switch (action) {
     case "confirm": order.state = "CONFIRMED"; break;
@@ -103,6 +169,8 @@ function orderAction(order, action, body) {
     case "cancel": order.state = "CANCELLED"; break;
     case "refund": return refund(order, body);
     case "update": {
+      const refused = orderAmountsError(body);
+      if (refused) return refused;
       const { merchant_urls: _ignored, ...edit } = body || {};
       Object.assign(order, edit, { line_items: withLineIds(edit.line_items) });
       break;
@@ -111,8 +179,11 @@ function orderAction(order, action, body) {
   return [200, order];
 }
 
-// The Two API: what the shop calls.
-function api(method, path, body) {
+// The Two API: what the shop calls. Every merchant call (/v1/) needs the key.
+function api(method, path, body, key) {
+  if (path.startsWith("/v1/") && key !== API_KEY) {
+    return error(401, "AUTHENTICATION_INVALID", "Authentication headers invalid", "X-API-Key is incorrect or has expired");
+  }
   if (method === "GET" && path === "/v1/merchant/verify_api_key") {
     return [200, { id: MERCHANT_ID, short_name: "e2e" }];
   }
@@ -138,6 +209,8 @@ function api(method, path, body) {
     return [200, { approved: true }];
   }
   if (method === "POST" && path === "/v1/order") {
+    const refused = orderAmountsError(body);
+    if (refused) return refused;
     const id = randomUUID();
     const order = { ...body, line_items: withLineIds(body?.line_items), id, state: "UNVERIFIED", status: "APPROVED", refunds: [], payment_url: `${PUBLIC_URL}/checkout/${id}` };
     orders.set(id, order);
@@ -146,12 +219,12 @@ function api(method, path, body) {
   const m = path.match(/^\/v1\/order\/([0-9a-f-]{36})(?:\/(confirm|fulfillments|cancel|refund))?$/);
   const order = m && orders.get(m[1]);
   if (m && !order) {
-    return [404, { error_code: "NOT_FOUND", error_message: "No such order." }];
+    return error(404, "NOT_FOUND", "Order not found", "No such order.");
   }
   if (order && method === "GET" && !m[2]) return [200, order];
   if (order && method === "PUT" && !m[2]) return orderAction(order, "update", body);
   if (order && method === "POST" && m[2]) return orderAction(order, m[2], body);
-  return [404, { error_code: "NOT_STUBBED", error_message: `${method} ${path} is not stubbed.` }];
+  return error(404, "NOT_STUBBED", "Not stubbed", `${method} ${path} is not stubbed.`);
 }
 
 // Two's hosted checkout: the buyer passes it at once, or leaves (cancel).
@@ -166,9 +239,14 @@ function hostedCheckout(id, res) {
   res.writeHead(302, { Location: order.merchant_urls.merchant_confirmation_url }).end();
 }
 
+// A fault: "fail" answers with the status and applies nothing; "drop" applies
+// the request, keeps its answer for a replay, and closes the connection with
+// no answer. `then` lists faults armed once this one has fired.
+const fault = (f) => ({ method: f.method, path: new RegExp(f.path), mode: f.mode === "drop" ? "drop" : "fail", status: f.status ?? 503, then: f.then || [] });
+
 function control(method, path, body, query, res) {
   if (method === "POST" && path === "/__stub/fault") {
-    faults.push({ method: body.method, path: new RegExp(body.path), status: body.status ?? 503 });
+    faults.push(fault(body));
     return send(res, 200, { faults: faults.length });
   }
   if (method === "POST" && path === "/__stub/checkout") {
@@ -190,39 +268,64 @@ function send(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
 }
 
+// One API request, logged with its answer: `status` is the HTTP status sent,
+// or "dropped"; `replayed` marks an answer repeated for its Idempotency-Key.
+function answer(req, res, path, body) {
+  const key = req.headers["idempotency-key"] || null;
+  const entry = { seq: requests.length, method: req.method, path, key, body, at: new Date().toISOString() };
+  requests.push(entry);
+  const found = faults.findIndex((f) => f.method === req.method && f.path.test(path));
+  const injected = found === -1 ? null : faults.splice(found, 1)[0];
+  if (injected) faults.push(...injected.then.map(fault));
+  if (injected?.mode === "fail") {
+    entry.status = injected.status;
+    return send(res, injected.status, { error_code: "STUB_FAULT", error_message: "Injected by the E2E suite." });
+  }
+  let reply;
+  if (key && req.method !== "GET" && replies.has(key)) {
+    reply = replies.get(key);
+    entry.replayed = true;
+  } else {
+    reply = api(req.method, path, body, req.headers["x-api-key"]);
+    if (key && req.method !== "GET" && reply[0] < 500) replies.set(key, [reply[0], structuredClone(reply[1])]);
+  }
+  if (reply[0] >= 400) console.log(`two-api stub: ${req.method} ${path} answered ${reply[0]} ${JSON.stringify(reply[1])}`);
+  if (injected?.mode === "drop") {
+    entry.status = "dropped";
+    req.socket.destroy();
+    return;
+  }
+  entry.status = reply[0];
+  return send(res, reply[0], reply[1]);
+}
+
 function handler(isPublic) {
   return (req, res) => {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", () => {
-      const url = new URL(req.url, "http://stub");
-      const path = url.pathname;
-      let body = null;
+      // A handler that throws answers 500 and says why, rather than taking the
+      // stub down and failing every later spec with a connection error.
       try {
-        body = raw ? JSON.parse(raw) : null;
-      } catch {
-        return send(res, 400, { error_code: "BAD_JSON" });
+        const url = new URL(req.url, "http://stub");
+        const path = url.pathname;
+        let body = null;
+        try {
+          body = raw ? JSON.parse(raw) : null;
+        } catch {
+          return send(res, 400, { error_code: "SCHEMA_ERROR", error_message: "Error parsing schema", error_details: "The body is not JSON." });
+        }
+        if (isPublic) {
+          const checkout = path.match(/^\/checkout\/([0-9a-f-]{36})$/);
+          if (checkout) return hostedCheckout(checkout[1], res);
+          if (path.startsWith("/__stub/")) return control(req.method, path, body || {}, url.searchParams, res);
+          return send(res, 404, {});
+        }
+        return answer(req, res, path, body);
+      } catch (thrown) {
+        console.error(`two-api stub: ${req.method} ${req.url} threw`, thrown);
+        if (!res.headersSent && !res.destroyed) send(res, 500, { error_code: "STUB_ERROR", error_message: String(thrown?.stack || thrown) });
       }
-      if (isPublic) {
-        const checkout = path.match(/^\/checkout\/([0-9a-f-]{36})$/);
-        if (checkout) return hostedCheckout(checkout[1], res);
-        if (path.startsWith("/__stub/")) return control(req.method, path, body || {}, url.searchParams, res);
-        return send(res, 404, {});
-      }
-      const key = req.headers["idempotency-key"] || null;
-      requests.push({ method: req.method, path, key, body, at: new Date().toISOString() });
-      const fault = faults.findIndex((f) => f.method === req.method && f.path.test(path));
-      if (fault !== -1) {
-        const [{ status }] = faults.splice(fault, 1);
-        return send(res, status, { error_code: "STUB_FAULT", error_message: "Injected by the E2E suite." });
-      }
-      if (key && req.method !== "GET" && replies.has(key)) {
-        const [status, reply] = replies.get(key);
-        return send(res, status, reply);
-      }
-      const [status, reply] = api(req.method, path, body);
-      if (key && req.method !== "GET" && status < 500) replies.set(key, [status, structuredClone(reply)]);
-      return send(res, status, reply);
     });
   };
 }

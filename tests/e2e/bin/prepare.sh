@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Readies the E2E shop once its containers are up: waits for the OpenCart
 # install, installs and enables the extension with dev/configure.php (sandbox
-# environment; the stub's key, or E2E_SANDBOX_API_KEY), then sets the shop up
-# for the specs (tests/e2e/bin/seed.php).
+# environment; the stub's key, TWO_API_STUB_KEY in tests/e2e/compose.yml, or
+# E2E_SANDBOX_API_KEY), then sets the shop up for the specs
+# (tests/e2e/bin/seed.php).
 set -euo pipefail
 
 cd "$(dirname "$0")/../../.."

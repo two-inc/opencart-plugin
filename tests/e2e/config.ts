@@ -3,6 +3,9 @@
 export const STORE_URL = process.env.STORE_URL ?? `http://localhost:${process.env.E2E_PORT ?? "1240"}`;
 export const STUB_PORT = process.env.TWO_API_STUB_PORT ?? "8099";
 export const STUB_URL = `https://localhost:${STUB_PORT}`;
+// The key the stub accepts and the shop is given: TWO_API_STUB_KEY in
+// compose.yml, and bin/prepare.sh.
+export const STUB_API_KEY = "e2e-stub-key";
 export const ADMIN_USER = "admin";
 export const ADMIN_PASSWORD = "examplepassword123";
 // Set only on the sandbox leg: the suite then runs tests/sandbox.spec.ts alone.
