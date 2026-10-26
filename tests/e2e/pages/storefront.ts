@@ -1,0 +1,65 @@
+import { Page, expect } from "@playwright/test";
+
+import { PRODUCT_ID } from "../config";
+import { latestOrderId } from "./shop";
+
+// The OpenCart 4.1 guest checkout, as a buyer drives it: one page with the
+// account and address form, then shipping and payment chosen in their modals.
+
+export async function addToCart(page: Page, quantity: number): Promise<void> {
+  await page.goto(`/index.php?route=product/product&product_id=${PRODUCT_ID}`);
+  await page.fill("#input-quantity", String(quantity));
+  await page.click("#button-cart");
+  await expect(page.locator("#alert")).toContainText("Success");
+}
+
+/** Fills the guest form, finding the company with Two's search. */
+export async function guestDetails(page: Page, search: string): Promise<string> {
+  await page.goto("/index.php?route=checkout/checkout");
+  await page.check("#input-guest");
+  await page.fill("#input-firstname", "Ada");
+  await page.fill("#input-lastname", "Buyer");
+  await page.fill("#input-email", `e2e-${Date.now()}@two.inc`);
+  await page.selectOption("#input-shipping-country", { label: "United Kingdom" });
+  await expect(page.locator("#input-shipping-zone option").nth(1)).toBeAttached();
+  await page.selectOption("#input-shipping-zone", { index: 1 });
+  // The company is searched in the country chosen, so it comes after the country.
+  await page.locator("#input-shipping-company").pressSequentially(search, { delay: 40 });
+  const result = page.locator(".two-company-results [role=option]").first();
+  await expect(result).toBeVisible();
+  const company = (await result.locator("span").first().innerText()).trim();
+  await result.click();
+  await expect(page.locator(".two-company-status").first()).toContainText(company);
+  await page.fill("#input-shipping-address-1", "1 Test Street");
+  await page.fill("#input-shipping-city", "London");
+  await page.fill("#input-shipping-postcode", "EC1A 1BB");
+  await page.click("#button-register");
+  await expect(page.locator("#alert")).toContainText("Success");
+  return company;
+}
+
+/** Chooses flat-rate shipping and Two, then waits for the tile's intent notice. */
+export async function chooseTwo(page: Page, company: string): Promise<void> {
+  await page.click("#button-shipping-methods");
+  await page.locator(".modal.show #button-shipping-method").click();
+  await expect(page.locator(".modal.show")).toHaveCount(0);
+  await page.click("#button-payment-methods");
+  await page.locator('.modal.show input[value="two.two"]').check();
+  await page.locator(".modal.show #button-payment-method").click();
+  await expect(page.locator("#checkout-confirm")).toContainText(`Buying for ${company}`);
+}
+
+/** Confirms, passes Two's hosted checkout and lands on the success page. Returns the shop's order id. */
+export async function confirmAndReturn(page: Page): Promise<number> {
+  await page.click("#button-two-confirm");
+  await page.waitForURL(/route=checkout\/success/, { timeout: 60_000 });
+  await expect(page.locator("#content h1")).toContainText("Your order has been placed");
+  return latestOrderId();
+}
+
+export async function placeOrder(page: Page, quantity = 1, search = "E2E Trad"): Promise<number> {
+  await addToCart(page, quantity);
+  const company = await guestDetails(page, search);
+  await chooseTwo(page, company);
+  return confirmAndReturn(page);
+}
