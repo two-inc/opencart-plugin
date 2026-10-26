@@ -28,6 +28,7 @@ Stubs throw `NotImplemented::inPhase(...)` naming the phase that implements them
 | Command | What it does |
 |---|---|
 | `make test` | Offline suite |
+| `make test-js` | Jest over the checkout script |
 | `make lint` | `php -l` over every tracked PHP file |
 | `make phpstan` | PHPStan level 6 against the OpenCart 4.1.0.0 sources (pinned, checksum-verified), then the core alone with no OpenCart symbols, then `tests/` (apart, since its DB double shares OpenCart's class name) |
 | `make install` | Fresh docker shop (MariaDB plus OpenCart 4.1.0.4 from the upstream zip, installed with `cli_install.php`), extension installed and enabled |
@@ -38,7 +39,7 @@ Stubs throw `NotImplemented::inPhase(...)` naming the phase that implements them
 
 Settings come from `.env` only (see `.env.example`). `TWO_INTERNAL_ENVIRONMENTS` passes through to the shop.
 
-CI (`.github/workflows/tests.yml`) runs lint and the suite on PHP 8.1 and 8.4, PHPStan, the install smoke and the package build. All are gates. Jest is deferred to P6, when the checkout capture lands; until then the one script, the admin's live key check, is covered by the save-time rules it mirrors (`SettingsSaveSpec`) and the smoke.
+CI (`.github/workflows/tests.yml`) runs lint and the suite on PHP 8.1 and 8.4, PHPStan, Jest (Node 20, jsdom) over `catalog/view/javascript/two_checkout.js`, the install smoke and the package build. All are gates. `make test-js` runs Jest locally (`tests/js/`). The admin's live key check is still covered by the save-time rules it mirrors (`SettingsSaveSpec`) and the smoke.
 
 The docker shop mounts the repo read-only, because OpenCart's Installer > Uninstall deletes everything under `extension/two`.
 
@@ -58,7 +59,7 @@ Where OpenCart deliberately differs from PrestaShop, the row goes in `docs/diver
 
 ## Checkout and order flow
 
-The buyer picks Two, enters the company in the tile (name, organisation number, country; company search is P6) and confirms. `catalog/controller/payment/two.php` maps the stored order through the model into `OrderFlow::create`, which builds the payload (`OrderBuilder`), runs the order postprocessing event (`Postprocessing`), creates the Two order and answers with Two's payment URL. The OpenCart order stays unplaced (status 0) until Two confirms it. Two then sends the buyer to `two.confirmation` (the order moves to the shop's default order status, then the success page) or `two.cancel` (the order stays unplaced with a history note, and the buyer is back at the cart with a notice).
+The buyer picks Two, captures the company (below) and confirms. `catalog/controller/payment/two.php` maps the stored order through the model into `OrderFlow::create`, which builds the payload (`OrderBuilder`), runs the order postprocessing event (`Postprocessing`), creates the Two order and answers with Two's payment URL. The OpenCart order stays unplaced (status 0) until Two confirms it. Two then sends the buyer to `two.confirmation` (the order moves to the shop's default order status, then the success page) or `two.cancel` (the order stays unplaced with a history note, and the buyer is back at the cart with a notice).
 
 - Tax: the plugin reports the shop's stored nets, taxes and rates and never computes or adjusts a tax. Where OpenCart keeps no per-line tax (shipping and other charge totals) the shop's own tax engine gives it, and the default handler refuses the order unless the lines add up to what the shop charged. A discount's tax is what the stored tax total leaves; at mixed rates, or with a fixed-amount tax rate, the order is refused rather than guessed.
 - Every write request to Two (POST, PUT, PATCH, DELETE) carries an `Idempotency-Key` built by `IdempotencyKey`, whether or not the endpoint reads it today, and `Client` refuses one without. The key names one operation from durable ids: `create_<shop order id>_<start of the attempt's token hash>` (one per checkout attempt, so a new attempt on the same cart never shares one), `confirm_`, `fulfil_` and `cancel_` plus the Two order id. It is logged with the request.
@@ -70,6 +71,13 @@ The buyer picks Two, enters the company in the tile (name, organisation number, 
 - install() and `configure.php` rename a `two_order` table of another shape (the pre-rewrite extension's) aside before creating the table, and an order create is refused unless its token row was stored.
 - The callbacks are guarded by a per-order token (its hash in `two_order`). OpenCart's session cookie is SameSite=Strict by default, so a callback arriving without it bounces once through a same-site page rebuilt from the route and the validated id and token.
 - Refusals: the buyer gets `ErrorMapper`'s copy (section 6.4), the merchant's order history and the log get the reason.
+
+## Checkout capture
+
+- Availability (Build Guide section 18): the method list runs `Availability::withholdReason` over the session's cart, in order: enabled, API key, the key heartbeat (only a definitive rejection withholds; an outage falls through to the cached record), buyer countries from the merchant record (absent is unrestricted; empty or malformed allows none; otherwise the billing, else shipping, country must be listed), the cart currency (NOK, GBP, SEK, USD, DKK, EUR), a resolvable country when the search sits in the tile, then the minimum order. The minimum has a platform floor (the record's amount, currency and basis; fails closed when it cannot be judged) and the merchant's own (Checkout fields tab, in the shop's default currency, on its basis, else the platform's, else gross; never withholds when it cannot be judged). OpenCart keeps amounts in the default currency, so the floor is judged there and converted at the shop's own rates until P7 brings Two's. A withheld method is silent for the buyer and logged once per request. The General tab's health row names the first cart-free reason, or the per-cart constraints.
+- Company capture (section 1.1): `catalog/view/javascript/two_checkout.js`, added to the checkout page by the `catalog/view/checkout/checkout/after` event (`catalog/controller/event/two_checkout.php`, `Services::CHECKOUT_EVENT_*`) with its settings as a JSON island. The placement switch puts one control per address form (`payment`, `shipping`, by the `#input-<role>-company` field, each with its own state and DOM subtree, re-mounted when OpenCart re-renders a form) or one in the tile. Search (3 or more characters, debounced, stale answers dropped), manual entry, and the sole-trader signup (two delegated-authority tokens minted by the shop, Two's hosted popup, its `ACCEPTED` message from the signup origin, then the buyer's own `/autofill/v1/buyer/current`). The shop relays every call (`CompanyLookup`) behind a per-session token, and keeps the captured company per role in the session; the buyer's role is the tile, else billing when the shop collects it, else shipping.
+- Optional fields (section 6.1): invoice email, PO number, project and department in the tile, each with its toggle (default on). They go on the order create (`invoice_details.invoice_emails`, `buyer_purchase_order_number`, `buyer_project`, `buyer_department`) and are kept in `two_order.buyer_fields` so the confirm rebuilds the same payload.
+- Order intent (section 6.3): built server-side from the stored order by the order builder and the hook (`order_intent`), never in the method list. The tile asks it once Two is chosen and the company is known, and shows the brand's approved or declined notice; confirm asks it again before the create, and only a decline refuses placement. Its key is `intent_<session hash>_<payload hash>`; with no session nothing is sent. Sole-trader mints are keyed `soletrader_<token>_<session hash>_<attempt>`, one attempt per click.
 
 ## Order lifecycle
 
@@ -89,7 +97,7 @@ Later-phase items, not built yet:
 - The error log view (last 100 lines).
 - The custom request-header table, with halt-and-show on save (`CustomHeaders::validate` is built and tested) and a `send_from_browser` flag per row.
 - P9's E2E must include a 4.1.0.0 CI leg that places a whole order: the floor voids an unplaced order on every checkout edit, and the CI shop otherwise runs 4.1.0.4.
-- The availability chain at checkout (P6): the tile is offered whenever the extension is enabled with an API key.
+- Company address lookup (filling the address from the chosen company), browser-sent custom headers, the fee-quote gate and Two's FX rates (P7).
 - A plugin status for confirmed orders (the shop's default order status is used).
 - The rest of the PrestaShop field set: vendor name, subtitle, the checkout field toggles, payment terms, and the remaining status maps.
 
