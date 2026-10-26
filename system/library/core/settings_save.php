@@ -39,6 +39,12 @@ final class SettingsSave
     public const STATUS_UNKNOWN = 'status_unknown';
     /** The shop's void status: OpenCart sets it on orders being edited, so the order lifecycle never acts on it. */
     public const STATUS_VOID = 'status_void';
+    public const SWITCH_INVALID = 'switch_invalid';
+    public const MINIMUM_INVALID = 'minimum_invalid';
+    public const BASIS_INVALID = 'basis_invalid';
+
+    /** The on/off settings of the Checkout fields tab: the placement switch and the optional field toggles. */
+    public const SWITCHES = ['company_search_in_address', 'enable_invoice_email', 'enable_po_number', 'enable_project', 'enable_department'];
 
     /** Printable ASCII with no spaces: a key is sent as a header value, so nothing else may reach the wire. */
     private const KEY = '/^[\x21-\x7E]+\z/';
@@ -55,7 +61,7 @@ final class SettingsSave
      * Validates and writes the submitted settings in one write, then brings
      * the verdict (and, for new credentials, the merchant record) up to date.
      *
-     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string} $submitted
+     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string} $submitted
      * @param list<int> $orderStatusIds the shop's order statuses, which the maps may name
      * @param int       $voidStatusId   the shop's void status (0 for none), which no map may name
      * @return array{errors: array<string, string>, credentials: string|null, status: string|null, code: int|null}
@@ -100,6 +106,34 @@ final class SettingsSave
                 $errors[$key] = $error;
             } else {
                 $write[$key] = $id;
+            }
+        }
+
+        foreach (self::SWITCHES as $key) {
+            if (isset($submitted[$key])) {
+                $value = trim($submitted[$key]);
+                if (in_array($value, ['0', '1'], true)) {
+                    $write[$key] = $value;
+                } else {
+                    $errors[$key] = self::SWITCH_INVALID;
+                }
+            }
+        }
+        if (isset($submitted['min_order_amount'])) {
+            // Empty is no minimum; otherwise a positive amount with at most two decimals.
+            $amount = trim($submitted['min_order_amount']);
+            if ($amount === '' || (preg_match('~^\d{1,10}(\.\d{1,2})?\z~', $amount) === 1 && (float) $amount > 0)) {
+                $write['min_order_amount'] = $amount;
+            } else {
+                $errors['min_order_amount'] = self::MINIMUM_INVALID;
+            }
+        }
+        if (isset($submitted['min_order_basis'])) {
+            $basis = trim($submitted['min_order_basis']);
+            if (in_array($basis, ['', SettingsProvider::BASIS_GROSS, SettingsProvider::BASIS_NET], true)) {
+                $write['min_order_basis'] = $basis;
+            } else {
+                $errors['min_order_basis'] = self::BASIS_INVALID;
             }
         }
 

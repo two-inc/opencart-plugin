@@ -88,3 +88,44 @@ $_['error_invoice_not_ready'] = 'The invoice is not ready yet because the order 
 $_['error_invoice_state'] = 'No invoice is available because the order is in state: %s.';
 $_['error_invoice_no_reference'] = 'No Two order is linked to this order.';
 $_['error_invoice'] = 'The invoice could not be retrieved. Please try again later.';
+
+// Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
+$_['entry_company_search_in_address'] = 'Enable company search in address entry';
+$_['help_company_search_in_address'] = 'When enabled, the buyer may search for their company within the address entry section of the checkout. Otherwise, company search will be visible within the payment method.';
+$_['entry_enable_invoice_email'] = 'Show invoice email field';
+$_['help_enable_invoice_email'] = 'If you choose Yes then customers will see an invoice email field in the %s payment section at checkout. It sits with the payment method rather than the address so the buyer is prompted to consider a dedicated invoicing address even when their billing and shipping addresses match.';
+$_['entry_enable_po_number'] = 'Show PO number field';
+$_['help_enable_po_number'] = 'If you choose Yes then customers will see a PO Number field in the %s payment section at checkout.';
+$_['entry_enable_project'] = 'Show project field';
+$_['help_enable_project'] = 'If you choose Yes then customers will see a Project field in the %s payment section at checkout.';
+$_['entry_enable_department'] = 'Show department field';
+$_['help_enable_department'] = 'If you choose Yes then customers will see a Department field in the %s payment section at checkout.';
+$_['entry_min_order_amount'] = 'Minimum order value, %s';
+$_['help_min_order_amount'] = 'Hide the payment method below this order value (shop default currency, on the tax basis selected below). Leave empty for no minimum.';
+$_['entry_min_order_basis'] = 'Minimum order value tax basis';
+$_['help_min_order_basis'] = 'Whether the basket is compared against the minimum including or excluding tax.';
+$_['text_basis_default'] = 'As the platform minimum (including tax when there is none)';
+$_['text_basis_option_gross'] = 'Including tax (gross)';
+$_['text_basis_option_net'] = 'Excluding tax (net)';
+$_['error_switch_invalid'] = 'Choose Yes or No.';
+$_['error_minimum_invalid'] = 'Enter an amount above zero with at most two decimals, or leave the field empty.';
+$_['error_basis_invalid'] = 'Choose a tax basis from the list.';
+
+// Health row (Build Guide section 18). %1$s is the provider's full name, %2$s the shop's default currency.
+$_['entry_health'] = 'Payment method at checkout';
+$_['text_health_hidden'] = 'Not shown at checkout';
+$_['text_health_shown'] = 'Shown at checkout';
+$_['text_withheld_disabled'] = 'the extension is not enabled. Switch Status on.';
+$_['text_withheld_no_api_key'] = 'no API key is saved. Check API key.';
+$_['text_withheld_key_rejected'] = 'the API key was rejected. Check API key and Environment.';
+$_['text_withheld_buyer_countries_empty'] = 'no buyer countries are currently enabled for your account. Contact %1$s to have them enabled.';
+$_['text_withheld_buyer_countries_malformed'] = 'the buyer countries on your account could not be read. Contact %1$s.';
+$_['text_withheld_currency'] = 'the shop default currency (%2$s) is not one invoices can be issued in.';
+$_['text_health_record_unknown'] = 'minimum order value not known until your profile refreshes';
+$_['text_health_below'] = 'hidden for baskets below %s';
+$_['text_health_floor'] = '%1$s %2$s %3$s';
+$_['text_basis_gross'] = 'including tax';
+$_['text_basis_net'] = 'excluding tax';
+$_['text_or'] = 'or';
+$_['text_health_countries'] = 'offered only to buyers in %s';
+$_['text_health_currencies'] = 'hidden for baskets in %s';

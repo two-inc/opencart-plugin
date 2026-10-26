@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
 use Opencart\System\Library\Extension\Two\Core\BuyerFields;
 use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
@@ -13,7 +14,9 @@ use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
+use Opencart\System\Library\Extension\Two\Core\RecordProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
+use Opencart\System\Library\Extension\Two\Core\SettingsSave;
 
 /**
  * Checkout capture (Build Guide sections 1.1, 6.1 and 6.3): the server-side
@@ -32,6 +35,7 @@ final class CheckoutCaptureSpec
         self::testSoleTrader();
         self::testKeys();
         self::testSettings();
+        self::testSave();
     }
 
     private static function testIntent(): void
@@ -193,6 +197,30 @@ final class CheckoutCaptureSpec
                 [$settings->companySearchInAddressArea(), $settings->optionalFields(), $settings->merchantMinimumOrder(), $settings->merchantMinimumOrderBasis()],
                 'checkout settings: ' . $description
             );
+        }
+    }
+
+    /** The Checkout fields tab's save: each field written when valid, kept and named when not. */
+    private static function testSave(): void
+    {
+        $cases = [
+            [['company_search_in_address' => '0', 'enable_project' => '1'], ['company_search_in_address' => '0', 'enable_project' => '1'], [], 'switches written'],
+            [['enable_po_number' => 'yes'], [], ['enable_po_number' => SettingsSave::SWITCH_INVALID], 'a switch that is not 0 or 1 is refused'],
+            [['min_order_amount' => '149.95', 'min_order_basis' => 'net'], ['min_order_amount' => '149.95', 'min_order_basis' => 'net'], [], 'a minimum on net'],
+            [['min_order_amount' => '', 'min_order_basis' => ''], ['min_order_amount' => '', 'min_order_basis' => ''], [], 'both cleared'],
+            [['min_order_amount' => '0'], [], ['min_order_amount' => SettingsSave::MINIMUM_INVALID], 'zero is refused: empty means no minimum'],
+            [['min_order_amount' => '1.234'], [], ['min_order_amount' => SettingsSave::MINIMUM_INVALID], 'three decimals are refused'],
+            [['min_order_amount' => '-5'], [], ['min_order_amount' => SettingsSave::MINIMUM_INVALID], 'a negative amount is refused'],
+            [['min_order_basis' => 'both'], [], ['min_order_basis' => SettingsSave::BASIS_INVALID], 'an unknown basis is refused'],
+        ];
+        foreach ($cases as [$submitted, $written, $errors, $description]) {
+            $store = new MemoryStore();
+            $settings = new SettingsProvider($store);
+            $client = self::client(new ScriptedTransport(), new RecordingLogger());
+            $verdict = new ApiKeyVerdict($client, $settings);
+            $save = new SettingsSave($settings, new Environment(false), $verdict, new RecordProvider($client, $settings, $verdict, new RecordingLogger()));
+            $result = $save->save($submitted, []);
+            TinyAssert::same([$written, $errors], [$store->values, $result['errors']], 'checkout settings save: ' . $description);
         }
     }
 
