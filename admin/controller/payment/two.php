@@ -116,6 +116,7 @@ class Two extends \Opencart\System\Engine\Controller
         $data['min_order_amount'] = trim((string) $settings->store()->get('min_order_amount'));
         $data['min_order_basis'] = $settings->merchantMinimumOrderBasis() ?? '';
         $data['trusted_proxies'] = trim((string) $settings->store()->get('trusted_proxies'));
+        $data['disable_rate_limit'] = $settings->rateLimitDisabled();
         $shopCurrency = (string) $this->config->get('config_currency');
         $data['entry_min_order_amount'] = sprintf($this->language->get('entry_min_order_amount'), $shopCurrency);
 
@@ -580,7 +581,7 @@ class Two extends \Opencart\System\Engine\Controller
      * decoded here and escaped again when rendered.
      *
      * @param array<string, mixed> $post
-     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string}
+     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string}
      */
     private function submitted(array $post): array
     {

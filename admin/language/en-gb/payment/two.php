@@ -169,3 +169,5 @@ $_['error_ajax'] = 'The shop did not answer as expected. Check the order history
 $_['entry_trusted_proxies'] = 'Trusted proxies';
 $_['help_trusted_proxies'] = 'Addresses of your own reverse proxies, load balancers or CDN egress, as IPs or CIDR ranges, separated by commas or new lines. These IP addresses will be exempt from rate limiting.';
 $_['error_proxy_invalid'] = 'Trusted proxies: "%s" is not a valid IP address or CIDR range.';
+$_['entry_disable_rate_limit'] = 'Disable checkout rate limiting';
+$_['help_disable_rate_limit'] = 'Removes the per-caller ceiling on the checkout AJAX endpoints. The ceiling is on by default. If this store sits behind a CDN, load balancer or reverse proxy and Trusted proxies above is empty, every buyer arrives as that one address and shares a single ceiling - buyers are then refused mid-checkout with a too-many-requests message. The fix is to fill in Trusted proxies, which lets the ceiling tell buyers apart; switch this On only as a stopgap while you get that list, and back Off afterwards.';

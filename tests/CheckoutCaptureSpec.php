@@ -278,6 +278,7 @@ final class CheckoutCaptureSpec
             [['min_order_amount' => '99.50', 'min_order_basis' => 'net'], true, BuyerFields::FIELDS, 99.5, 'net', 'a merchant minimum on net'],
             [['min_order_amount' => 'abc', 'min_order_basis' => 'both'], true, BuyerFields::FIELDS, null, null, 'unreadable minimum and basis are none'],
         ];
+        TinyAssert::same([false, true], [(new SettingsProvider(new MemoryStore()))->rateLimitDisabled(), (new SettingsProvider(new MemoryStore(['disable_rate_limit' => '1'])))->rateLimitDisabled()], 'checkout settings: the per-caller rate limits are on unless switched off');
         foreach ($cases as [$stored, $address, $fields, $minimum, $basis, $description]) {
             $settings = new SettingsProvider(new MemoryStore($stored));
             TinyAssert::same(
@@ -293,6 +294,7 @@ final class CheckoutCaptureSpec
     {
         $cases = [
             [['company_search_in_address' => '0', 'enable_project' => '1'], ['company_search_in_address' => '0', 'enable_project' => '1'], [], 'switches written'],
+            [['disable_rate_limit' => '1'], ['disable_rate_limit' => '1'], [], 'the rate-limit switch written'],
             [['enable_po_number' => 'yes'], [], ['enable_po_number' => SettingsSave::SWITCH_INVALID], 'a switch that is not 0 or 1 is refused'],
             [['min_order_amount' => '149.95', 'min_order_basis' => 'net'], ['min_order_amount' => '149.95', 'min_order_basis' => 'net'], [], 'a minimum on net'],
             [['min_order_amount' => '', 'min_order_basis' => ''], ['min_order_amount' => '', 'min_order_basis' => ''], [], 'both cleared'],

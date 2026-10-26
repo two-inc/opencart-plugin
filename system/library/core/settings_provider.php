@@ -41,6 +41,7 @@ final class SettingsProvider
         'min_order_amount' => '',
         'min_order_basis' => '',
         'trusted_proxies' => '',
+        'disable_rate_limit' => '0',
     ];
 
     /**
@@ -177,6 +178,12 @@ final class SettingsProvider
     public function trustedProxies(): array
     {
         return RateLimiter::parseProxies((string) $this->store->get('trusted_proxies'));
+    }
+
+    /** Whether the merchant switched off the per-caller limits on the checkout relays (Diagnostics); off by default. */
+    public function rateLimitDisabled(): bool
+    {
+        return self::isOn($this->store->get('disable_rate_limit'));
     }
 
     /** TLS verification is on unless the merchant switched it off (section 13.2). */
