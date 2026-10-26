@@ -61,7 +61,8 @@ final class OrderBuilder
      *     merchant_urls: array<string, string>,
      *     buyer_fields?: array<string, string>,
      *     terms?: array<string, mixed>|null,
-     *     fee_refusal?: string
+     *     fee_refusal?: string,
+     *     currency_refusal?: string
      * } $order
      * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string}> $lines
      * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool}> $totals
@@ -74,6 +75,10 @@ final class OrderBuilder
         $fx = (float) $order['currency_value'];
         if ($fx <= 0) {
             throw OrderRefused::because('currency_value', 'The order has no usable currency value.');
+        }
+        // A rebuilt order whose currency an edit changed from the one it was placed in (the adapter says why).
+        if (($order['currency_refusal'] ?? '') !== '') {
+            throw OrderRefused::because('currency_changed', $order['currency_refusal']);
         }
         if ($lines === []) {
             throw OrderRefused::because('empty_order', 'The order has no product lines.');

@@ -63,11 +63,12 @@ final class OrderEditSpec
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'responses' => [self::get('CONFIRMED'), self::json(401, [])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $put], 'after' => 'placed', 'description' => 'a 401: refused for now, nothing stored'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'handlers' => $refuses, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the hook refuses the update: nothing sent'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => null, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the order can no longer be read: refused'],
+            ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'currency_refusal' => 'the order was placed with Two in NOK and its currency is now EUR', 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'reason' => 'placed with Two in NOK and its currency is now EUR', 'description' => 'the edit changed the order\'s currency: refused with the reason, no PUT'],
             ['stored' => 'CONFIRMED', 'unhashed' => true, 'rows' => 3, 'input' => 3, 'responses' => [], 'outcome' => null, 'calls' => [], 'after' => 'unhashed', 'description' => 'no rows hash kept: nothing to compare, the fulfil check refuses instead'],
         ];
         foreach ($cases as $case) {
             [$edit, $transport, $records] = self::edit($case['responses'], $case['stored'], $case['handlers'] ?? [], !empty($case['unhashed']));
-            $result = $edit->sync(42, self::rows($case['rows']), static fn (array $record): ?array => $case['input'] === null ? null : self::input($case['input']));
+            $result = $edit->sync(42, self::rows($case['rows']), static fn (array $record): ?array => $case['input'] === null ? null : array_replace_recursive(self::input($case['input']), ['order' => ['currency_refusal' => $case['currency_refusal'] ?? '']]));
             $d = 'edit: ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'] ?? null, $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');

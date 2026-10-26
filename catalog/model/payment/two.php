@@ -168,7 +168,7 @@ class Two extends \Opencart\System\Engine\Model
         // An admin edit keeps the fee the order was placed with, as the reference plugin replays it:
         // none stays none, and a placed fee goes back with its own net and tax rows, never repriced.
         if ($this->inAdminEdit()) {
-            $placed = FeeQuote::editLine($this->services()->orders->get($this->editedOrderId()) ?? [], (float) $this->currency->getValue($this->sessionCurrency()));
+            $placed = FeeQuote::editLine($this->services()->orders->get($this->editedOrderId()) ?? [], (float) $this->currency->getValue($this->sessionCurrency()), $this->sessionCurrency());
 
             return $placed === null ? null : ['title' => $placed['title'], 'value' => $placed['value'], 'tax_class_id' => 0, 'taxes' => $placed['tax_rates']];
         }
@@ -393,6 +393,25 @@ class Two extends \Opencart\System\Engine\Model
         return 'the order was placed with a payment terms fee but no longer carries one (is the Two payment terms fee order total enabled?)';
     }
 
+    /**
+     * Why a rebuilt order may not be sent, or '': an edit changed its
+     * currency from the one it was placed with Two in
+     * (FeeQuote::placedInOtherCurrency).
+     *
+     * @param array<string, string> $record the order's two_order row
+     */
+    private function currencyRefusal(array $record, string $currency): string
+    {
+        $placed = FeeQuote::placedInOtherCurrency($record, $currency);
+        if ($placed === null) {
+            return '';
+        }
+        // Prefixed: the edit sync runs inside OpenCart's own history write, whose language keys must not be overwritten.
+        $copy = $this->load->language('extension/two/payment/two', 'two_edit');
+
+        return sprintf((string) $copy['two_edit_error_edit_currency'], $placed, $currency);
+    }
+
     /** The cart's gross without the fee, in the session currency at the shop's own currency value (the factor the order is sent at). */
     public function grossWithoutFee(): float
     {
@@ -505,7 +524,7 @@ class Two extends \Opencart\System\Engine\Model
                 $taxTotal += $total['value'];
             }
             $class = $this->chargeTaxClass($total['code'], $order);
-            $placed = $total['code'] === 'two_fee' && $terms !== null ? FeeQuote::decodePlaced((string) ($record['placed_fee'] ?? ''), (float) $order['currency_value']) : null;
+            $placed = $total['code'] === 'two_fee' && $terms !== null ? FeeQuote::decodePlaced((string) ($record['placed_fee'] ?? ''), (float) $order['currency_value'], (string) $order['currency_code']) : null;
             if ($placed !== null) {
                 // A rebuilt order's fee is the fee as placed: its stored tax and rate, never recomputed.
                 $total += ['tax' => $placed['tax'], 'rate' => $placed['rate'], 'tax_rates' => $placed['tax_rates']];
@@ -552,6 +571,7 @@ class Two extends \Opencart\System\Engine\Model
                 'buyer_fields' => $buyerFields,
                 'terms' => $terms ?? $this->termsBlock(),
                 'fee_refusal' => $terms === null ? '' : $this->feeRefusal($orderId, $totals),
+                'currency_refusal' => $terms === null ? '' : $this->currencyRefusal($record, (string) $order['currency_code']),
             ],
             'lines' => $lines,
             'totals' => $totals,

@@ -132,7 +132,8 @@ final class OrderFlowSpec
             $order['total'] = (float) $order['total'] + array_sum(array_column($totals, 'value'));
             $flow->create($order, self::lines(2), $totals, self::TOKEN);
             TinyAssert::same($expected, [$records->rows[42]['payment_terms'] ?? null, $records->rows[42]['payment_fee'] ?? null], 'create keeps the term and the fee: ' . $description);
-            TinyAssert::same($totals === [] ? null : ['title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 0.0, 'rate' => 0.0, 'tax_rates' => []], FeeQuote::decodePlaced($records->rows[42]['placed_fee'] ?? '', (float) $order['currency_value']), 'create keeps the placed fee line: ' . $description);
+            TinyAssert::same($totals === [] ? null : ['title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 0.0, 'rate' => 0.0, 'tax_rates' => []], FeeQuote::decodePlaced($records->rows[42]['placed_fee'] ?? '', (float) $order['currency_value'], (string) $order['currency']), 'create keeps the placed fee line: ' . $description);
+            TinyAssert::same($order['currency'], FeeQuote::placedInOtherCurrency($records->rows[42] ?? [], 'XXX'), 'create keeps the order\'s currency code: ' . $description);
         }
     }
 

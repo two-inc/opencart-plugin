@@ -87,6 +87,8 @@ final class OrderBuilderSpec
             [['fee_refusal' => 'the order was placed with a payment terms fee but no longer carries one'], [], 'fee_missing', 'an order placed with a fee that lost it is refused, with the adapter\'s reason'],
             [['fee_refusal' => '', 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order carrying its fee line is built'],
             [['fee_refusal' => ''], [], null, 'an order placed without a fee needs none'],
+            [['currency_refusal' => 'the order was placed with Two in NOK and its currency is now EUR'], [], 'currency_changed', 'an order whose currency an edit changed is refused, with the adapter\'s reason'],
+            [['currency_refusal' => '', 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order in the currency it was placed in is built'],
         ];
         foreach ($rebuilds as [$over, $totals, $refused, $description]) {
             try {

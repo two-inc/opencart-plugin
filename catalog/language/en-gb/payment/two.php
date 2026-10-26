@@ -101,3 +101,4 @@ $_['error_term'] = 'That payment term is not available. Please choose another.';
 $_['error_placement_terms'] = 'This payment method is not available.';
 $_['error_placement_fee'] = '%s is not available for this order right now. Please choose another payment method.';
 $_['error_placement_fee_changed'] = 'Your payment terms fee changed. Please review your order total and confirm again.';
+$_['error_edit_currency'] = 'the order was placed with Two in %1$s and its currency is now %2$s. Two keeps an order in the currency it was placed in: set the order\'s currency back to %1$s and save it again to send the edit.';

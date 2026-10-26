@@ -166,13 +166,14 @@ final class FeeQuote
      * and an edit re-stamps the order's currency value at today's rate, so
      * only the order-currency figures stay exact): its title, net, tax and
      * rate, and its tax rows with their names (a rate the merchant deletes
-     * later still has its title). $fx is the order's currency value. '' when
-     * the order was placed without one.
+     * later still has its title). Every order keeps its currency code and
+     * currency value ($fx), the fee fields only when it was placed with one.
      *
      * @param list<array<string, mixed>> $totals
      */
-    public static function encodePlaced(array $totals, float $fx): string
+    public static function encodePlaced(array $totals, float $fx, string $currency): string
     {
+        $placed = ['currency' => $currency, 'fx' => $fx];
         foreach ($totals as $total) {
             if (($total['code'] ?? null) !== 'two_fee') {
                 continue;
@@ -181,32 +182,40 @@ final class FeeQuote
             foreach (is_array($total['tax_rates'] ?? null) ? $total['tax_rates'] : [] as $id => $row) {
                 $rows[(string) $id] = ['amount' => round((float) ($row['amount'] ?? 0) * $fx, 2), 'name' => (string) ($row['name'] ?? '')];
             }
-
-            return (string) json_encode([
+            $placed += [
                 'title' => (string) ($total['title'] ?? ''),
                 'net' => round((float) ($total['value'] ?? 0) * $fx, 2),
                 'tax' => round((float) ($total['tax'] ?? 0) * $fx, 2),
                 'rate' => isset($total['rate']) ? (float) $total['rate'] : null,
                 'tax_rates' => (object) $rows,
-            ]);
+            ];
+            break;
         }
 
-        return '';
+        return (string) json_encode($placed);
     }
 
     /**
-     * The placed fee read back in the shop's default currency at the
-     * order's currency value now ($fx), so that in the order's currency it
-     * is exactly as placed; null when there is none. An edit puts it back as
-     * it was placed (never repriced, never its tax recomputed), as the
-     * reference plugin replays a placed order's fee rows.
+     * The placed fee read back in the shop's default currency, null when
+     * there is none (or it was stored without its currency). In the order's
+     * placed currency it is read at the order's currency value now ($fx), so
+     * that in that currency it is exactly as placed. An order whose currency
+     * ($currency) was changed since reads it at the placement's value, its
+     * worth in the default currency, never the placed figures relabelled (the
+     * edit sync refuses that order: placedInOtherCurrency). An edit puts the
+     * fee back as it was placed (never repriced, never its tax recomputed),
+     * as the reference plugin replays a placed order's fee rows.
      *
      * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, array{amount: float, name: string}>}|null
      */
-    public static function decodePlaced(string $stored, float $fx): ?array
+    public static function decodePlaced(string $stored, float $fx, string $currency): ?array
     {
         $fee = json_decode($stored, true);
-        if ($fx <= 0 || !is_array($fee) || !is_numeric($fee['net'] ?? null) || (float) $fee['net'] <= 0 || !is_numeric($fee['tax'] ?? null)) {
+        if (!is_array($fee) || !is_string($fee['currency'] ?? null) || !is_numeric($fee['fx'] ?? null) || !is_numeric($fee['net'] ?? null) || (float) $fee['net'] <= 0 || !is_numeric($fee['tax'] ?? null)) {
+            return null;
+        }
+        $fx = $fee['currency'] === $currency ? $fx : (float) $fee['fx'];
+        if ($fx <= 0) {
             return null;
         }
         $rows = [];
@@ -228,14 +237,32 @@ final class FeeQuote
     /**
      * The fee line an admin edit puts on an existing order: the fee it was
      * placed with, or none when it was placed without one. Never a new
-     * quote, whatever the surcharge, terms or quotes now say.
+     * quote, whatever the surcharge, terms or quotes now say. $fx and
+     * $currency are the order's currency value and code now.
      *
      * @param array<string, string> $record the order's two_order row
      * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, array{amount: float, name: string}>}|null
      */
-    public static function editLine(array $record, float $fx): ?array
+    public static function editLine(array $record, float $fx, string $currency): ?array
     {
-        return ($record['payment_fee'] ?? '') === '1' ? self::decodePlaced((string) ($record['placed_fee'] ?? ''), $fx) : null;
+        return ($record['payment_fee'] ?? '') === '1' ? self::decodePlaced((string) ($record['placed_fee'] ?? ''), $fx, $currency) : null;
+    }
+
+    /**
+     * The currency an order was placed with Two in, when an edit has since
+     * changed it to $currency; null when it is unchanged or the record kept
+     * no currency. Two keeps an order in the currency it was placed in, so
+     * the edit sync refuses such an order, as PrestaShop refuses a currency
+     * change on a Two order.
+     *
+     * @param array<string, string> $record the order's two_order row
+     */
+    public static function placedInOtherCurrency(array $record, string $currency): ?string
+    {
+        $placed = json_decode((string) ($record['placed_fee'] ?? ''), true);
+        $code = is_array($placed) && is_string($placed['currency'] ?? null) ? $placed['currency'] : '';
+
+        return $code !== '' && $code !== $currency ? $code : null;
     }
 
     /**

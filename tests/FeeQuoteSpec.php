@@ -42,31 +42,53 @@ final class FeeQuoteSpec
     private static function testPlacedFee(): void
     {
         $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => ['amount' => 2.5, 'name' => 'VAT 25%']]];
-        $placed = FeeQuote::encodePlaced([['code' => 'sub_total', 'value' => 100], $fee], 1.0);
+        $placed = FeeQuote::encodePlaced([['code' => 'sub_total', 'value' => 100], $fee], 1.0, 'GBP');
         $line = ['title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => ['amount' => 2.5, 'name' => 'VAT 25%']]];
+        $legacy = '{"title":"Payment terms fee - 30 days","net":10,"tax":2.5,"rate":0.25,"tax_rates":{"86":{"amount":2.5,"name":"VAT 25%"}}}';
         $cases = [
             [['payment_fee' => '1', 'placed_fee' => $placed], $line, 'placed with a fee: that fee, its tax rows and their names as stored'],
-            [['payment_fee' => '0', 'placed_fee' => ''], null, 'placed without a fee (a shop with no surcharge, or a term with none): none, and nothing to quote'],
+            [['payment_fee' => '0', 'placed_fee' => FeeQuote::encodePlaced([], 1.0, 'GBP')], null, 'placed without a fee (a shop with no surcharge, or a term with none): none, and nothing to quote'],
             [['payment_fee' => '1', 'placed_fee' => ''], null, 'a fee flag with no stored fee: none'],
+            [['payment_fee' => '1', 'placed_fee' => $legacy], null, 'a fee stored without its currency (before the currency was kept): none, so the edit is refused as one that lost its fee'],
             [['payment_fee' => '0', 'placed_fee' => $placed], null, 'a stored fee on an order flagged without one: none'],
             [[], null, 'no Two record: none'],
         ];
         foreach ($cases as [$record, $expected, $description]) {
-            TinyAssert::same($expected, FeeQuote::editLine($record, 1.0), 'edit line: ' . $description);
+            TinyAssert::same($expected, FeeQuote::editLine($record, 1.0, 'GBP'), 'edit line: ' . $description);
         }
-        TinyAssert::same('', FeeQuote::encodePlaced([['code' => 'shipping', 'value' => 5]], 1.0), 'placed fee: none when the order has no fee line');
-        TinyAssert::same(null, FeeQuote::decodePlaced('{"net":0,"tax":0}', 1.0), 'placed fee: a zero fee is none');
+        TinyAssert::same('{"currency":"NOK","fx":11.5}', FeeQuote::encodePlaced([['code' => 'shipping', 'value' => 5]], 11.5, 'NOK'), 'placed fee: an order with no fee line keeps only its currency and value');
+        TinyAssert::same(['NOK', 11.5], [json_decode(FeeQuote::encodePlaced([$fee], 11.5, 'NOK'), true)['currency'] ?? null, json_decode(FeeQuote::encodePlaced([$fee], 11.5, 'NOK'), true)['fx'] ?? null], 'placed fee: the order\'s currency code and value are stored with the fee');
+        TinyAssert::same(null, FeeQuote::decodePlaced('{"currency":"GBP","fx":1,"net":0,"tax":0}', 1.0, 'GBP'), 'placed fee: a zero fee is none');
 
         // A shop in EUR, an order in NOK placed at 11.5 and edited when the rate is 12.0:
         // the fee in the order's currency stays exactly as placed, never drifting with the rate.
         $nok = ['value' => 100.0 / 11.5, 'tax' => 25.0 / 11.5, 'tax_rates' => [86 => ['amount' => 25.0 / 11.5, 'name' => 'MVA 25%']]] + $fee;
-        $edited = FeeQuote::editLine(['payment_fee' => '1', 'placed_fee' => FeeQuote::encodePlaced([$nok], 11.5)], 12.0);
+        $nokRecord = ['payment_fee' => '1', 'placed_fee' => FeeQuote::encodePlaced([$nok], 11.5, 'NOK')];
+        $edited = FeeQuote::editLine($nokRecord, 12.0, 'NOK');
         TinyAssert::same(['100.00', '25.00', '25.00', 'MVA 25%'], [
             number_format(($edited['value'] ?? 0) * 12.0, 2, '.', ''),
             number_format(($edited['tax'] ?? 0) * 12.0, 2, '.', ''),
             number_format(($edited['tax_rates'][86]['amount'] ?? 0) * 12.0, 2, '.', ''),
             $edited['tax_rates'][86]['name'] ?? '',
         ], 'placed fee: in a non-default currency at a changed rate, the order-currency fee and tax are exactly as placed');
+
+        // An edit that changes the order's currency: the fee keeps its worth (never the placed
+        // figures relabelled), and the edit sync is refused with the currency it was placed in.
+        $eurRecord = ['payment_fee' => '1', 'placed_fee' => FeeQuote::encodePlaced([['value' => 10.0, 'tax' => 2.5] + $fee], 1.0, 'EUR')];
+        $changes = [
+            // record, currency now, its value now, fee net and tax in that currency, refused from, description
+            [$nokRecord, 'NOK', 12.0, ['100.00', '25.00'], null, 'NOK order edited in NOK: unchanged, not refused'],
+            [$nokRecord, 'EUR', 1.0, ['8.70', '2.17'], 'NOK', 'NOK order switched to EUR: NOK 100.00 is EUR 8.70 at the placement rate, not EUR 100.00, and refused'],
+            [$eurRecord, 'EUR', 1.0, ['10.00', '2.50'], null, 'EUR order edited in EUR: unchanged, not refused'],
+            [$eurRecord, 'NOK', 11.5, ['115.00', '28.75'], 'EUR', 'EUR order switched to NOK: EUR 10.00 is NOK 115.00, not NOK 10.00, and refused'],
+            [['payment_fee' => '0', 'placed_fee' => FeeQuote::encodePlaced([], 11.5, 'NOK')], 'EUR', 1.0, ['0.00', '0.00'], 'NOK', 'an order placed without a fee switched to EUR: refused too'],
+            [['payment_fee' => '1', 'placed_fee' => $legacy], 'EUR', 1.0, ['0.00', '0.00'], null, 'a record kept without its currency: no currency to judge (its fee is gone, so refused as one that lost it)'],
+        ];
+        foreach ($changes as [$record, $currency, $fx, $expected, $refused, $description]) {
+            $line = FeeQuote::editLine($record, $fx, $currency);
+            TinyAssert::same($expected, [number_format(($line['value'] ?? 0) * $fx, 2, '.', ''), number_format(($line['tax'] ?? 0) * $fx, 2, '.', '')], 'currency change, fee shown: ' . $description);
+            TinyAssert::same($refused, FeeQuote::placedInOtherCurrency($record, $currency), 'currency change, refused from: ' . $description);
+        }
     }
 
     /** The chips' preview: terms asked together, a kept quote reused, the fresh ones handed back to keep. */
