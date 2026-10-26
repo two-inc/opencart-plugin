@@ -77,6 +77,7 @@ final class CallSiteAllowlistSpec
         TinyAssert::true(preg_match('~function payload\([^{]*\{[^}]*postprocessing->apply\(~s', $flow) === 1, 'OrderFlow::payload runs the hook');
 
         self::testTriggers();
+        self::testOrderStore();
         self::testLoadable();
     }
 
@@ -101,6 +102,31 @@ final class CallSiteAllowlistSpec
             TinyAssert::true(($hook !== false && $hook < $call) || ($stored !== false && $stored < $call), $path . ': ' . strtok($method, '(') . ' runs the hook, or resends the stored hooked body, before ' . $name);
         }
         TinyAssert::same(count(self::SHARED_SENDERS[$path][$name]), $callers, $path . ': ' . $name . ' has only its listed callers');
+    }
+
+    /**
+     * Settings, the API key among them, are kept per store: every admin
+     * action on one order reads Two with the order's own store.
+     */
+    private static function testOrderStore(): void
+    {
+        $code = (string) file_get_contents(dirname(__DIR__) . '/admin/controller/payment/two.php');
+        $methods = [];
+        foreach (preg_split('~\n    (?:public|private) (?:static )?function ~', $code) ?: [] as $method) {
+            $methods[(string) strtok($method, '(')] = $method;
+        }
+        $cases = [
+            ['panelHtml', 'the Two tab and its read of the Two order'],
+            ['refund', 'the partial refund'],
+            ['refundRetry', 'the retry'],
+            ['creditNote', 'the credit note'],
+            ['invoice', 'the invoice'],
+        ];
+        foreach ($cases as [$name, $description]) {
+            $body = $methods[$name] ?? '';
+            TinyAssert::true(preg_match('~new Services\(\$this->db, \$this->log, \(int\) \(?\$order\[\'store_id\'\]~', $body) === 1, 'order store: ' . $description . ' (' . $name . ') uses the order\'s store');
+            TinyAssert::same(1, substr_count($body, 'new Services('), 'order store: ' . $description . ' (' . $name . ') builds its services once');
+        }
     }
 
     private static function testLoadable(): void

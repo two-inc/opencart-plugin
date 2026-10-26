@@ -254,7 +254,11 @@ class Two extends \Opencart\System\Engine\Controller
 
             return is_object($result) ? $result->rows : [];
         }, DB_PREFIX);
-        DbRefundRecords::install(fn (string $sql): mixed => $this->db->query($sql), DB_PREFIX);
+        DbRefundRecords::install(function (string $sql): array {
+            $result = $this->db->query($sql);
+
+            return is_object($result) ? $result->rows : [];
+        }, DB_PREFIX);
     }
 
     public function uninstall(): void
@@ -277,9 +281,31 @@ class Two extends \Opencart\System\Engine\Controller
      */
     public function order(): string
     {
+        return '<div id="two-order-panel">' . $this->panelHtml() . '</div>';
+    }
+
+    /**
+     * The Two tab's content again, for the reload after a refund or retry.
+     * Same guard as the downloads.
+     */
+    public function panel(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->user->hasPermission('access', 'sale/order') || !$this->user->hasPermission('access', self::ROUTE)) {
+            $this->response->setOutput('<p>' . htmlspecialchars($this->language->get('error_invoice_permission'), ENT_QUOTES, 'UTF-8') . '</p>');
+
+            return;
+        }
+        $this->response->setOutput($this->panelHtml());
+    }
+
+    private function panelHtml(): string
+    {
         $this->load->language(self::ROUTE);
         $orderId = (int) ($this->request->get['order_id'] ?? 0);
-        $services = new Services($this->db, $this->log);
+        // The order's own store: settings, the API key among them, are kept per store.
+        $order = $this->twoOrder($orderId);
+        $services = new Services($this->db, $this->log, (int) ($order['store_id'] ?? 0));
         $record = $services->orders->get($orderId) ?? [];
         $state = $record['two_order_state'] ?? '';
         $link = fn (string $action): string => $this->url->link(self::ROUTE . '.' . $action, 'user_token=' . $this->session->data['user_token'] . '&order_id=' . $orderId, true);
@@ -288,10 +314,15 @@ class Two extends \Opencart\System\Engine\Controller
         $two = $refundable ? $services->orderRefunds($this->event)->read($orderId, $record['two_order_id'] ?? '', OrderLifecycle::INVOICE_TIMEOUT_SECONDS) : null;
         $remaining = $two === null ? null : OrderRefunds::remainingCents($two);
         $refunds = $services->refunds->forOrder($orderId);
+        $earlier = OrderRefunds::refundedPerLine($refunds);
+        $lines = [];
+        foreach ($two === null ? [] : OrderRefunds::refundableLines($two) as $line) {
+            $lines[] = $line + ['left' => max(0, $line['quantity'] - ($earlier[$line['id']]['quantity'] ?? 0))];
+        }
         $text = [];
         foreach (['text_two_order', 'text_two_state', 'text_no_two_order', 'button_invoice', 'help_invoice', 'button_credit_note', 'help_credit_note', 'text_refund', 'text_refunded', 'text_remaining',
             'text_refund_help', 'text_refund_unavailable', 'text_refund_unread', 'text_refunds', 'column_line', 'column_quantity', 'column_net', 'column_tax', 'column_rate', 'column_refund_quantity',
-            'column_date', 'column_amount', 'column_state', 'entry_refund_net', 'entry_refund_tax', 'entry_refund_rate', 'entry_refund_reason', 'button_refund', 'button_retry', 'text_refund_blocked'] as $key) {
+            'column_date', 'column_amount', 'column_state', 'entry_refund_net', 'entry_refund_tax', 'entry_refund_rate', 'entry_refund_reason', 'button_refund', 'button_retry', 'text_refund_blocked', 'column_left'] as $key) {
             $text[$key] = $this->language->get($key);
         }
         $unresolved = false;
@@ -315,7 +346,8 @@ class Two extends \Opencart\System\Engine\Controller
             'currency' => (string) ($two['currency'] ?? ''),
             'refunded' => $two === null ? '' : Postprocessing::money(OrderRefunds::refundedCents($two)),
             'remaining' => $remaining === null ? '' : Postprocessing::money($remaining),
-            'lines' => $two === null ? [] : OrderRefunds::refundableLines($two),
+            'lines' => $lines,
+            'panel_action' => $link('panel'),
             'rates' => $two === null ? [] : OrderRefunds::rates($two),
             'refunds' => $refunds,
         ]);

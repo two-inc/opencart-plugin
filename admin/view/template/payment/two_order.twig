@@ -26,15 +26,15 @@
 {% elseif unresolved %}
 <div class="alert alert-warning">{{ text_refund_blocked|e }}</div>
 {% else %}
-<form id="form-two-refund" action="{{ refund_action|e }}" method="post" data-oc-toggle="ajax">
+<form id="form-two-refund" action="{{ refund_action|e }}" method="post" class="two-action">
   <p class="form-text">{{ text_refund_help|e }}</p>
   <table class="table table-bordered">
-    <thead><tr><th>{{ column_line|e }}</th><th class="text-end">{{ column_quantity|e }}</th><th class="text-end">{{ column_net|e }}</th><th class="text-end">{{ column_tax|e }}</th><th class="text-end">{{ column_rate|e }}</th><th class="w-25">{{ column_refund_quantity|e }}</th></tr></thead>
+    <thead><tr><th>{{ column_line|e }}</th><th class="text-end">{{ column_quantity|e }}</th><th class="text-end">{{ column_net|e }}</th><th class="text-end">{{ column_tax|e }}</th><th class="text-end">{{ column_rate|e }}</th><th class="text-end">{{ column_left|e }}</th><th class="w-25">{{ column_refund_quantity|e }}</th></tr></thead>
     <tbody>
       {% for line in lines %}
       <tr>
-        <td>{{ line.name|e }}</td><td class="text-end">{{ line.quantity|e }}</td><td class="text-end">{{ line.net_amount|e }}</td><td class="text-end">{{ line.tax_amount|e }}</td><td class="text-end">{{ line.tax_rate|e }}</td>
-        <td><input type="number" min="0" max="{{ line.quantity|e }}" step="1" name="two_refund_line[{{ line.id|e }}]" value="" class="form-control"/></td>
+        <td>{{ line.name|e }}</td><td class="text-end">{{ line.quantity|e }}</td><td class="text-end">{{ line.net_amount|e }}</td><td class="text-end">{{ line.tax_amount|e }}</td><td class="text-end">{{ line.tax_rate|e }}</td><td class="text-end">{{ line.left|e }}</td>
+        <td><input type="number" min="0" max="{{ line.left|e }}" step="1" name="two_refund_line[{{ line.id|e }}]" value="" class="form-control"{% if not line.left %} disabled{% endif %}/></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -56,11 +56,30 @@
   <tbody>
     {% for refund in refunds %}
     <tr><td>{{ refund.date_added|e }}</td><td class="text-end">{{ refund.amount|e }} {{ refund.currency|e }}</td><td>{{ refund.state_text|e }}{% if refund.reason %}<div class="form-text">{{ refund.reason|e }}</div>{% endif %}
-      {% if refund.retry %}<form action="{{ retry_action|e }}" method="post" data-oc-toggle="ajax" class="mt-2"><input type="hidden" name="two_refund_id" value="{{ refund.refund_id|e }}"/><button type="submit" class="btn btn-sm btn-warning"><i class="fa-solid fa-rotate"></i> {{ button_retry|e }}</button></form>{% endif %}</td></tr>
+      {% if refund.retry %}<form action="{{ retry_action|e }}" method="post" class="mt-2 two-action"><input type="hidden" name="two_refund_id" value="{{ refund.refund_id|e }}"/><button type="submit" class="btn btn-sm btn-warning"><i class="fa-solid fa-rotate"></i> {{ button_retry|e }}</button></form>{% endif %}</td></tr>
     {% endfor %}
   </tbody>
 </table>
 {% endif %}
 {% else %}
 <p>{{ text_no_two_order|e }}</p>
+{% endif %}
+{% if two_order_id %}
+<script>
+// Refund and retry post here, show the outcome, and reload the tab whatever it was, so the form, the figures and the Retry button are never stale.
+$(document).off('submit.two', '#two-order-panel form.two-action').on('submit.two', '#two-order-panel form.two-action', function (event) {
+  event.preventDefault();
+  var form = this;
+  var button = $(form).find('button[type=submit]');
+  $.ajax({
+    url: form.action.replaceAll('&amp;', '&'), type: 'post', data: $(form).serialize(), dataType: 'json',
+    beforeSend: function () { button.prop('disabled', true); },
+    success: function (json) {
+      $('.alert-dismissible').remove();
+      $('#alert').prepend($('<div class="alert alert-dismissible"></div>').addClass(json.success ? 'alert-success' : 'alert-danger').text(json.success || json.error || '').append(' <button type="button" class="btn-close" data-bs-dismiss="alert"></button>'));
+    },
+    complete: function () { $('#two-order-panel').load('{{ panel_action|e('js') }}'.replaceAll('&amp;', '&')); }
+  });
+});
+</script>
 {% endif %}
