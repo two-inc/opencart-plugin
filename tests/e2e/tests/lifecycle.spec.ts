@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { addHistory, addOneMore, openOrder, refundLine, retryRefund } from "../pages/admin";
-import { twoOrderId } from "../pages/shop";
+import { refundRows, twoOrderId } from "../pages/shop";
 import { placeOrder } from "../pages/storefront";
 import { cents, dropNext, expectState, failNext, refundedCents, requests, stubOrder } from "../pages/stub";
 
@@ -31,7 +31,8 @@ test("a partial refund from the Two tab, then Refunded refunds the rest", async 
   await expectState(twoId, "FULFILLED");
 
   const line = (await stubOrder(twoId)).line_items[0];
-  expect(await refundLine(page, 1)).toContain("Two refunded");
+  await refundLine(page, 1);
+  expect(refundRows(orderId), "the partial refund is settled as done").toEqual([{ state: "done", note: "note_refunded" }]);
   const partly = await stubOrder(twoId);
   expect(refundedCents(partly), "one of two units is refunded").toBe(cents(line.gross_amount) / 2);
   expect(partly.state).toBe("FULFILLED");
@@ -51,10 +52,12 @@ test("a refund with no answer from Two is retried from the Two tab and applied o
   await expectState(twoId, "FULFILLED");
 
   await failNext("POST", `^/v1/order/${twoId}/refund$`);
-  expect(await refundLine(page, 1)).toContain("unknown");
+  await refundLine(page, 1);
+  expect(refundRows(orderId), "the unanswered refund waits as unknown").toEqual([{ state: "unknown", note: "note_refund_unknown" }]);
   expect((await stubOrder(twoId)).refunds).toHaveLength(0);
 
-  expect(await retryRefund(page)).toContain("Two refunded");
+  await retryRefund(page);
+  expect(refundRows(orderId), "the retry is settled as done").toEqual([{ state: "done", note: "note_refunded" }]);
   const order = await stubOrder(twoId);
   expect(order.refunds, "the retry is applied once").toHaveLength(1);
   const sent = (await requests(`/v1/order/${twoId}/refund`)).map((r) => r.key);
@@ -71,10 +74,12 @@ test("a refund Two applied but whose answer was lost is retried from the Two tab
 
   // Two applies the refund and the connection drops; the read-back after it fails too, so the shop cannot tell.
   await dropNext("POST", `^/v1/order/${twoId}/refund$`, [{ method: "GET", path: `^/v1/order/${twoId}$` }]);
-  expect(await refundLine(page, 1)).toContain("unknown");
+  await refundLine(page, 1);
+  expect(refundRows(orderId), "the unanswered refund waits as unknown").toEqual([{ state: "unknown", note: "note_refund_unknown" }]);
   expect((await stubOrder(twoId)).refunds, "Two applied the first attempt").toHaveLength(1);
 
-  expect(await retryRefund(page)).toContain("Two had applied the earlier attempt");
+  await retryRefund(page);
+  expect(refundRows(orderId), "the retry finds Two applied the first attempt").toEqual([{ state: "done", note: "note_refunded_earlier" }]);
   expect((await stubOrder(twoId)).refunds, "the retry refunds nothing more").toHaveLength(1);
   const sent = await requests(`/v1/order/${twoId}/refund`);
   expect(sent.map((r) => r.status), "the first attempt went unanswered, the retry was answered").toEqual(["dropped", 201]);

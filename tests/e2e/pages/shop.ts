@@ -40,6 +40,15 @@ export function callTwo(method: string, path: string, body: unknown, apiKey: str
   return { status: Number(out.slice(at + 1)), json: JSON.parse(out.slice(0, at) || "null") };
 }
 
+/**
+ * The order's refunds as the plugin settled them: the state and the key of
+ * the note it wrote, so a spec checks the outcome in any admin language.
+ */
+export function refundRows(orderId: number): { state: string; note: string }[] {
+  return sql(`SELECT state, JSON_VALUE(reason, '$.key') FROM oc_two_refund WHERE order_id = ${orderId} ORDER BY refund_id`)
+    .map(([state, note]) => ({ state, note }));
+}
+
 export function twoOrderId(orderId: number): string {
   return sql(`SELECT two_order_id FROM oc_two_order WHERE order_id = ${orderId}`)[0]?.[0] ?? "";
 }
