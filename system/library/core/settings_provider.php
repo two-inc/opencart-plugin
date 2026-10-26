@@ -42,6 +42,16 @@ final class SettingsProvider
         'min_order_basis' => '',
         'trusted_proxies' => '',
         'disable_rate_limit' => '0',
+        'payment_terms' => '',
+        'payment_term_type' => PaymentTerms::STANDARD,
+        'default_payment_term' => '',
+        'surcharge_type' => Surcharge::NONE,
+        'surcharge_differential' => '0',
+        'surcharge_grid' => '{}',
+        'surcharge_rounding_basis' => 'none',
+        'surcharge_rounding_step' => '',
+        'surcharge_line_description' => '',
+        'surcharge_tax_class_id' => '',
     ];
 
     /**
@@ -184,6 +194,36 @@ final class SettingsProvider
     public function rateLimitDisabled(): bool
     {
         return self::isOn($this->store->get('disable_rate_limit'));
+    }
+
+    /**
+     * The terms the merchant ticked on the Payment terms tab, or null when
+     * none are stored: every term the merchant record offers.
+     *
+     * @return list<int>|null
+     */
+    public function tickedPaymentTerms(): ?array
+    {
+        $decoded = json_decode((string) $this->store->get('payment_terms'), true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        return array_values(array_unique(array_map('intval', array_filter($decoded, static fn (mixed $days): bool => is_int($days) && $days > 0))));
+    }
+
+    /** Standard terms, or end of month; anything else reads as standard. */
+    public function paymentTermType(): string
+    {
+        return trim((string) $this->store->get('payment_term_type')) === PaymentTerms::END_OF_MONTH ? PaymentTerms::END_OF_MONTH : PaymentTerms::STANDARD;
+    }
+
+    /** The merchant's own default term, or null when none is chosen. */
+    public function defaultPaymentTerm(): ?int
+    {
+        $value = trim((string) $this->store->get('default_payment_term'));
+
+        return ctype_digit($value) && (int) $value > 0 ? (int) $value : null;
     }
 
     /** TLS verification is on unless the merchant switched it off (section 13.2). */

@@ -64,6 +64,16 @@ final class IdempotencyKey
     }
 
     /**
+     * The fee quote: a pure calculation with no side effect at Two, so the
+     * same payload has the same answer for any buyer and the key is the
+     * payload's hash alone.
+     */
+    public static function feeQuote(string $payloadHash): string
+    {
+        return self::checked('fee_' . self::part($payloadHash));
+    }
+
+    /**
      * One mint of a sole-trader signup token ('delegation' or 'autofill').
      * $keyBase names the buyer's enrolment attempt (soleTraderAttempt), so
      * each click mints afresh and a retry of one click repeats its key.
