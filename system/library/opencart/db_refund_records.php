@@ -86,20 +86,25 @@ final class DbRefundRecords implements RefundRecords
 
     public function lock(int $orderId): bool
     {
-        $query = $this->db->query("SELECT GET_LOCK('" . $this->db->escape(self::lockName($orderId)) . "', " . self::LOCK_WAIT_SECONDS . ') AS `got`');
+        $query = $this->db->query('SELECT GET_LOCK(' . self::lockName($orderId) . ', ' . self::LOCK_WAIT_SECONDS . ') AS `got`');
 
         return is_object($query) && (int) ($query->row['got'] ?? 0) === 1;
     }
 
     public function unlock(int $orderId): void
     {
-        $this->db->query("SELECT RELEASE_LOCK('" . $this->db->escape(self::lockName($orderId)) . "')");
+        $this->db->query('SELECT RELEASE_LOCK(' . self::lockName($orderId) . ')');
     }
 
-    /** One name per shop order, across the admin and catalog connections. */
+    /**
+     * One lock per shop order across the admin and catalog connections, as
+     * an SQL expression. Lock names are server-wide, so the shop's database
+     * and table prefix are in it (hashed, to stay within 64 characters): two
+     * shops on one server never wait for each other.
+     */
     private static function lockName(int $orderId): string
     {
-        return DB_PREFIX . 'two_refund_' . $orderId;
+        return "CONCAT('two_refund_', LEFT(SHA2(CONCAT(DATABASE(), '|', '" . (string) preg_replace('~[^A-Za-z0-9_]~', '', DB_PREFIX) . "'), 256), 16), '_" . $orderId . "')";
     }
 
     public function forOrder(int $orderId): array
