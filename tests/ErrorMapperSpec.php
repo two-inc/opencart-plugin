@@ -34,17 +34,18 @@ final class ErrorMapperSpec
         }
 
         $reasons = [
-            ['response' => new HttpResponse(400, '{"error_code":"SCHEMA_ERROR","error_message":"Field required"}'), 'reason' => 'HTTP 400: SCHEMA_ERROR: Field required', 'ours' => false, 'description' => 'status, code and Two\'s message'],
-            ['response' => new HttpResponse(502, '<html>bad gateway</html>'), 'reason' => 'HTTP 502', 'ours' => false, 'description' => 'a body that is not JSON'],
-            ['response' => HttpResponse::unreachable('Could not resolve host'), 'reason' => 'Two could not be reached (Could not resolve host).', 'ours' => true, 'description' => 'a transport failure'],
-            ['response' => HttpResponse::unreachable(''), 'reason' => 'Two could not be reached (no response).', 'ours' => true, 'description' => 'no response at all'],
-            ['response' => new HttpResponse(400, (string) json_encode(['detail' => str_repeat('x', 600)])), 'reason' => mb_substr('HTTP 400: ' . str_repeat('x', 600), 0, ErrorMapper::REASON_LIMIT) . '...', 'ours' => false, 'description' => 'a long message is cut'],
+            ['response' => new HttpResponse(400, '{"error_code":"SCHEMA_ERROR","error_message":"Field required"}'), 'reason' => 'HTTP 400: SCHEMA_ERROR: Field required', 'note' => 'HTTP 400: SCHEMA_ERROR: Field required.', 'ours' => false, 'description' => 'status, code and Two\'s message'],
+            ['response' => new HttpResponse(502, '<html>bad gateway</html>'), 'reason' => 'HTTP 502', 'note' => 'HTTP 502.', 'ours' => false, 'description' => 'a body that is not JSON'],
+            ['response' => new HttpResponse(400, '{"error_message":"Field required."}'), 'reason' => 'HTTP 400: Field required.', 'note' => 'HTTP 400: Field required.', 'ours' => false, 'description' => 'Two\'s message with its own full stop gets no second one'],
+            ['response' => HttpResponse::unreachable('Could not resolve host'), 'reason' => 'Two could not be reached (Could not resolve host).', 'note' => 'Two could not be reached (Could not resolve host).', 'ours' => true, 'description' => 'a transport failure'],
+            ['response' => HttpResponse::unreachable(''), 'reason' => 'Two could not be reached (no response).', 'note' => 'Two could not be reached (no response).', 'ours' => true, 'description' => 'no response at all'],
+            ['response' => new HttpResponse(400, (string) json_encode(['detail' => str_repeat('x', 600)])), 'reason' => mb_substr('HTTP 400: ' . str_repeat('x', 600), 0, ErrorMapper::REASON_LIMIT) . '...', 'note' => mb_substr('HTTP 400: ' . str_repeat('x', 600), 0, ErrorMapper::REASON_LIMIT) . '...', 'ours' => false, 'description' => 'a long message is cut'],
         ];
         foreach ($reasons as $case) {
             TinyAssert::same($case['reason'], $mapper->reason($case['response']), 'merchant reason: ' . $case['description']);
             $note = $mapper->noteReason($case['response']);
-            // The plugin's own words are a Message, translated in the note; Two's text goes as Two sent it.
-            TinyAssert::same([$case['ours'], $case['reason']], [$note instanceof Message, $note instanceof Message ? $note->english() : $note], 'note reason: ' . $case['description']);
+            // The plugin's own words are a Message, translated in the note; Two's text goes as Two sent it, ending in a full stop.
+            TinyAssert::same([$case['ours'], $case['note']], [$note instanceof Message, $note instanceof Message ? $note->english() : $note], 'note reason: ' . $case['description']);
         }
 
         self::testEveryKeyHasCopy();
