@@ -976,7 +976,8 @@
                     return failed(json && json.error);
                 }
                 this.saved = days;
-                return this.totals();
+                // The term is saved: a totals reload that fails is tried once more, then the buyer is told.
+                return this.totals().catch(() => this.totals()).catch(() => this.alert(this.config.i18n.totals_failed || '', false));
             }, () => failed(''));
         }
 

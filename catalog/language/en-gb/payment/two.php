@@ -45,6 +45,7 @@ $_['js_checking'] = 'Checking %1$s payment eligibility...';
 $_['js_selected'] = 'Selected';
 $_['js_settle_timeout'] = 'We are still saving your company details. Please try again in a moment.';
 $_['js_confirm_failed'] = 'Your order could not be sent. Please check your connection and try again.';
+$_['js_totals_failed'] = 'Your payment term is saved, but the order total could not be updated. Please reload the page before you confirm.';
 $_['js_number_missing'] = 'Enter your organisation number to continue.';
 $_['error_too_many'] = 'Too many requests. Please wait and try again.';
 
