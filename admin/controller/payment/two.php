@@ -6,6 +6,7 @@ namespace Opencart\Admin\Controller\Extension\Two\Payment;
 
 use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
 use Opencart\System\Library\Extension\Two\Core\Brand;
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
@@ -18,6 +19,7 @@ use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\DbRefundRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;
+use Opencart\System\Library\Extension\Two\Opencart\NoteText;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
@@ -433,6 +435,7 @@ class Two extends \Opencart\System\Engine\Controller
         $unresolved = false;
         foreach ($refunds as &$refund) {
             $refund['state_text'] = $this->language->get('text_refund_state_' . $refund['state']);
+            $refund['reason'] = NoteText::stored((string) $refund['reason'], $this->load, $this->language, $this->language->get('code'));
             $refund['retry'] = in_array($refund['state'], [RefundRecords::UNKNOWN, RefundRecords::PENDING], true);
             $unresolved = $unresolved || $refund['retry'];
         }
@@ -501,8 +504,10 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->partial($orderId, $request);
-        $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
-        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
+        $this->historyNote($orderId, (int) $order['order_status_id'], $result['message']);
+        // The answer in the admin user's language; the history note in the shop's.
+        $text = NoteText::render($result['message'], $this->load, $this->language, $this->language->get('code'));
+        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $text] : ['error' => $text]);
     }
 
     /**
@@ -526,8 +531,10 @@ class Two extends \Opencart\System\Engine\Controller
         }
         $refundId = (int) ($this->request->post['two_refund_id'] ?? 0);
         $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->retry($orderId, $refundId);
-        $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
-        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
+        $this->historyNote($orderId, (int) $order['order_status_id'], $result['message']);
+        // The answer in the admin user's language; the history note in the shop's.
+        $text = NoteText::render($result['message'], $this->load, $this->language, $this->language->get('code'));
+        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $text] : ['error' => $text]);
     }
 
     /**
@@ -596,13 +603,15 @@ class Two extends \Opencart\System\Engine\Controller
 
     /**
      * A line in the order history at the order's current status, not
-     * notified. Written directly: the admin has no order history model, and
-     * the status does not change, so no order event is due.
+     * notified, in the shop's language. Written directly: the admin has no
+     * order history model, and the status does not change, so no order event
+     * is due.
      */
-    private function historyNote(int $orderId, int $statusId, string $reason): void
+    private function historyNote(int $orderId, int $statusId, Message $message): void
     {
+        $text = NoteText::render($message, $this->load, $this->language, (string) ($this->config->get('config_language_catalog') ?: $this->language->get('code')));
         $this->db->query('INSERT INTO `' . DB_PREFIX . "order_history` SET `order_id` = '" . $orderId . "', `order_status_id` = '" . $statusId . "', `notify` = '0', `comment` = '"
-            . $this->db->escape('Two: ' . $reason) . "', `date_added` = NOW()");
+            . $this->db->escape('Two: ' . $text) . "', `date_added` = NOW()");
     }
 
     private function pdf(string $body, string $filename): void

@@ -62,7 +62,7 @@ final class OrderEdit
      * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null $rows the order's own rows now
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
      *        the stored order as OrderBuilder's inputs, given the record
-     * @return array{outcome: string, reason: string}|null null when the order was not edited, or nothing Two holds changed
+     * @return array{outcome: string, reason: string, message: Message}|null null when the order was not edited, or nothing Two holds changed
      */
     public function sync(int $orderId, ?array $rows, \Closure $rebuild): ?array
     {
@@ -94,18 +94,18 @@ final class OrderEdit
 
         $state = $this->flow->readState($orderId, $twoOrderId);
         if ($state === null) {
-            return $this->refused($orderId, 'The edit to this order was not sent to Two: Two could not be asked for the state of order ' . $twoOrderId . '. Save the status again to retry.');
+            return $this->refused($orderId, Message::of('note_edit_unread', $twoOrderId));
         }
         if (in_array($state, OrderLifecycle::FULFILLED_STATES, true) || ($this->records->get($orderId)['two_order_status'] ?? '') === self::PARTIAL_STATUS) {
             return $this->afterFulfilment($orderId, $twoOrderId, $rowsHash);
         }
         if (!in_array($state, self::EDITABLE_STATES, true)) {
-            return $this->refused($orderId, 'The edit to this order was not sent to Two: Two no longer accepts changes to order ' . $twoOrderId . ' (' . $state . ').');
+            return $this->refused($orderId, Message::of('note_edit_closed', $twoOrderId, $state));
         }
 
         $input = $rebuild($record);
         if ($input === null) {
-            return $this->refused($orderId, 'The edit to this order was not sent to Two: the order can no longer be read.');
+            return $this->refused($orderId, Message::of('note_edit_unreadable'));
         }
         $path = '/v1/order/' . $twoOrderId;
         try {
@@ -121,7 +121,7 @@ final class OrderEdit
             unset($payload['merchant_urls'], $payload['buyer'], $payload['invoice_type']);
             $body = $this->postprocessing->apply(Postprocessing::ORDER_UPDATE, 'order_edit', $path, $payload, ($input['context'] ?? []) + ['order_id' => $orderId], $failures);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, 'The edit to this order was not sent to Two: ' . $refused->detail);
+            return $this->refused($orderId, Message::of('note_edit_not_built', $refused->detail));
         }
 
         $previous = ($record['edit_key'] ?? '') !== '' ? $record['edit_key'] : IdempotencyKey::orderCreate($orderId, $record['token_hash'] ?? '');
@@ -131,42 +131,42 @@ final class OrderEdit
             $this->records->put($orderId, ['payload_hash' => $snapshot, 'rows_hash' => $rowsHash, 'edit_key' => $key, 'edit_refused_hash' => ''] + OrderFlow::stateFields($response->json() ?? []));
             $this->logger->info('Order ' . $orderId . ': Two order ' . $twoOrderId . ' updated, idempotency key ' . $key . '.');
 
-            return ['outcome' => OrderLifecycle::DONE, 'reason' => 'Two order ' . $twoOrderId . ' updated with this order\'s changes.'];
+            return OrderLifecycle::outcome(OrderLifecycle::DONE, Message::of('note_edit_done', $twoOrderId));
         }
         if (in_array($response->status, self::DEFINITIVE_REFUSALS, true) && $response->reachedTwo()) {
             // Kept so the same refused edit is not resent and noted on every status save; another edit is still tried.
             $this->records->put($orderId, ['edit_refused_hash' => $rowsHash]);
 
-            return $this->refused($orderId, 'Two refused the edit to order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' Two still holds the order as before, so it will not be fulfilled until the order matches. Edit the order to what Two can accept, or fulfil it in the Two merchant portal.');
+            return $this->refused($orderId, Message::of('note_edit_refused', $twoOrderId, $this->errors->reason($response)));
         }
         if ($response->reachedTwo() && $response->status < 500 && !in_array($response->status, self::TRANSIENT, true)) {
             // Not about the edit itself (an API key being changed, a conflict): nothing recorded, so the next save sends it again.
-            return $this->refused($orderId, 'Two did not take the edit to order ' . $twoOrderId . ': ' . $this->errors->reason($response) . ' It is sent again on the next status save.');
+            return $this->refused($orderId, Message::of('note_edit_not_taken', $twoOrderId, $this->errors->reason($response)));
         }
         // Two may or may not hold the edit: the next save must send it whatever the hash says.
         $this->records->put($orderId, ['payload_hash' => '']);
 
-        return $this->refused($orderId, 'The edit to order ' . $twoOrderId . ' may not have reached Two (' . $this->errors->reason($response) . '). It is sent again on the next status save.', self::UNKNOWN);
+        return $this->refused($orderId, Message::of('note_edit_unknown', $twoOrderId, $this->errors->reason($response)), self::UNKNOWN);
     }
 
     /**
      * An edit after fulfilment is never sent. The rows hash moves on so the
      * note is written once, not on every later status save.
      *
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     private function afterFulfilment(int $orderId, string $twoOrderId, string $rowsHash): array
     {
         $this->records->put($orderId, ['rows_hash' => $rowsHash]);
 
-        return $this->refused($orderId, 'Two has invoiced all or part of order ' . $twoOrderId . ', so this order\'s edit was not sent to Two. Two invoices the order as it holds it; refund any difference from the Two tab.');
+        return $this->refused($orderId, Message::of('note_edit_invoiced', $twoOrderId));
     }
 
-    /** @return array{outcome: string, reason: string} */
-    private function refused(int $orderId, string $reason, string $outcome = OrderLifecycle::REFUSED): array
+    /** @return array{outcome: string, reason: string, message: Message} */
+    private function refused(int $orderId, Message $message, string $outcome = OrderLifecycle::REFUSED): array
     {
-        $this->logger->error('Order ' . $orderId . ': ' . $reason);
+        $this->logger->error('Order ' . $orderId . ': ' . $message->english());
 
-        return ['outcome' => $outcome, 'reason' => $reason];
+        return OrderLifecycle::outcome($outcome, $message);
     }
 }

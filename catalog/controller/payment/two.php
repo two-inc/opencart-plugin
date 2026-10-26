@@ -8,10 +8,12 @@ use Opencart\System\Library\Extension\Two\Core\Brand;
 use Opencart\System\Library\Extension\Two\Core\BuyerFields;
 use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
 use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderRecords;
 use Opencart\System\Library\Extension\Two\Core\RateLimiter;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderLock;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
+use Opencart\System\Library\Extension\Two\Opencart\NoteText;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Core\PaymentTerms;
@@ -198,19 +200,19 @@ class Two extends \Opencart\System\Engine\Controller
         if ($intent !== null && $refusal !== null) {
             // Section 6.3: only an approved intent lets the order be created.
             if ($intent['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
-                $this->note($orderId, $intent['reason']);
+                $this->note($orderId, $intent['message']);
             }
 
             return ['ok' => false, 'error' => $refusal === [OrderFlow::INTENT_DECLINED] ? $this->declinedNotice() : $this->buyerMessage($refusal)];
         }
         $result = $input === null
-            ? ['ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'reason' => 'The order could not be read.']
+            ? ['ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'reason' => Message::of('note_order_unreadable')->english(), 'message' => Message::of('note_order_unreadable')]
             : $flow->create($input['order'], $input['lines'], $input['totals'], $token, $input['context']);
         if ($result['ok']) {
             return ['ok' => true, 'redirect' => $result['redirect']];
         }
         if ($result['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
-            $this->note($orderId, $result['reason']);
+            $this->note($orderId, $result['message']);
         }
 
         return ['ok' => false, 'error' => $this->buyerMessage($result['buyer'])];
@@ -541,9 +543,9 @@ class Two extends \Opencart\System\Engine\Controller
             $owner = (int) ($this->session->data['order_id'] ?? 0) === $orderId
                 || ($this->customer->isLogged() && (int) $order['customer_id'] === $this->customer->getId());
             if (!$owner || !$this->unplaced($order)) {
-                $reason = 'Cancel callback refused: ' . ($owner ? 'the order is already placed.' : 'it did not come from the buyer\'s session.');
-                $this->log->write('Two error: order ' . $orderId . ': ' . $reason);
-                $this->note($orderId, $reason);
+                $message = Message::of($owner ? 'note_cancel_callback_placed' : 'note_cancel_callback_session');
+                $this->log->write('Two error: order ' . $orderId . ': ' . $message->english());
+                $this->note($orderId, $message);
                 $this->leave('cart', 'generic');
 
                 return;
@@ -568,11 +570,15 @@ class Two extends \Opencart\System\Engine\Controller
         $order = $this->model_checkout_order->getOrder($orderId);
         $after = OrderFlow::afterCallback($kind, $result['outcome'], $order && !$this->unplaced($order));
         if ($after['place']) {
-            $this->model_checkout_order->addHistory($orderId, (int) $this->config->get('config_order_status_id'), $this->language->get('text_history_prefix') . $result['reason']);
+            // Placed with no comment: OpenCart puts the placing comment in the buyer's order confirmation
+            // email, and the reference plugin places its order with none. The note is the merchant's.
+            $this->model_checkout_order->addHistory($orderId, (int) $this->config->get('config_order_status_id'));
+            $placed = $this->model_checkout_order->getOrder($orderId);
+            $this->historyNote($orderId, (int) ($placed['order_status_id'] ?? $this->config->get('config_order_status_id')), $result['message']);
             // The buyer's next checkout starts on the default chain again.
             unset($this->session->data['two_payment_term'], $this->session->data['two_fee_quotes']);
         } elseif ($after['note']) {
-            $this->note($orderId, $result['reason']);
+            $this->note($orderId, $result['message']);
         }
         $this->leave($after['goto'], $after['notice']);
     }
@@ -591,12 +597,24 @@ class Two extends \Opencart\System\Engine\Controller
     }
 
     /** The reason in the order history of an unplaced order, its status unchanged. Placed orders are left alone. */
-    private function note(int $orderId, string $reason): void
+    private function note(int $orderId, Message $message): void
     {
         $order = $this->model_checkout_order->getOrder($orderId);
         if ($order && $this->unplaced($order)) {
-            $this->model_checkout_order->addHistory($orderId, (int) $order['order_status_id'], $this->language->get('text_history_prefix') . $reason);
+            $this->historyNote($orderId, (int) $order['order_status_id'], $message);
         }
+    }
+
+    /**
+     * A line in the order history for the merchant, in the shop's language
+     * whatever the buyer's, never notified. Written directly: the status does
+     * not change, so no order event or mail is due.
+     */
+    private function historyNote(int $orderId, int $statusId, Message $message): void
+    {
+        $text = $this->language->get('text_history_prefix') . NoteText::render($message, $this->load, $this->language, (string) ($this->config->get('config_language_catalog') ?: $this->language->get('code')));
+        $this->db->query('INSERT INTO `' . DB_PREFIX . "order_history` SET `order_id` = '" . $orderId . "', `order_status_id` = '" . $statusId . "', `notify` = '0', `comment` = '"
+            . $this->db->escape($text) . "', `date_added` = NOW()");
     }
 
     /**
