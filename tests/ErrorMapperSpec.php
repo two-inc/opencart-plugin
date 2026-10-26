@@ -48,6 +48,20 @@ final class ErrorMapperSpec
             TinyAssert::same([$case['ours'], $case['note']], [$note instanceof Message, $note instanceof Message ? $note->english() : $note], 'note reason: ' . $case['description']);
         }
 
+
+        // Every note slot that takes a reason reads with one full stop, whatever the reason: Two's text or the plugin's own.
+        $bad = new HttpResponse(502, '<html>bad gateway</html>');
+        $slots = [
+            ['key' => 'note_edit_unknown', 'before' => ['abc'], 'response' => $bad, 'english' => 'The edit to order abc may not have reached Two: HTTP 502. It is sent again on the next status save.', 'description' => 'an edit with an unknown outcome'],
+            ['key' => 'note_refund_unknown', 'before' => ['10.00 NOK', 'abc'], 'response' => $bad, 'english' => 'The outcome of the refund of 10.00 NOK on order abc is unknown: HTTP 502. Retry it on the Two tab of the order page; no other refund is sent until then.', 'description' => 'a refund with an unknown outcome'],
+            ['key' => 'note_create_earlier_open', 'before' => ['abc'], 'response' => $bad, 'english' => 'Two order not created. The earlier Two order abc for this order could not be cancelled: HTTP 502.', 'description' => 'an earlier Two order left open'],
+            ['key' => 'note_cancel_refused_why', 'before' => ['abc', 'CONFIRMED'], 'response' => $bad, 'english' => 'Two order abc not cancelled: HTTP 502. Two holds it as CONFIRMED. Save the status again to retry.', 'description' => 'a refused cancel'],
+            ['key' => 'note_edit_unknown', 'before' => ['abc'], 'response' => HttpResponse::unreachable('Timeout'), 'english' => 'The edit to order abc may not have reached Two: Two could not be reached (Timeout). It is sent again on the next status save.', 'description' => 'the plugin\'s own reason in the same slot'],
+        ];
+        foreach ($slots as $case) {
+            TinyAssert::same($case['english'], Message::of($case['key'], ...[...$case['before'], $mapper->noteReason($case['response'])])->english(), 'reason slot: ' . $case['description']);
+        }
+
         self::testEveryKeyHasCopy();
     }
 
