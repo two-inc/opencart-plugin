@@ -74,6 +74,7 @@ describe('company search', () => {
         const { calls, fetchImpl } = shop({ s: { items }, st: { available: false } });
         const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
         checkout.mountAddressRoles();
+        await flush();
         calls.length = 0;
         await checkout.instances.payment.search(term);
         expect(calls).toEqual(expectedCalls);
@@ -86,6 +87,7 @@ describe('company search', () => {
         const { calls, fetchImpl } = shop({ st: { available: false } });
         const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
         checkout.mountAddressRoles();
+        await flush();
         calls.length = 0;
         await checkout.instances.payment.search('acme');
         expect(calls).toEqual([]);
@@ -160,6 +162,7 @@ describe('company search', () => {
         checkout.mountAddressRoles();
         expect(Object.keys(checkout.instances)).toEqual(['payment', 'shipping']);
         expect(document.querySelectorAll('[data-two-role]').length).toBe(2);
+        await flush();
         calls.length = 0;
         await checkout.instances.shipping.search('acme');
         expect(calls.map(([, params]) => params.country)).toEqual(['NO']);
@@ -186,11 +189,20 @@ describe('company search', () => {
         const search = checkout.instances.payment;
         search.manualButton.click();
         expect(search.orgWrapper.hidden).toBe(false);
-        search.input.value = 'Small Shop';
+        jest.useFakeTimers();
         search.orgInput.value = '998877';
-        search.orgInput.dispatchEvent(new Event('change'));
+        ['S', 'Sm', 'Small', 'Small Shop'].forEach((value) => {
+            search.input.value = value;
+            search.input.dispatchEvent(new Event('input'));
+        });
+        search.orgInput.dispatchEvent(new Event('input'));
+        jest.advanceTimersByTime(300);
+        jest.useRealTimers();
         await flush();
-        expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ role: 'payment', company_name: 'Small Shop', organization_number: '998877', source: 'manual' });
+        await flush();
+        const saves = calls.filter(([route]) => route === 'save');
+        expect(saves.length).toBe(1);
+        expect(saves[0][1]).toMatchObject({ role: 'payment', company_name: 'Small Shop', organization_number: '998877', source: 'manual' });
     });
 
     test.each([
@@ -204,6 +216,97 @@ describe('company search', () => {
         holder.appendChild(highlight(document, html));
         const shape = Array.from(holder.childNodes).map((node) => (node.nodeType === 1 ? node.tagName + ':' + node.textContent : node.textContent)).join('|');
         expect([shape, holder.querySelector('script, img')]).toEqual([expected, null]);
+    });
+});
+
+describe('review round 1', () => {
+    test('a result without a number is looked up, and saved with the number its entry gives', async () => {
+        addressForms();
+        const { calls, fetchImpl } = shop({ s: { items: [{ name: 'Acme Flooring Ltd', organization_number: '', lookup_id: 'bEB0' }] }, cd: { organization_number: '07844329', addresses: [] }, st: { available: false }, save: { ok: true } });
+        const cfg = config();
+        cfg.urls.company_details = 'index.php?route=cd';
+        const checkout = new Checkout(cfg, document, new Api(cfg, fetchImpl), window);
+        checkout.mountAddressRoles();
+        await checkout.instances.payment.search('acme');
+        await checkout.instances.payment.choose(0);
+        await flush();
+        expect(calls.filter(([route]) => route === 'cd')).toEqual([['cd', { two_token: 'tok', lookup_id: 'bEB0' }]]);
+        expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ company_name: 'Acme Flooring Ltd', organization_number: '07844329' });
+    });
+
+    test.each([
+        [{ organization_number: '' }, 'an entry without a number'],
+        [new Error('down'), 'a failed lookup'],
+    ])('no number: never saved empty, the buyer is asked for it (%#)', async (answer, description) => {
+        addressForms();
+        const { calls, fetchImpl } = shop({ s: { items: [{ name: 'Acme Ltd', organization_number: '', lookup_id: 'L' }] }, cd: answer, st: { available: false } });
+        const cfg = config({ i18n: Object.assign(config().i18n, { number_missing: 'enter number' }) });
+        cfg.urls.company_details = 'index.php?route=cd';
+        const checkout = new Checkout(cfg, document, new Api(cfg, fetchImpl), window);
+        checkout.mountAddressRoles();
+        const search = checkout.instances.payment;
+        await search.search('acme');
+        await search.choose(0);
+        await flush();
+        expect([calls.filter(([route]) => route === 'save').length, search.manual, search.orgWrapper.hidden, search.status.textContent, search.input.value]).toEqual([0, true, false, 'enter number', 'Acme Ltd']);
+    });
+
+    test('session writes run one after another, so a clear can never land after the save that follows it', async () => {
+        const order = [];
+        const resolvers = [];
+        const fetchImpl = jest.fn((url, init) => new Promise((resolve) => {
+            order.push('start ' + new URLSearchParams(init.body).get('company_name'));
+            resolvers.push(() => { order.push('end'); resolve({ json: () => Promise.resolve({ ok: true }) }); });
+        }));
+        const api = new Api(config(), fetchImpl);
+        const first = api.post('save_company', { company_name: '' });
+        const second = api.post('save_company', { company_name: 'Acme' });
+        await flush();
+        expect(order).toEqual(['start ']);
+        resolvers[0]();
+        await flush();
+        await flush();
+        expect(order).toEqual(['start ', 'end', 'start Acme']);
+        resolvers[1]();
+        await Promise.all([first, second]);
+    });
+
+    test.each([
+        ['Acme Ltd', '01234567', 'Acme Ltd (01234567)'],
+        ['Jo Bloggs', 'TWO:ST123', 'Jo Bloggs'],
+        ['Jo Bloggs', 'two:st1', 'Jo Bloggs'],
+        ['Acme Ltd', '', 'Acme Ltd'],
+    ])('label for %p %p: a TWO: number is never shown', (name, number, expected) => {
+        const { labelFor } = require('../../catalog/view/javascript/two_checkout.js');
+        expect(labelFor(name, number)).toBe(expected);
+    });
+
+    test('an enrolled sole trader with no company name takes their own name, never the TWO: number', async () => {
+        addressForms();
+        const tokens = { autofill_token: 'a', api_base: 'https://api.sandbox.two.inc', country: 'GB' };
+        const win = { fetch: jest.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ first_name: 'Jo', last_name: 'Bloggs', organization_number: 'TWO:ST1' }) })), addEventListener: jest.fn(), removeEventListener: jest.fn() };
+        const { calls, fetchImpl } = shop({ st: { available: true }, save: { ok: true } });
+        const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), win);
+        checkout.mountAddressRoles();
+        const search = checkout.instances.payment;
+        search.tokens = tokens;
+        await search.adoptEnrolledBuyer();
+        await flush();
+        expect([search.input.value, search.status.textContent]).toEqual(['Jo Bloggs', 'Jo Bloggs']);
+        expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ company_name: 'Jo Bloggs', organization_number: 'TWO:ST1', source: 'sole_trader' });
+    });
+
+    test('in address mode with nothing captured (a saved address), the tile searches itself and asks the intent with its fields', async () => {
+        document.body.innerHTML = '<form id="form-two" data-two-tile="search"><select data-two-country name="two_country"><option value="GB">UK</option></select><input data-two-company name="two_company_name"><div data-two-organization><input name="two_organization_number"></div></form><div id="two-intent-notice"></div>';
+        const { calls, fetchImpl } = shop({ st: { available: false }, s: { items: [{ name: 'Acme Ltd', organization_number: '0123' }] }, save: { ok: true }, i: { outcome: 'approved', notice: 'likely' } });
+        const checkout = new Checkout(config({ in_address: true }), document, new Api(config(), fetchImpl), window);
+        await checkout.tileReady(document.getElementById('form-two'));
+        await checkout.instances.tile.search('acme');
+        await checkout.instances.tile.choose(0);
+        await flush();
+        await flush();
+        expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ role: 'tile', company_name: 'Acme Ltd' });
+        expect(calls.filter(([route]) => route === 'i').pop()[1]).toMatchObject({ two_company_name: 'Acme Ltd', two_organization_number: '0123' });
     });
 });
 
