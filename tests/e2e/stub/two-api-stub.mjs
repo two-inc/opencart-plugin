@@ -82,6 +82,9 @@ function refund(order, body) {
   return [201, item];
 }
 
+// Two gives every order line an id, which refunds then reference.
+const withLineIds = (lines) => (lines || []).map((line) => ({ ...line, id: randomUUID() }));
+
 const STATES_FOR = {
   confirm: ["VERIFIED"],
   fulfillments: ["CONFIRMED", "VERIFIED"],
@@ -101,7 +104,7 @@ function orderAction(order, action, body) {
     case "refund": return refund(order, body);
     case "update": {
       const { merchant_urls: _ignored, ...edit } = body || {};
-      Object.assign(order, edit);
+      Object.assign(order, edit, { line_items: withLineIds(edit.line_items) });
       break;
     }
   }
@@ -136,7 +139,7 @@ function api(method, path, body) {
   }
   if (method === "POST" && path === "/v1/order") {
     const id = randomUUID();
-    const order = { ...body, id, state: "UNVERIFIED", status: "APPROVED", refunds: [], payment_url: `${PUBLIC_URL}/checkout/${id}` };
+    const order = { ...body, line_items: withLineIds(body?.line_items), id, state: "UNVERIFIED", status: "APPROVED", refunds: [], payment_url: `${PUBLIC_URL}/checkout/${id}` };
     orders.set(id, order);
     return [201, order];
   }
