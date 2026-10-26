@@ -69,6 +69,7 @@ final class CurlTransport implements Transport
     {
         $multi = curl_multi_init();
         $handles = [];
+        $results = [];
         $received = [];
         foreach ($requests as $index => $request) {
             $lines = [];
@@ -98,24 +99,31 @@ final class CurlTransport implements Transport
             if ($request['body'] !== null) {
                 curl_setopt($ch, CURLOPT_POSTFIELDS, $request['body']);
             }
-            curl_multi_add_handle($multi, $ch);
             $handles[$index] = $ch;
+            if (curl_multi_add_handle($multi, $ch) !== CURLM_OK) {
+                // Never added, so never run: a failed call, and nothing to wait for.
+                $results[$index] = CURLE_FAILED_INIT;
+            }
         }
 
         // Each handle's own result: curl_error() is empty for a multi handle.
-        $results = [];
-        do {
-            $status = curl_multi_exec($multi, $running);
+        $read = static function () use ($multi, $handles, &$results): void {
             while (($done = curl_multi_info_read($multi)) !== false) {
                 $index = array_search($done['handle'], $handles, true);
                 if ($index !== false) {
                     $results[$index] = (int) $done['result'];
                 }
             }
+        };
+        do {
+            $status = curl_multi_exec($multi, $running);
+            $read();
             if ($running > 0) {
                 curl_multi_select($multi, 1.0);
             }
-        } while (($running > 0 || count($results) < count($handles)) && $status === CURLM_OK);
+        } while ($running > 0 && $status === CURLM_OK);
+        // A handle with no result read is a failed call (CURLE_RECV_ERROR below), never a wait.
+        $read();
 
         $responses = [];
         foreach ($handles as $index => $ch) {
