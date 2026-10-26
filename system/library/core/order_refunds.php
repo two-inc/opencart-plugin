@@ -528,10 +528,16 @@ final class OrderRefunds
 
         $first = ($row['refunded_before'] ?? '') === '' ? null : Postprocessing::cents($row['refunded_before']);
         $amount = Postprocessing::cents($row['amount']);
-        if ($payload === []) {
-            // A full refund's empty body asks Two for whatever remains now: after a refund made meanwhile
-            // (in the merchant portal) that is less than when it was first sent, and that is what to look for.
+        if (!array_key_exists('amount', $payload)) {
+            // A full refund's body (empty, or with only fields a hook added) asks Two for whatever remains now:
+            // after a refund made meanwhile (in the merchant portal) that is less than when it was first sent,
+            // and that is what to look for.
             $amount = min($amount, self::remainingCents($two) ?? $amount);
+            if ($amount <= 0) {
+                $result = $this->done($orderId, $key, 'Nothing was left to refund on Two order ' . $twoOrderId . ': Two holds it as refunded in full, by the earlier attempt or by a refund made meanwhile in the Two merchant portal. Nothing was sent.');
+
+                return $this->settled($refundId, RefundRecords::DONE, $result);
+            }
         }
         // An explicit amount over what remains is still sent under its key: Two answers with the earlier
         // attempt if it applied it, and refuses it otherwise, which settles the row either way.
