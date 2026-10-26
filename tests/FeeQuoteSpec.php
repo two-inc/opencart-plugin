@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
@@ -91,15 +92,13 @@ final class FeeQuoteSpec
         }
         TinyAssert::same([
             'the order was placed with Two in NOK and its currency is now EUR. Two keeps an order in the currency it was placed in.',
-            'the order was placed with Two in NOK and its currency is now EUR. Two keeps an order in the currency it was placed in: set the order\'s currency back to NOK and save the status again.',
             null,
             null,
         ], [
-            FeeQuote::currencyChange($nokRecord, 'EUR'),
-            FeeQuote::currencyChange($nokRecord, 'EUR', 'save the status again'),
-            FeeQuote::currencyChange($nokRecord, 'NOK', 'save the status again'),
-            FeeQuote::currencyChange($nokRecord, '', 'save the status again'),
-        ], 'currency change: the confirm\'s reason gives no advice, the edit and fulfil say to switch back; none when unchanged or not known');
+            FeeQuote::currencyChange($nokRecord, 'EUR')?->english(),
+            FeeQuote::currencyChange($nokRecord, 'NOK'),
+            FeeQuote::currencyChange($nokRecord, ''),
+        ], 'currency change: the confirm\'s reason, with no advice; none when unchanged or not known');
     }
 
     /** The chips' preview: terms asked together, a kept quote reused, the fresh ones handed back to keep. */

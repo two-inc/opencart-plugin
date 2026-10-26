@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\BuyerFields;
 use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
@@ -64,7 +65,7 @@ final class OrderEditSpec
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'responses' => [self::get('CONFIRMED'), self::json(401, [])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $put], 'after' => 'placed', 'description' => 'a 401: refused for now, nothing stored'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'handlers' => $refuses, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the hook refuses the update: nothing sent'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => null, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the order can no longer be read: refused'],
-            ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'currency_refusal' => 'the order was placed with Two in NOK and its currency is now EUR', 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'reason' => 'placed with Two in NOK and its currency is now EUR', 'description' => 'the edit changed the order\'s currency: refused with the reason, no PUT'],
+            ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'currency_refusal' => Message::of('refusal_currency_changed', 'NOK', 'EUR'), 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'reason' => 'placed with Two in NOK and its currency is now EUR', 'description' => 'the edit changed the order\'s currency: refused with the reason, no PUT'],
             ['stored' => 'CONFIRMED', 'rows' => 2, 'currency' => 'EUR', 'input' => 2, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'after' => 'placed', 'reason' => 'not sent to Two: the order was placed with Two in NOK and its currency is now EUR', 'description' => 'a currency-only edit (the rows alike, in the default currency): refused with the currency before the rows shortcut, nothing asked'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'currency' => 'EUR', 'input' => 3, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'after' => 'placed', 'reason' => 'its currency is now EUR', 'description' => 'a currency change with another edit: refused with the currency, nothing asked'],
             ['stored' => 'CONFIRMED', 'rows' => 2, 'currency' => 'NOK', 'input' => 2, 'responses' => [], 'outcome' => null, 'calls' => [], 'after' => 'placed', 'description' => 'the currency switched back, the rows as placed: nothing to send'],
@@ -72,7 +73,7 @@ final class OrderEditSpec
         ];
         foreach ($cases as $case) {
             [$edit, $transport, $records] = self::edit($case['responses'], $case['stored'], $case['handlers'] ?? [], !empty($case['unhashed']));
-            $result = $edit->sync(42, self::rows($case['rows']) + (isset($case['currency']) ? ['currency' => $case['currency']] : []), static fn (array $record): ?array => $case['input'] === null ? null : array_replace_recursive(self::input($case['input']), ['order' => ['currency_refusal' => $case['currency_refusal'] ?? '']]));
+            $result = $edit->sync(42, self::rows($case['rows']) + (isset($case['currency']) ? ['currency' => $case['currency']] : []), static fn (array $record): ?array => $case['input'] === null ? null : array_replace_recursive(self::input($case['input']), ['order' => ['currency_refusal' => $case['currency_refusal'] ?? null]]));
             $d = 'edit: ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'] ?? null, $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');

@@ -309,7 +309,7 @@ final class OrderRefunds
         try {
             $lines = $this->requestLines($two, $request, $orderId);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, Message::of('note_refund_form_not_built', $refused->detail));
+            return $this->refused($orderId, Message::of('note_refund_form_not_built', $refused->note));
         }
         $totals = Postprocessing::recomputeTotals(['line_items' => $lines]);
         $payload = ['amount' => $totals['gross_amount'], 'currency' => (string) ($two['currency'] ?? ''), 'line_items' => $lines, 'tax_subtotals' => $totals['tax_subtotals']];
@@ -364,12 +364,12 @@ final class OrderRefunds
             }
             $line = $byId[(string) $id] ?? null;
             if ($line === null) {
-                throw OrderRefused::because('refund_line_unknown', 'a picked line is not on the Two order.');
+                throw OrderRefused::because('refund_line_unknown', Message::of('refusal_refund_line_unknown'));
             }
             $done = $earlier[$line['id']] ?? ['quantity' => 0, 'net' => 0, 'tax' => 0];
             $left = $line['quantity'] - $done['quantity'];
             if ($quantity > $left) {
-                throw OrderRefused::because('refund_line_quantity', 'more of "' . $line['name'] . '" than is left to refund (' . max(0, $left) . ' of ' . $line['quantity'] . ').');
+                throw OrderRefused::because('refund_line_quantity', Message::of('refusal_refund_line_quantity', $line['name'], max(0, $left), $line['quantity']));
             }
             // The share of the line's own net and tax; the last of the line takes what earlier refunds left, so the pieces add up to what Two holds.
             $lineNet = Postprocessing::cents($line['net_amount']);
@@ -384,22 +384,22 @@ final class OrderRefunds
         if ($netTyped !== '' || $taxTyped !== '') {
             foreach (['net' => $netTyped, 'tax' => $taxTyped === '' ? '0' : $taxTyped] as $field => $typed) {
                 if (preg_match('~^\d{1,9}(\.\d{1,2})?\z~', $typed) !== 1) {
-                    throw OrderRefused::because('refund_amount_format', 'the amount line\'s ' . $field . ' is not an amount (digits, and up to two decimals after a dot).');
+                    throw OrderRefused::because('refund_amount_format', Message::of($field === 'net' ? 'refusal_refund_amount_net' : 'refusal_refund_amount_tax'));
                 }
             }
             $rate = OrderBuilder::rate((float) ($request['rate'] ?? 0));
             if (!in_array($rate, self::rates($two), true)) {
-                throw OrderRefused::because('refund_amount_rate', 'the amount line\'s tax rate is not one of the order\'s.');
+                throw OrderRefused::because('refund_amount_rate', Message::of('refusal_refund_amount_rate'));
             }
             $net = Postprocessing::cents($netTyped);
             if ($net <= 0) {
-                throw OrderRefused::because('refund_amount_zero', 'the amount line has no net amount.');
+                throw OrderRefused::because('refund_amount_zero', Message::of('refusal_refund_amount_zero'));
             }
             $name = 'Refund on order ' . $orderId;
             $lines[] = self::checkedLine($name, 1, $net, Postprocessing::cents($taxTyped === '' ? '0' : $taxTyped), $rate, 'item');
         }
         if ($lines === []) {
-            throw OrderRefused::because('refund_empty', 'nothing to refund. Pick a quantity on a line, or enter an amount.');
+            throw OrderRefused::because('refund_empty', Message::of('refusal_refund_empty'));
         }
 
         return $lines;
@@ -413,7 +413,7 @@ final class OrderRefunds
     private static function checkedLine(string $name, int $quantity, int $net, int $tax, string $rate, string $unit): array
     {
         if (self::untaxed($net, $tax, $rate)) {
-            throw OrderRefused::because('refund_line_untaxed', '"' . $name . '" has a net amount but no tax at ' . $rate . '. Enter the tax the shop charged.');
+            throw OrderRefused::because('refund_line_untaxed', Message::of('refusal_refund_line_untaxed', $name, $rate));
         }
 
         return OrderBuilder::line($name, 'PHYSICAL', $quantity, intdiv($net, max(1, $quantity)), $net, $tax, (float) $rate, $unit);
@@ -557,7 +557,7 @@ final class OrderRefunds
         try {
             $body = $this->postprocessing->apply(Postprocessing::REFUND, $trigger, $path, $payload, ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, Message::of('note_refund_not_built', $twoOrderId, $refused->detail));
+            return $this->refused($orderId, Message::of('note_refund_not_built', $twoOrderId, $refused->note));
         }
         // The amount Two is asked for: the hooked body's when it names one, else the plugin's own (a full
         // refund's empty body may come back with a field added, and still asks Two for the whole rest).

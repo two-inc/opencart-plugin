@@ -122,7 +122,7 @@ final class OrderEdit
             unset($payload['merchant_urls'], $payload['buyer'], $payload['invoice_type']);
             $body = $this->postprocessing->apply(Postprocessing::ORDER_UPDATE, 'order_edit', $path, $payload, ($input['context'] ?? []) + ['order_id' => $orderId], $failures);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, Message::of('note_edit_not_built', $refused->detail));
+            return $this->refused($orderId, Message::of('note_edit_not_built', $refused->note));
         }
 
         $previous = ($record['edit_key'] ?? '') !== '' ? $record['edit_key'] : IdempotencyKey::orderCreate($orderId, $record['token_hash'] ?? '');

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderRefused;
 
@@ -84,11 +85,11 @@ final class OrderBuilderSpec
         ];
         $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 2.5, 'rate' => 0.25];
         $rebuilds = [
-            [['fee_refusal' => 'the order was placed with a payment terms fee but no longer carries one'], [], 'fee_missing', 'an order placed with a fee that lost it is refused, with the adapter\'s reason'],
-            [['fee_refusal' => '', 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order carrying its fee line is built'],
-            [['fee_refusal' => ''], [], null, 'an order placed without a fee needs none'],
-            [['currency_refusal' => 'the order was placed with Two in NOK and its currency is now EUR'], [], 'currency_changed', 'an order whose currency an edit changed is refused, with the adapter\'s reason'],
-            [['currency_refusal' => '', 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order in the currency it was placed in is built'],
+            [['fee_refusal' => Message::of('refusal_fee_missing')], [], 'fee_missing', 'an order placed with a fee that lost it is refused, with the adapter\'s reason'],
+            [['fee_refusal' => null, 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order carrying its fee line is built'],
+            [['fee_refusal' => null], [], null, 'an order placed without a fee needs none'],
+            [['currency_refusal' => Message::of('refusal_currency_changed', 'NOK', 'EUR')], [], 'currency_changed', 'an order whose currency an edit changed is refused, with the adapter\'s reason'],
+            [['currency_refusal' => null, 'total' => 262.5, 'tax_total' => 52.5], [$fee], null, 'an order in the currency it was placed in is built'],
         ];
         foreach ($rebuilds as [$over, $totals, $refused, $description]) {
             try {
@@ -165,7 +166,7 @@ final class OrderBuilderSpec
         $payload = ['gross_amount' => '312.50', 'tax_amount' => '62.50', 'line_items' => [[], []]];
         TinyAssert::same(
             ['The lines add up to 312.50 but the shop charged 300.00.', 'The lines carry 62.50 tax but the shop charged 50.00.'],
-            OrderBuilder::shopMatchFailures($payload, ['currency_value' => 1, 'total' => 300, 'tax_total' => 50]),
+            array_map(static fn (Message $failure): string => $failure->english(), OrderBuilder::shopMatchFailures($payload, ['currency_value' => 1, 'total' => 300, 'tax_total' => 50])),
             'shop-match failures name both sums'
         );
     }

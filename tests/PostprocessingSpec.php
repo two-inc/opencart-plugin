@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderRefused;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 
@@ -20,8 +21,8 @@ final class PostprocessingSpec
         $edited['line_items'][0]['net_amount'] = '90.00';
         $cases = [
             ['handlers' => [], 'failures' => [], 'sent' => $payload, 'refused' => null, 'info' => 0, 'errors' => [], 'description' => 'no handler, checks pass: the payload goes as built'],
-            ['handlers' => [], 'failures' => ['The lines add up to 1 but the shop charged 2.'], 'sent' => null, 'refused' => 'shop_match_failed', 'info' => 0, 'errors' => [Postprocessing::SHOP_MATCH_FAILED], 'description' => 'no handler, a check fails: the default handler refuses'],
-            ['handlers' => ['merchant.fix' => $identity], 'failures' => ['The lines add up to 1 but the shop charged 2.'], 'sent' => $payload, 'refused' => null, 'info' => 1, 'errors' => [], 'description' => 'a handler that changes nothing still takes over the checks'],
+            ['handlers' => [], 'failures' => [Message::of('refusal_shop_match_gross', '1.00', '2.00')], 'sent' => null, 'refused' => 'shop_match_failed', 'info' => 0, 'errors' => [Postprocessing::SHOP_MATCH_FAILED], 'description' => 'no handler, a check fails: the default handler refuses'],
+            ['handlers' => ['merchant.fix' => $identity], 'failures' => [Message::of('refusal_shop_match_gross', '1.00', '2.00')], 'sent' => $payload, 'refused' => null, 'info' => 1, 'errors' => [], 'description' => 'a handler that changes nothing still takes over the checks'],
             ['handlers' => ['merchant.fix' => $identity], 'failures' => null, 'sent' => $payload, 'refused' => null, 'info' => 0, 'errors' => [], 'description' => 'a request with no checks logs no delegation'],
             ['handlers' => ['merchant.edit' => static function (array $p): array { $p['line_items'][0]['net_amount'] = '90.00'; return $p; }], 'failures' => [], 'sent' => $edited, 'refused' => null, 'info' => 1, 'errors' => [], 'description' => 'an edit goes out as the handler returns it, never recomputed'],
             ['handlers' => ['a' => static fn (array $p): array => ['step' => 'a'] + $p, 'b' => static fn (array $p): array => ['step' => $p['step'] . 'b'] + $p], 'failures' => [], 'sent' => ['step' => 'ab'] + $payload, 'refused' => null, 'info' => 1, 'errors' => [], 'description' => 'handlers chain in order'],

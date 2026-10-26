@@ -13,7 +13,7 @@ final class MessageSpec
 {
     public static function runAll(): void
     {
-        $nb = ['note_confirmed' => 'Two-ordren %s er bekreftet.', 'note_already' => 'Two-ordren %1$s er allerede %2$s.', 'note_cancelled' => 'Kansellert %1$s %2$s.'];
+        $nb = ['note_confirmed' => 'Two-ordren %s er bekreftet.', 'note_already' => 'Two-ordren %1$s er allerede %2$s.', 'note_cancelled' => 'Kansellert %1$s %2$s.', 'note_refund_form_not_built' => 'Ikke refundert: %s', 'refusal_refund_empty' => 'ingenting å refundere.'];
         $copy = static fn (string $key): string => $nb[$key] ?? $key;
         $cases = [
             ['message' => Message::of('note_confirmed', 'abc'), 'english' => 'Two order abc confirmed.', 'in' => 'Two-ordren abc er bekreftet.', 'description' => 'one parameter'],
@@ -21,11 +21,13 @@ final class MessageSpec
             ['message' => Message::of('note_cancel_refused_why', 'abc', 'CONFIRMED', 'HTTP 409'), 'english' => 'Two order abc not cancelled: HTTP 409. Two holds it as CONFIRMED. Save the status again to retry.', 'in' => 'Two order abc not cancelled: HTTP 409. Two holds it as CONFIRMED. Save the status again to retry.', 'description' => 'a key the language lacks reads in English'],
             ['message' => Message::of('note_cancelled', 'abc'), 'english' => 'Two order abc cancelled.', 'in' => 'Two order abc cancelled.', 'description' => 'a translation that wants more parameters than given reads in English'],
             ['message' => Message::of('note_no_company'), 'english' => 'No company was entered.', 'in' => 'No company was entered.', 'description' => 'no parameters'],
+            ['message' => Message::of('note_refund_form_not_built', Message::of('refusal_refund_empty')), 'english' => 'Not refunded: nothing to refund. Pick a quantity on a line, or enter an amount.', 'in' => 'Ikke refundert: ingenting å refundere.', 'description' => 'a message inside a message reads in the same language'],
         ];
         foreach ($cases as $case) {
             TinyAssert::same($case['english'], $case['message']->english(), 'english: ' . $case['description']);
             TinyAssert::same($case['in'], $case['message']->in($copy), 'in a language: ' . $case['description']);
             TinyAssert::same($case['english'], Message::decode($case['message']->encode())?->english(), 'stored and read back: ' . $case['description']);
+            TinyAssert::same($case['in'], Message::decode($case['message']->encode())?->in($copy), 'stored and read back in a language: ' . $case['description']);
         }
 
         $stored = [

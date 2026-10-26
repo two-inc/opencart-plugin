@@ -9,7 +9,10 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * a language key and its parameters, so the adapter renders it in the shop's
  * or the admin's language. english() is the text for the log, which stays
  * English. TEMPLATES is the en-gb source: the en-gb notes language file holds
- * the same keys and text (LanguageCatalogueSpec pins them).
+ * the same keys and text (LanguageCatalogueSpec pins them). A parameter may
+ * itself be a Message (why an order could not be built, inside the note
+ * that says so), rendered in the same language. Plain string parameters are
+ * data or Two's own text, never the plugin's copy.
  */
 final class Message
 {
@@ -111,26 +114,56 @@ final class Message
         'note_refund_unknown' => 'The outcome of the refund of %1$s on order %2$s is unknown (%3$s). Retry it on the Two tab of the order page; no other refund is sent until then.',
         'note_refund_locked' => 'Not refunded: another refund on this order is being sent. Try again in a minute.',
         'note_refund_blocked' => 'Not refunded: the refund of %1$s sent on %2$s has an unknown outcome. Retry it on the Two tab of the order page first, so Two never refunds twice.',
+        // Why an order or a refund could not be built (OrderRefused), a parameter of the notes above.
+        'refusal_currency_value' => 'The order has no usable currency value.',
+        'refusal_currency_changed' => 'the order was placed with Two in %1$s and its currency is now %2$s. Two keeps an order in the currency it was placed in.',
+        'refusal_empty_order' => 'The order has no product lines.',
+        'refusal_unsupported_total' => 'The order total "%s" is not one the plugin can send.',
+        'refusal_fee_missing' => 'the order was placed with a payment terms fee but no longer carries one (is the Two payment terms fee order total enabled?)',
+        'refusal_negative_line' => 'The line "%s" has a negative or empty quantity or amount.',
+        'refusal_line_rate_unknown' => 'The shop charged tax on "%s" but its tax class gives no rate at the order address.',
+        'refusal_discount_tax_positive' => 'The stored tax total is %s more than the lines carry, which a discount cannot explain: a line\'s tax does not match what the shop charged.',
+        'refusal_discount_tax_unexplained' => 'The stored tax total is %s less than the lines carry, but no line carries tax for the discount to reduce.',
+        'refusal_discount_tax_ambiguous' => 'The discount reduced tax on lines at more than one rate (%s), and the shop does not store how much at each.',
+        'refusal_fixed_amount_tax' => 'fixed-amount tax rate on "%s": a Two line carries one percentage rate.',
+        'refusal_order_date' => 'The order has no readable date added.',
+        'refusal_shop_match_gross' => 'The lines add up to %1$s but the shop charged %2$s.',
+        'refusal_shop_match_tax' => 'The lines carry %1$s tax but the shop charged %2$s.',
+        'refusal_shop_match_both' => '%1$s %2$s',
+        'refusal_hook_threw' => 'A postprocessing subscriber threw %s.',
+        'refusal_hook_returned' => 'A postprocessing subscriber returned %s, not an array.',
+        'refusal_hook_unencodable' => 'A postprocessing subscriber returned a payload that cannot be JSON-encoded.',
+        'refusal_cancel_not_sent' => 'not sent: %s',
+        'refusal_refund_line_unknown' => 'a picked line is not on the Two order.',
+        'refusal_refund_line_quantity' => 'more of "%1$s" than is left to refund (%2$s of %3$s).',
+        'refusal_refund_amount_net' => 'the amount line\'s net is not an amount (digits, and up to two decimals after a dot).',
+        'refusal_refund_amount_tax' => 'the amount line\'s tax is not an amount (digits, and up to two decimals after a dot).',
+        'refusal_refund_amount_rate' => 'the amount line\'s tax rate is not one of the order\'s.',
+        'refusal_refund_amount_zero' => 'the amount line has no net amount.',
+        'refusal_refund_empty' => 'nothing to refund. Pick a quantity on a line, or enter an amount.',
+        'refusal_refund_line_untaxed' => '"%1$s" has a net amount but no tax at %2$s. Enter the tax the shop charged.',
     ];
 
-    /** @param list<string> $params */
+    /** @param list<string|self> $params */
     private function __construct(public readonly string $key, public readonly array $params)
     {
     }
 
-    public static function of(string $key, string|int|float ...$params): self
+    public static function of(string $key, string|int|float|self ...$params): self
     {
         if (!isset(self::TEMPLATES[$key])) {
             throw new \InvalidArgumentException('Unknown message key "' . $key . '".');
         }
 
-        return new self($key, array_values(array_map('strval', $params)));
+        return new self($key, array_values(array_map(static fn (string|int|float|self $param): string|self => $param instanceof self ? $param : (string) $param, $params)));
     }
 
     /** The English text, for the log and wherever no language file has the key. */
     public function english(): string
     {
-        return self::format(self::TEMPLATES[$this->key], $this->params) ?? self::TEMPLATES[$this->key];
+        $params = array_map(static fn (string|self $param): string => $param instanceof self ? $param->english() : $param, $this->params);
+
+        return self::format(self::TEMPLATES[$this->key], $params) ?? self::TEMPLATES[$this->key];
     }
 
     /**
@@ -142,8 +175,9 @@ final class Message
     public function in(\Closure $template): string
     {
         $copy = $template($this->key);
+        $params = array_map(static fn (string|self $param): string => $param instanceof self ? $param->in($template) : $param, $this->params);
 
-        return $copy === '' || $copy === $this->key ? $this->english() : (self::format($copy, $this->params) ?? $this->english());
+        return $copy === '' || $copy === $this->key ? $this->english() : (self::format($copy, $params) ?? $this->english());
     }
 
     /**
@@ -164,17 +198,27 @@ final class Message
     /** The message as stored (a refund row's outcome), to render later in the reader's language. */
     public function encode(): string
     {
-        return (string) json_encode(['key' => $this->key, 'params' => $this->params]);
+        return (string) json_encode($this->stored());
+    }
+
+    /** @return array{key: string, params: list<string|array<string, mixed>>} */
+    private function stored(): array
+    {
+        return ['key' => $this->key, 'params' => array_map(static fn (string|self $param): string|array => $param instanceof self ? $param->stored() : $param, $this->params)];
     }
 
     /** A stored message, or null for text stored before messages were (shown as it stands). */
     public static function decode(string $stored): ?self
     {
-        $data = json_decode($stored, true);
+        return self::fromStored(json_decode($stored, true));
+    }
+
+    private static function fromStored(mixed $data): ?self
+    {
         if (!is_array($data) || !is_string($data['key'] ?? null) || !isset(self::TEMPLATES[$data['key']]) || !is_array($data['params'] ?? null)) {
             return null;
         }
-        $params = array_map(static fn (mixed $param): string => is_scalar($param) ? (string) $param : '', array_values($data['params']));
+        $params = array_map(static fn (mixed $param): string|self => is_scalar($param) ? (string) $param : (self::fromStored($param) ?? ''), array_values($data['params']));
 
         return self::of($data['key'], ...$params);
     }

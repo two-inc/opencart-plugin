@@ -103,7 +103,7 @@ final class OrderFlow
         try {
             $payload = $this->payload($order, $lines, $totals, $context, 'checkout');
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, Message::of('note_create_not_built', $refused->detail));
+            return $this->refused($orderId, Message::of('note_create_not_built', $refused->note));
         }
 
         // A re-create (the buyer placed the order again) replaces the earlier
@@ -213,7 +213,7 @@ final class OrderFlow
         try {
             $body = $this->postprocessing->apply(Postprocessing::ORDER_CONFIRM, 'buyer_return', $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
-            return self::outcome(self::REFUSED, Message::of('note_confirm_not_built', $twoOrderId, $refused->detail), $twoOrderId);
+            return self::outcome(self::REFUSED, Message::of('note_confirm_not_built', $twoOrderId, $refused->note), $twoOrderId);
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CONFIRM, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
@@ -447,9 +447,9 @@ final class OrderFlow
         try {
             $payload = $this->payload($order, $lines, $totals, $context, 'checkout', Postprocessing::ORDER_INTENT);
         } catch (OrderRefused $refused) {
-            $this->logger->error('Order ' . $orderId . ': order intent not sent: ' . $refused->detail);
+            $this->logger->error('Order ' . $orderId . ': order intent not sent: ' . $refused->note->english());
 
-            return self::intentOutcome(self::REFUSED, Message::of('note_intent_not_built', $refused->detail), [ErrorMapper::GENERIC]);
+            return self::intentOutcome(self::REFUSED, Message::of('note_intent_not_built', $refused->note), [ErrorMapper::GENERIC]);
         }
 
         $response = $this->client->request('POST', '/v1/order_intent', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderIntent($sessionHash, self::payloadHash($payload))));
@@ -492,7 +492,7 @@ final class OrderFlow
      *
      * @param array<string, string> $record
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
-     * @return array{0: string, 1: string, 2: list<string>}|null
+     * @return array{0: string, 1: string, 2: list<string|Message>}|null
      */
     public function snapshotMismatch(array $record, \Closure $rebuild): ?array
     {
@@ -506,7 +506,7 @@ final class OrderFlow
         try {
             $payload = $this->payload($input['order'], $input['lines'], $input['totals'], $input['context'] ?? [], 'snapshot_hash');
         } catch (OrderRefused $refused) {
-            return [self::REFUSED, 'note_confirm_rebuild_failed', [$refused->detail]];
+            return [self::REFUSED, 'note_confirm_rebuild_failed', [$refused->note]];
         }
 
         return hash_equals($record['payload_hash'], self::payloadHash($payload)) ? null : [self::CHANGED, 'note_confirm_changed', []];
@@ -548,9 +548,9 @@ final class OrderFlow
      * Sends the cancel of a whole Two order, through the hook, with an
      * idempotency key.
      *
-     * @return string|null why it was not sent or Two refused it, null when Two accepted it
+     * @return Message|string|null why it was not sent (a Message) or Two refused it (Two's text), null when Two accepted it
      */
-    public function sendCancel(string $twoOrderId, string $trigger, int $orderId): ?string
+    public function sendCancel(string $twoOrderId, string $trigger, int $orderId): Message|string|null
     {
         return $this->cancelOrder($twoOrderId, $trigger, $orderId)['failure'];
     }
@@ -560,7 +560,7 @@ final class OrderFlow
      * as cancelled, 200 that this request cancelled it, 0 that nothing was sent
      * or Two was not reached.
      *
-     * @return array{failure: string|null, status: int}
+     * @return array{failure: Message|string|null, status: int}
      */
     public function cancelOrder(string $twoOrderId, string $trigger, int $orderId): array
     {
@@ -568,9 +568,9 @@ final class OrderFlow
         try {
             $body = $this->postprocessing->apply(Postprocessing::CANCEL, $trigger, $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
-            $this->logger->error('Two order ' . $twoOrderId . ' cancel not sent: ' . $refused->detail);
+            $this->logger->error('Two order ' . $twoOrderId . ' cancel not sent: ' . $refused->note->english());
 
-            return ['failure' => 'not sent: ' . $refused->detail, 'status' => 0];
+            return ['failure' => Message::of('refusal_cancel_not_sent', $refused->note), 'status' => 0];
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CANCEL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {

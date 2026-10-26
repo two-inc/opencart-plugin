@@ -164,7 +164,7 @@ final class OrderLifecycle
         try {
             $body = $this->postprocessing->apply(Postprocessing::CAPTURE, 'status_change', $path, [], ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, Message::of('note_fulfil_not_built', $twoOrderId, $refused->detail));
+            return $this->refused($orderId, Message::of('note_fulfil_not_built', $twoOrderId, $refused->note));
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::FULFIL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
