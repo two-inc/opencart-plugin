@@ -108,7 +108,9 @@ class Two extends \Opencart\System\Engine\Controller
         $data['languages'] = $this->model_localisation_language->getLanguages();
         $data['titles'] = [];
         foreach ($data['languages'] as $language) {
-            $data['titles'][$language['language_id']] = $settings->title((int) $language['language_id']);
+            // Each language's default title from its own language file, prefixed so this page's keys stay.
+            $copy = $this->load->language(self::ROUTE, 'two_title', (string) $language['code']);
+            $data['titles'][$language['language_id']] = $settings->title((int) $language['language_id'], (string) ($copy['two_title_text_title_default'] ?? ''));
         }
 
         // Checkout fields: the placement switch, the optional fields and the minimum order.
@@ -487,7 +489,7 @@ class Two extends \Opencart\System\Engine\Controller
             }
         }
         if (in_array(-1, $lines, true)) {
-            $this->json(['error' => 'Not refunded: a quantity is not a whole number.']);
+            $this->json(['error' => $this->language->get('error_refund_quantity')]);
 
             return;
         }

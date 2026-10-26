@@ -73,7 +73,9 @@ class Two extends \Opencart\System\Engine\Model
             return [];
         }
         // OpenCart 4.1 renders method names unescaped, and the title is stored as typed.
-        $title = htmlspecialchars($services->settings->title((int) $this->config->get('config_language_id')), ENT_QUOTES, 'UTF-8');
+        // Prefixed: the method list runs inside other pages' rendering, whose own language keys must not be overwritten.
+        $copy = $this->load->language('extension/two/payment/two', 'two_title');
+        $title = htmlspecialchars($services->settings->title((int) $this->config->get('config_language_id'), (string) ($copy['two_title_text_title_default'] ?? '')), ENT_QUOTES, 'UTF-8');
 
         return [
             'code' => 'two',

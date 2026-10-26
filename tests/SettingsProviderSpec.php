@@ -45,7 +45,7 @@ final class SettingsProviderSpec
         ['a' => ['api_key' => 'k1'], 'b' => ['api_key' => 'k2'], 'same' => false, 'description' => 'another key is other credentials'],
     ];
 
-    /** @var list<array{stored: string|null, language: int, expected: string, description: string}> */
+    /** @var list<array{stored: string|null, language: int, default?: string, expected: string, description: string}> */
     private const TITLES = [
         ['stored' => null, 'language' => 1, 'expected' => 'Business invoice', 'description' => 'no titles stored reads as the default'],
         ['stored' => '{"1":" Pay by invoice ","2":"Faktura"}', 'language' => 2, 'expected' => 'Faktura', 'description' => 'the title for the language'],
@@ -53,13 +53,16 @@ final class SettingsProviderSpec
         ['stored' => '{"1":"Pay by invoice"}', 'language' => 3, 'expected' => 'Business invoice', 'description' => 'a language added after the save reads as the default'],
         ['stored' => '{"1":"  "}', 'language' => 1, 'expected' => 'Business invoice', 'description' => 'a blank title reads as the default'],
         ['stored' => 'not json', 'language' => 1, 'expected' => 'Business invoice', 'description' => 'malformed titles read as the default'],
+        ['stored' => null, 'language' => 2, 'default' => 'Bedriftsfaktura', 'expected' => 'Bedriftsfaktura', 'description' => 'no title reads as the language\'s own default'],
+        ['stored' => '{"2":"Faktura"}', 'language' => 2, 'default' => 'Bedriftsfaktura', 'expected' => 'Faktura', 'description' => 'a stored title wins over the language\'s default'],
+        ['stored' => null, 'language' => 2, 'default' => ' ', 'expected' => 'Business invoice', 'description' => 'a language file with no default reads as the built-in one'],
     ];
 
     public static function runAll(): void
     {
         foreach (self::TITLES as $case) {
             $settings = new SettingsProvider(new MemoryStore($case['stored'] === null ? [] : ['title' => $case['stored']]));
-            TinyAssert::same($case['expected'], $settings->title($case['language']), 'title: ' . $case['description']);
+            TinyAssert::same($case['expected'], $settings->title($case['language'], $case['default'] ?? ''), 'title: ' . $case['description']);
         }
 
         foreach (self::CASES as $case) {
