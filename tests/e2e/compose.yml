@@ -48,7 +48,8 @@ services:
         if [ -s /e2e-tls/ca.crt ]; then cp /e2e-tls/ca.crt /usr/local/share/ca-certificates/two-e2e.crt && update-ca-certificates >/dev/null; fi
         exec two-opencart-start
     volumes:
-      - ../..:/var/www/html/extension/two:ro
+      # The extension under test: this checkout, or the upgrade smoke's copy.
+      - ${E2E_EXTENSION_DIR:-../..}:/var/www/html/extension/two:ro
       - ./.tls:/e2e-tls:ro
 
   stub:

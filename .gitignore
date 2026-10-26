@@ -21,3 +21,4 @@ node_modules/
 tests/e2e/.tls/
 tests/e2e/test-results/
 tests/e2e/playwright-report/
+tests/e2e/.upgrade/
