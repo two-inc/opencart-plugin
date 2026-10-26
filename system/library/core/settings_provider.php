@@ -42,7 +42,7 @@ final class SettingsProvider
         'min_order_basis' => '',
         'trusted_proxies' => '',
         'disable_rate_limit' => '0',
-        'payment_terms' => '',
+        'payment_terms' => '[30,60,90]',
         'payment_term_type' => PaymentTerms::STANDARD,
         'default_payment_term' => '',
         'surcharge_type' => Surcharge::NONE,
@@ -197,16 +197,17 @@ final class SettingsProvider
     }
 
     /**
-     * The terms the merchant ticked on the Payment terms tab, or null when
-     * none are stored: every term the merchant record offers.
+     * The terms the merchant ticked on the Payment terms tab. A shop with no
+     * stored value reads the fresh-install ticks (30, 60 and 90 days, as the
+     * reference plugin installs); an unreadable value ticks none.
      *
-     * @return list<int>|null
+     * @return list<int>
      */
-    public function tickedPaymentTerms(): ?array
+    public function tickedPaymentTerms(): array
     {
-        $decoded = json_decode((string) $this->store->get('payment_terms'), true);
+        $decoded = json_decode((string) ($this->store->get('payment_terms') ?? self::DEFAULTS['payment_terms']), true);
         if (!is_array($decoded)) {
-            return null;
+            return [];
         }
 
         return array_values(array_unique(array_map('intval', array_filter($decoded, static fn (mixed $days): bool => is_int($days) && $days > 0))));

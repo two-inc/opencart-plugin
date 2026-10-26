@@ -10,9 +10,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * The terms come from the merchant record (`available_terms`), never from a
  * list held by the plugin: a term Two withdraws drops out of checkout even
  * while the merchant's own choice still ticks it. The merchant's settings
- * only narrow that set: the terms ticked on the Payment terms tab (none
- * stored means every term the record offers), and the term type (end of
- * month offers 30, 45 and 60 only).
+ * only narrow that set: the terms ticked on the Payment terms tab (30, 60
+ * and 90 days on a fresh install), and the term type (end of month offers
+ * 30, 45 and 60 only).
  *
  * With no offered term there is no default either: a substituted day count
  * would book the order under a term the merchant's account cannot honour,
@@ -32,11 +32,11 @@ final class PaymentTerms
 
     /**
      * @param list<int>      $recordTerms the record's terms, ascending
-     * @param list<int>|null $ticked      the merchant's ticked terms, null for every term the record offers
+     * @param list<int>      $ticked      the merchant's ticked terms
      */
     public function __construct(
         public readonly array $recordTerms,
-        private readonly ?array $ticked,
+        private readonly array $ticked,
         public readonly string $type,
         private readonly ?int $merchantDefault,
         private readonly ?int $dueInDays,
@@ -84,7 +84,7 @@ final class PaymentTerms
      */
     public function offered(): array
     {
-        return array_values(array_filter($this->configurable(), fn (int $days): bool => $this->ticked === null || in_array($days, $this->ticked, true)));
+        return array_values(array_filter($this->configurable(), fn (int $days): bool => in_array($days, $this->ticked, true)));
     }
 
     /**
@@ -122,6 +122,14 @@ final class PaymentTerms
     public function selected(?int $chosen): ?int
     {
         return $chosen !== null && $this->offers($chosen) ? $chosen : $this->defaultTerm();
+    }
+
+    /** A posted term (the tile's `two.term`) as days, when it is a whole number of days the record offers; else null. */
+    public function accept(mixed $posted): ?int
+    {
+        $days = is_string($posted) || is_int($posted) ? trim((string) $posted) : '';
+
+        return ctype_digit($days) && $this->offers((int) $days) ? (int) $days : null;
     }
 
     public function offers(int $days): bool

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Opencart\Catalog\Model\Extension\Two\Payment;
 
+use Opencart\System\Library\Extension\Two\Core\FeeQuote;
 use Opencart\System\Library\Extension\Two\Core\PaymentTerms;
 use Opencart\System\Library\Extension\Two\Opencart\OrderTax;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
@@ -28,6 +29,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Library\DB $db
  * @property-read \Opencart\System\Library\Log $log
  * @property-read \Opencart\System\Library\Session $session
+ * @property-read \Opencart\System\Library\Request $request
  * @property-read \Opencart\System\Library\Cart\Currency $currency
  * @property-read \Opencart\System\Library\Cart\Tax $tax
  * @property-read \Opencart\Catalog\Model\Checkout\Order $model_checkout_order
@@ -95,6 +97,7 @@ class Two extends \Opencart\System\Engine\Model
 
         return [
             'enabled' => (bool) $this->config->get('payment_two_status'),
+            'fee_total' => $this->feeTotalEnabled(),
             'currency' => (string) ($this->session->data['currency'] ?? $shop),
             'shop_currency' => $shop,
             'gross' => (float) $total,
@@ -148,19 +151,20 @@ class Two extends \Opencart\System\Engine\Model
      * The fee line for the cart, when Two is the chosen method and its term
      * prices one: the title, and the net in the shop's default currency (as
      * OpenCart keeps every total). Null when no fee applies, or when it
-     * cannot be quoted: the method list then withholds Two, and placement
-     * refuses an order whose fee is missing.
+     * cannot be quoted: the method list then withholds Two, placement
+     * refuses an order whose fee is missing, and an edit rebuilt without it
+     * is refused (OrderBuilder, fee_expected).
      *
      * @return array{title: string, value: float, tax_class_id: int}|null
      */
     public function feeTotal(): ?array
     {
-        if (self::$feeSuspended || ($this->session->data['payment_method']['code'] ?? '') !== 'two.two') {
+        if (self::$feeSuspended) {
             return null;
         }
         $fee = $this->cartFee();
-        $value = (float) $this->currency->getValue($this->sessionCurrency());
-        if ($fee['net'] === null || $fee['net'] <= 0 || $fee['days'] === null || $value <= 0) {
+        $value = FeeQuote::lineValue($fee, (string) ($this->session->data['payment_method']['code'] ?? ''), (float) $this->currency->getValue($this->sessionCurrency()));
+        if ($value === null || $fee['days'] === null) {
             return null;
         }
         // Prefixed: the totals run inside other pages' rendering, whose own language keys must not be overwritten.
@@ -169,17 +173,17 @@ class Two extends \Opencart\System\Engine\Model
 
         return [
             'title' => $services->surcharge()->label($fee['days'], $services->paymentTerms()->isEndOfMonth(), (string) $copy['two_fee_text_fee_line'], (string) $copy['two_fee_text_fee_line_eom']),
-            'value' => $fee['net'] / $value,
+            'value' => $value,
             'tax_class_id' => $services->surcharge()->taxClassId,
         ];
     }
 
     /**
      * The fee the cart is charged (FeeQuote::charged) with the term it is
-     * for, and why it cannot be quoted when it cannot. The term is the
-     * buyer's choice, else the one stored with the order being edited, else
-     * the default. A quote is reused for FEE_CACHE_SECONDS while its request
-     * is unchanged, so a checkout's many renders ask Two once.
+     * for, and why it cannot be quoted when it cannot. The term is the one
+     * stored with the order on an admin edit, else the buyer's choice, else
+     * the default. Quotes are reused for FEE_CACHE_SECONDS by their request's
+     * hash (rememberQuotes), so a checkout's many renders ask Two once.
      *
      * @param array<string, mixed> $address
      * @return array{applies: bool, days: int|null, net: float|null, failure: string}
@@ -187,26 +191,74 @@ class Two extends \Opencart\System\Engine\Model
     public function cartFee(array $address = []): array
     {
         $services = $this->services();
-        $terms = $services->paymentTerms();
-        $surcharge = $services->surcharge();
-        $currency = $this->sessionCurrency();
-        $shop = (string) $this->config->get('config_currency');
-        $gross = $this->grossWithoutFee();
-        $country = $this->buyerCountry($address) ?? '';
-        $chosen = $this->chosenTerm();
-        $days = $terms->selected($chosen);
-        $payload = $days !== null && $surcharge->isKnown() && $surcharge->enabled() && $gross > 0 ? $services->fees->payload($surcharge, $terms, $days, $gross, $country, $currency, $shop) : null;
-        $key = $payload === null ? '' : hash('sha256', (string) json_encode($payload));
-        $cached = $this->session->data['two_fee_quote'] ?? null;
-        if ($key !== '' && is_array($cached) && ($cached['key'] ?? '') === $key && (int) ($cached['at'] ?? 0) > time() - self::FEE_CACHE_SECONDS && $surcharge->pricesFee($days, $terms->defaultTerm(), $terms->isEndOfMonth())) {
-            return ['applies' => true, 'days' => $days, 'net' => (float) $cached['net'], 'failure' => ''];
-        }
-        $charged = $services->fees->charged($surcharge, $terms, $chosen, $gross, $country, $currency, $shop);
-        if ($key !== '' && $charged['net'] !== null) {
-            $this->session->data['two_fee_quote'] = ['key' => $key, 'net' => $charged['net'], 'at' => time()];
-        }
+        $this->rememberQuotes();
+        $charged = $services->fees->charged($services->surcharge(), $services->paymentTerms(), $this->chosenTerm(), $this->grossWithoutFee(), $this->buyerCountry($address) ?? '', $this->sessionCurrency(), (string) $this->config->get('config_currency'));
+        $this->keepQuotes();
 
         return $charged + ['failure' => $services->fees->failure];
+    }
+
+    /**
+     * The fee each offered term would add to the cart, for the chips, by
+     * term: quoted together, in parallel, within FeeQuote::PREVIEW_SECONDS,
+     * reusing the quotes kept in the session. A term whose quote fails is
+     * left out. Read-only on the session: before keeping its quotes it
+     * reloads what is stored, so this request's write-back at shutdown can
+     * never undo a term the buyer saved while the quotes were out.
+     *
+     * @return array<int, float>
+     */
+    public function previewFees(): array
+    {
+        $services = $this->services();
+        $surcharge = $services->surcharge();
+        $terms = $services->paymentTerms();
+        $gross = $this->grossWithoutFee();
+        if (!$surcharge->isKnown() || !$surcharge->enabled() || $gross <= 0) {
+            return [];
+        }
+        $days = array_values(array_filter($terms->offered(), static fn (int $term): bool => $surcharge->pricesFee($term, $terms->defaultTerm(), $terms->isEndOfMonth())));
+        $this->rememberQuotes();
+        $quotes = $services->fees->quoteAll($surcharge, $terms, $days, $gross, $this->buyerCountry() ?? '', $this->sessionCurrency(), (string) $this->config->get('config_currency'), FeeQuote::PREVIEW_SECONDS);
+        $this->session->start($this->session->getId());
+        $this->keepQuotes();
+        $fees = [];
+        foreach ($quotes as $term => $quote) {
+            if ($quote !== null && $quote['net'] > 0) {
+                $fees[$term] = $quote['net'];
+            }
+        }
+
+        return $fees;
+    }
+
+    /** Hands the fee quotes kept in the session (younger than FEE_CACHE_SECONDS) to FeeQuote. */
+    public function rememberQuotes(): void
+    {
+        $known = [];
+        foreach ((array) ($this->session->data['two_fee_quotes'] ?? []) as $hash => $quote) {
+            if (is_array($quote) && (int) ($quote['at'] ?? 0) > time() - self::FEE_CACHE_SECONDS && is_numeric($quote['net'] ?? null) && is_string($quote['currency'] ?? null)) {
+                $known[(string) $hash] = ['net' => (float) $quote['net'], 'currency' => $quote['currency']];
+            }
+        }
+        $this->services()->fees->remember($known);
+    }
+
+    /**
+     * Keeps the quotes Two gave in this request in the session, by request
+     * hash, dropping expired ones. Only this key is written.
+     */
+    public function keepQuotes(): void
+    {
+        $fresh = $this->services()->fees->fresh();
+        if ($fresh === []) {
+            return;
+        }
+        $kept = array_filter((array) ($this->session->data['two_fee_quotes'] ?? []), static fn (mixed $quote): bool => is_array($quote) && (int) ($quote['at'] ?? 0) > time() - self::FEE_CACHE_SECONDS);
+        foreach ($fresh as $hash => $quote) {
+            $kept[$hash] = $quote + ['at' => time()];
+        }
+        $this->session->data['two_fee_quotes'] = $kept;
     }
 
     /**
@@ -228,39 +280,21 @@ class Two extends \Opencart\System\Engine\Model
     }
 
     /**
-     * Placement's term and fee check: why the session's order may not be
-     * placed on its term, or null. Refused when the merchant record offers
-     * no term, when the buyer's term is one it does not offer, when the fee
-     * cannot be quoted, and when the stored order's fee is not the fee for
-     * the term (the order was written before the buyer changed term).
+     * Placement's term and fee check (FeeQuote::placementRefusal) for the
+     * session's order.
      *
      * @return array{reason: string, detail: string}|null
      */
     public function placementTermRefusal(int $orderId): ?array
     {
-        $terms = $this->services()->paymentTerms();
-        if ($terms->offered() === []) {
-            return ['reason' => 'terms', 'detail' => 'the merchant record offers no payment term'];
-        }
-        $chosen = $this->chosenTerm();
-        if ($chosen !== null && !$terms->offers($chosen)) {
-            return ['reason' => 'terms', 'detail' => 'the chosen ' . $chosen . '-day term is not one the merchant record offers'];
-        }
-        $fee = $this->cartFee();
-        if ($fee['applies'] && $fee['net'] === null) {
-            return ['reason' => 'fee', 'detail' => $fee['failure']];
-        }
         $stored = 0.0;
         foreach ($this->db->query('SELECT `value` FROM `' . DB_PREFIX . "order_total` WHERE `order_id` = '" . $orderId . "' AND `code` = 'two_fee'")->rows as $row) {
             $stored += (float) $row['value'];
         }
-        $expected = $fee['applies'] ? (int) round((float) $fee['net'] * 100) : 0;
-        $value = (float) $this->currency->getValue($this->sessionCurrency());
-        if ((int) round($stored * $value * 100) !== $expected) {
-            return ['reason' => 'fee_changed', 'detail' => 'the order\'s payment terms fee is not the fee for the ' . (int) $fee['days'] . '-day term'];
-        }
+        $fee = $this->cartFee();
+        $cents = (int) round($stored * (float) $this->currency->getValue($this->sessionCurrency()) * 100);
 
-        return null;
+        return FeeQuote::placementRefusal($this->services()->paymentTerms(), $this->chosenTerm(), $fee, $fee['failure'], $cents);
     }
 
     /**
@@ -276,17 +310,47 @@ class Two extends \Opencart\System\Engine\Model
         return $days === null ? null : PaymentTerms::block($days, $terms->isEndOfMonth());
     }
 
-    /** The buyer's chosen term from the session, else the term stored with the order being edited, else null. */
+    /**
+     * The term the cart is priced on. An admin order edit runs in a fresh
+     * API session that knows only the order id it posts, so there the term
+     * is the one stored with the order (null when none is: the order was
+     * placed before terms were kept). Otherwise the buyer's choice, if any.
+     */
     public function chosenTerm(): ?int
     {
-        $chosen = (int) ($this->session->data['two_payment_term'] ?? 0);
-        if ($chosen > 0) {
-            return $chosen;
-        }
-        $orderId = (int) ($this->session->data['order_id'] ?? 0);
-        $stored = $orderId > 0 ? PaymentTerms::decode((string) ($this->services()->orders->get($orderId)['payment_terms'] ?? '')) : null;
+        if (str_starts_with((string) ($this->request->get['route'] ?? ''), 'api/')) {
+            $orderId = (int) ($this->request->post['order_id'] ?? $this->request->get['order_id'] ?? 0);
+            $stored = $orderId > 0 ? PaymentTerms::decode((string) ($this->services()->orders->get($orderId)['payment_terms'] ?? '')) : null;
 
-        return $stored['duration_days'] ?? null;
+            return $stored['duration_days'] ?? null;
+        }
+        $chosen = (int) ($this->session->data['two_payment_term'] ?? 0);
+
+        return $chosen > 0 ? $chosen : null;
+    }
+
+    /** Whether the shop runs the payment terms fee order total: installed and enabled. */
+    public function feeTotalEnabled(): bool
+    {
+        return (bool) $this->config->get('total_two_fee_status')
+            && $this->db->query('SELECT `extension_id` FROM `' . DB_PREFIX . "extension` WHERE `type` = 'total' AND `code` = 'two_fee'")->num_rows > 0;
+    }
+
+    /**
+     * Whether an order rebuilt on its stored term must carry a fee line: the
+     * surcharge prices one for that term. An edit whose fee could not be
+     * quoted is then refused, not sent without its fee.
+     *
+     * @param array<string, mixed> $terms
+     */
+    private function feeExpected(array $terms, float $total): bool
+    {
+        $services = $this->services();
+        $surcharge = $services->surcharge();
+        $days = is_int($terms['duration_days'] ?? null) ? $terms['duration_days'] : 0;
+        $offered = $services->paymentTerms();
+
+        return $days > 0 && $total > 0 && $surcharge->isKnown() && $surcharge->pricesFee($days, $offered->defaultTerm(), $offered->isEndOfMonth());
     }
 
     /** The cart's gross without the fee, in the session currency at the shop's own currency value (the factor the order is sent at). */
@@ -436,6 +500,7 @@ class Two extends \Opencart\System\Engine\Model
                 'merchant_urls' => $urls,
                 'buyer_fields' => $buyerFields,
                 'terms' => $terms ?? $this->termsBlock(),
+                'fee_expected' => $terms !== null && $terms !== [] && $this->feeExpected($terms, (float) $order['total']),
             ],
             'lines' => $lines,
             'totals' => $totals,

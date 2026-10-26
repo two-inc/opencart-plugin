@@ -25,6 +25,7 @@ final class PaymentTermsSpec
         self::testOffered();
         self::testDefault();
         self::testSelected();
+        self::testAccept();
         self::testBlock();
         self::testSave();
     }
@@ -32,13 +33,16 @@ final class PaymentTermsSpec
     private static function testOffered(): void
     {
         $cases = [
-            [['available_terms' => [60, 30, '14', 30, 0, -7, 'x', 2.5]], [], [14, 30, 60], 'the record\'s terms: positive whole days, unique, ascending'],
+            [['available_terms' => [60, 30, '14', 30, 0, -7, 'x', 2.5]], ['payment_terms' => '[14,30,60]'], [14, 30, 60], 'the record\'s terms: positive whole days, unique, ascending'],
+            [['available_terms' => [14, 30, 60, 90]], ['payment_terms' => null], [30, 60, 90], 'a shop with nothing stored offers the fresh-install ticks: 30, 60 and 90 days'],
+            [['available_terms' => [14, 45]], ['payment_terms' => null], [], 'none of the fresh-install ticks offered: no term'],
             [[], [], [], 'a record with no terms offers none'],
             [null, [], [], 'no record offers none'],
             [['available_terms' => [14, 30, 60]], ['payment_terms' => '[30,60]'], [30, 60], 'narrowed to the ticked terms'],
             [['available_terms' => [14, 30]], ['payment_terms' => '[30,90]'], [30], 'a ticked term the record withdrew is not offered'],
-            [['available_terms' => [14, 30, 45, 60, 90]], ['payment_term_type' => 'EOM'], [30, 45, 60], 'end of month offers 30, 45 and 60 only'],
-            [['available_terms' => [14, 30]], ['payment_terms' => 'junk'], [14, 30], 'an unreadable ticked list reads as every term'],
+            [['available_terms' => [14, 30, 45, 60, 90]], ['payment_term_type' => 'EOM', 'payment_terms' => '[14,30,45,60,90]'], [30, 45, 60], 'end of month offers 30, 45 and 60 only'],
+            [['available_terms' => [14, 30]], ['payment_terms' => 'junk'], [], 'an unreadable ticked list ticks none'],
+            [['available_terms' => [14, 30]], ['payment_terms' => '[]'], [], 'nothing ticked offers nothing'],
         ];
         foreach ($cases as [$record, $settings, $expected, $description]) {
             TinyAssert::same($expected, self::terms($record, $settings)->offered(), 'offered: ' . $description);
@@ -65,6 +69,16 @@ final class PaymentTermsSpec
         $terms = self::terms(['available_terms' => [14, 30, 60]], []);
         foreach ([[60, 60, 'an offered choice stands'], [90, 30, 'a choice the record does not offer falls back to the default'], [null, 30, 'no choice is the default']] as [$chosen, $expected, $description]) {
             TinyAssert::same($expected, $terms->selected($chosen), 'selected: ' . $description);
+        }
+    }
+
+    /** The tile's two.term: only a whole number of days the record offers is kept. */
+    private static function testAccept(): void
+    {
+        $terms = self::terms(['available_terms' => [14, 30, 60]], ['payment_terms' => '[14,30]']);
+        $cases = [['30', 30, 'an offered term'], [30, 30, 'an offered term as a number'], [' 14 ', 14, 'padded'], ['60', null, 'a record term the merchant did not tick'], ['90', null, 'a term the record does not offer'], ['30.0', null, 'not whole days'], ['-30', null, 'negative'], ['', null, 'empty'], [null, null, 'absent'], [['30'], null, 'a list']];
+        foreach ($cases as [$posted, $expected, $description]) {
+            TinyAssert::same($expected, $terms->accept($posted), 'accept: ' . $description);
         }
     }
 
@@ -106,11 +120,11 @@ final class PaymentTermsSpec
 
     /**
      * @param array<string, mixed>|null $record
-     * @param array<string, string>     $settings
+     * @param array<string, string|null> $settings
      */
     private static function terms(?array $record, array $settings): PaymentTerms
     {
-        return PaymentTerms::from($record, new SettingsProvider(new MemoryStore($settings)));
+        return PaymentTerms::from($record, new SettingsProvider(new MemoryStore($settings + ['payment_terms' => '[14,30,45,60,90]'])));
     }
 
     /**

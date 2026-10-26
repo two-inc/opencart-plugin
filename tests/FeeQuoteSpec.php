@@ -22,7 +22,7 @@ final class FeeQuoteSpec
 {
     private const NOW = 1_800_000_000;
     /** One EUR is 11.5 NOK and 0.85 GBP. */
-    private const TABLE = '{"base":"EUR","as_of":"2026-10-25","rates":{"EUR":1,"NOK":0.0869565,"GBP":1.1764706}}';
+    private const TABLE = '{"base":"EUR","as_of":"2026-10-25","fetched_at":1800000000,"rates":{"EUR":1,"NOK":0.0869565,"GBP":1.1764706}}';
     private const GRID = '{"30":{"percentage":"2","fixed":"10","cap":"50"},"60":{"percentage":"3","fixed":"","cap":""}}';
 
     public static function runAll(): void
@@ -32,29 +32,98 @@ final class FeeQuoteSpec
         self::testQuote();
         self::testCharged();
         self::testCurrencyFailure();
+        self::testQuoteAll();
+        self::testLineValue();
+        self::testPlacementRefusal();
+    }
+
+    /** The chips' preview: terms asked together, a kept quote reused, the fresh ones handed back to keep. */
+    private static function testQuoteAll(): void
+    {
+        [$quotes, $transport, $settings] = self::quotes(['surcharge_type' => 'percentage'], [new HttpResponse(200, '{"currency":"NOK","buyer_fee_share":"3"}'), new HttpResponse(503, '')]);
+        $surcharge = Surcharge::from($settings);
+        $terms = PaymentTerms::from(['available_terms' => [30, 60, 90]], $settings);
+        $kept = $quotes->payload($surcharge, $terms, 90, 100.0, 'NO', 'NOK', 'NOK');
+        $quotes->remember([hash('sha256', (string) json_encode($kept)) => ['net' => 9.0, 'currency' => 'NOK']]);
+        $result = $quotes->quoteAll($surcharge, $terms, [30, 60, 90], 100.0, 'NO', 'NOK', 'NOK', FeeQuote::PREVIEW_SECONDS);
+        TinyAssert::same([30 => ['net' => 3.0, 'currency' => 'NOK'], 60 => null, 90 => ['net' => 9.0, 'currency' => 'NOK']], [30 => $result[30], 60 => $result[60], 90 => $result[90]], 'quote all: each term answered, a failure null, a kept quote reused');
+        TinyAssert::same(2, count($transport->calls), 'quote all: only the terms not kept are asked');
+        TinyAssert::same(FeeQuote::PREVIEW_SECONDS, $transport->calls[0]['timeout'], 'quote all: the preview\'s whole wait is capped');
+        TinyAssert::same([['net' => 3.0, 'currency' => 'NOK']], array_values($quotes->fresh()), 'quote all: only Two\'s new answers are handed back to keep');
+    }
+
+    private static function testLineValue(): void
+    {
+        $quoted = ['applies' => true, 'days' => 30, 'net' => 25.0];
+        $cases = [
+            [$quoted, 'two.two', 2.5, 10.0, 'the net in the shop currency: the session currency\'s net over its value'],
+            [$quoted, 'cod.cod', 1.0, null, 'no fee line while another method is chosen'],
+            [['net' => null] + $quoted, 'two.two', 1.0, null, 'no fee line when the quote failed'],
+            [['net' => 0.0] + $quoted, 'two.two', 1.0, null, 'no fee line for a zero fee'],
+            [['applies' => false] + $quoted, 'two.two', 1.0, null, 'no fee line when none applies'],
+            [$quoted, 'two.two', 0.0, null, 'no fee line without a currency value'],
+        ];
+        foreach ($cases as [$charged, $code, $value, $expected, $description]) {
+            TinyAssert::same($expected, FeeQuote::lineValue($charged, $code, $value), 'line value: ' . $description);
+        }
+    }
+
+    private static function testPlacementRefusal(): void
+    {
+        $settings = new SettingsProvider(new MemoryStore(['payment_terms' => '[30,60]']));
+        $offered = PaymentTerms::from(['available_terms' => [30, 60]], $settings);
+        $none = PaymentTerms::from(['available_terms' => [14]], $settings);
+        $fee = ['applies' => true, 'days' => 30, 'net' => 12.34];
+        $cases = [
+            [$offered, 30, $fee, 1234, null, 'the stored fee is the fee for the term'],
+            [$offered, null, ['applies' => false, 'days' => 30, 'net' => null], 0, null, 'no fee applies and none is stored'],
+            [$none, null, $fee, 1234, 'terms', 'no term offered'],
+            [$offered, 90, $fee, 1234, 'terms', 'a chosen term the record does not offer'],
+            [$offered, 30, ['net' => null] + $fee, 0, 'fee', 'a fee that cannot be quoted'],
+            [$offered, 60, ['days' => 60, 'net' => 20.0] + $fee, 1234, 'fee_changed', 'the order was written before the buyer changed term'],
+            [$offered, 30, $fee, 0, 'fee_changed', 'the order carries no fee line (the fee total did not run)'],
+            [$offered, 30, ['applies' => false] + $fee, 1234, 'fee_changed', 'a stored fee no term prices'],
+        ];
+        foreach ($cases as [$terms, $chosen, $charged, $stored, $expected, $description]) {
+            $refusal = FeeQuote::placementRefusal($terms, $chosen, $charged, 'the quote failed', $stored);
+            TinyAssert::same($expected, $refusal['reason'] ?? null, 'placement: ' . $description);
+        }
     }
 
     private static function testConvert(): void
     {
+        $fresh = self::table(self::NOW - 60);
+        $answer = new HttpResponse(200, '{"base":"EUR","rates":{"EUR":1,"NOK":0.1,"GBP":1.2}}');
+        $due = (string) (self::NOW - FxRates::TTL - 1);
         $cases = [
-            [[], 100.0, 'NOK', 'NOK', [], 100.0, 'the same currency needs no rate'],
-            [[FxRates::CACHE_KEY => self::TABLE, FxRates::STAMP_KEY => (string) self::NOW], 100.0, 'GBP', 'NOK', [], 1352.94, 'through the EUR pivot, rounded once'],
-            [[FxRates::CACHE_KEY => self::TABLE, FxRates::STAMP_KEY => (string) (self::NOW - FxRates::TTL - 1)], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], 1352.94, 'a stale table is served when a refresh fails'],
-            [[FxRates::STAMP_KEY => (string) self::NOW], 100.0, 'GBP', 'NOK', [], null, 'no table and no refresh due: no rate'],
-            [[], 100.0, 'GBP', 'NOK', [new HttpResponse(200, self::TABLE)], 1352.94, 'a missing table is fetched on demand'],
-            [[FxRates::CACHE_KEY => self::TABLE, FxRates::STAMP_KEY => (string) self::NOW], 100.0, 'GBP', 'SEK', [], null, 'a currency the table lacks, with no refresh due'],
+            [[], 100.0, 'NOK', 'NOK', [], 100.0, 0, 'the same currency needs no rate'],
+            [[FxRates::CACHE_KEY => $fresh, FxRates::STAMP_KEY => (string) (self::NOW - 60)], 100.0, 'GBP', 'NOK', [], 1352.94, 0, 'a fresh table converts through the EUR pivot, rounded once, with no fetch'],
+            [[FxRates::CACHE_KEY => $fresh, FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [$answer], 1200.0, 1, 'a table past its TTL is refreshed, and the fresh rate used'],
+            [[FxRates::CACHE_KEY => self::table(self::NOW - FxRates::TTL - 1), FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], 1352.94, 1, 'a failed refresh serves the last good table within the grace'],
+            [[FxRates::CACHE_KEY => self::table(self::NOW - FxRates::STALE_GRACE - 1), FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], null, 1, 'past the grace a failed refresh fails closed'],
+            [[FxRates::CACHE_KEY => self::table(self::NOW - FxRates::STALE_GRACE - 1), FxRates::STAMP_KEY => (string) (self::NOW - 60)], 100.0, 'GBP', 'NOK', [], null, 0, 'past the grace, within the backoff, fails closed without a fetch'],
+            [[], 100.0, 'GBP', 'NOK', [$answer], 1200.0, 1, 'a missing table is fetched on demand'],
+            [[FxRates::CACHE_KEY => $fresh, FxRates::STAMP_KEY => (string) (self::NOW - 60)], 100.0, 'GBP', 'SEK', [], null, 0, 'a currency the table lacks'],
         ];
-        foreach ($cases as [$stored, $amount, $from, $to, $responses, $expected, $description]) {
-            [$fx] = self::fx($stored, $responses);
+        foreach ($cases as [$stored, $amount, $from, $to, $responses, $expected, $fetches, $description]) {
+            [$fx, , $transport] = self::fx($stored, $responses);
             TinyAssert::same($expected, $fx->convert($amount, $from, $to), 'convert: ' . $description);
+            TinyAssert::same($fetches, count($transport->calls), 'convert fetches: ' . $description);
         }
+    }
+
+    /** A cached table fetched at $fetchedAt: one EUR is 11.5 NOK and 0.85 GBP. */
+    private static function table(int $fetchedAt): string
+    {
+        return '{"base":"EUR","as_of":"2026-10-25","fetched_at":' . $fetchedAt . ',"rates":{"EUR":1,"NOK":0.0869565,"GBP":1.1764706}}';
     }
 
     private static function testRefresh(): void
     {
-        [$fx, $store] = self::fx([FxRates::CACHE_KEY => self::TABLE], [new HttpResponse(200, '{"rates":{"SEK":0.0869,"NOK":"junk"}}')]);
+        [$fx] = self::fx([FxRates::CACHE_KEY => self::TABLE], [new HttpResponse(200, '{"rates":{"SEK":0.0869,"NOK":"junk"}}')]);
         TinyAssert::true($fx->refreshIfDue(), 'refresh: a fresh table is stored');
         TinyAssert::same(['EUR' => 1.0, 'NOK' => 0.0869565, 'GBP' => 1.1764706, 'SEK' => 0.0869], $fx->table()['rates'] ?? null, 'refresh: merged over the cached table, junk rates never displace good ones');
+        TinyAssert::same(self::NOW, $fx->table()['fetched_at'] ?? null, 'refresh: the table records when it was fetched');
         [$fx, $store] = self::fx([], [new HttpResponse(500, '')]);
         TinyAssert::true(!$fx->refreshIfDue(), 'refresh: a failed fetch stores nothing');
         TinyAssert::same((string) (self::NOW - FxRates::TTL + FxRates::BACKOFF), $store->values[FxRates::STAMP_KEY], 'refresh: a failure retries after the backoff, not a whole TTL');
@@ -125,15 +194,16 @@ final class FeeQuoteSpec
     /**
      * @param array<string, string> $stored
      * @param list<HttpResponse>    $responses
-     * @return array{0: FxRates, 1: MemoryStore}
+     * @return array{0: FxRates, 1: MemoryStore, 2: ScriptedTransport}
      */
     private static function fx(array $stored, array $responses): array
     {
         $store = new MemoryStore($stored + ['api_key' => 'k']);
         $settings = new SettingsProvider($store);
-        $client = new Client(new Environment(false), $settings, new CustomHeaders(), new ScriptedTransport($responses), new RecordingLogger(), '1.0.0');
+        $transport = new ScriptedTransport($responses);
+        $client = new Client(new Environment(false), $settings, new CustomHeaders(), $transport, new RecordingLogger(), '1.0.0');
 
-        return [new FxRates($client, $settings, new RecordingLogger(), static fn (): int => self::NOW), $store];
+        return [new FxRates($client, $settings, new RecordingLogger(), static fn (): int => self::NOW), $store, $transport];
     }
 
     /**

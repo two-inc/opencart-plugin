@@ -253,13 +253,13 @@ class Two extends \Opencart\System\Engine\Controller
         if (!$this->guarded(true, 'term')) {
             return;
         }
-        $days = (string) ($this->request->post['days'] ?? '');
-        if (!ctype_digit($days) || !$this->services()->paymentTerms()->offers((int) $days)) {
+        $days = $this->services()->paymentTerms()->accept($this->request->post['days'] ?? null);
+        if ($days === null) {
             $this->json(['ok' => false, 'error' => htmlspecialchars($this->language->get('error_term'), ENT_QUOTES, 'UTF-8')]);
 
             return;
         }
-        $this->session->data['two_payment_term'] = (int) $days;
+        $this->session->data['two_payment_term'] = $days;
         $this->json(['ok' => true]);
     }
 
@@ -275,30 +275,14 @@ class Two extends \Opencart\System\Engine\Controller
         if (!$this->guarded(false, 'fees')) {
             return;
         }
-        $services = $this->services();
-        $surcharge = $services->surcharge();
-        $terms = $services->paymentTerms();
-        if (!$surcharge->isKnown() || !$surcharge->enabled()) {
-            $this->json(['fees' => (object) []]);
-
-            return;
-        }
         $this->load->model(self::ROUTE);
         $model = $this->model_extension_two_payment_two;
         $currency = $model->sessionCurrency();
-        $shop = (string) $this->config->get('config_currency');
-        $gross = $model->grossWithoutFee();
-        $country = $model->buyerCountry() ?? '';
+        $taxClass = $this->services()->surcharge()->taxClassId;
         $fees = [];
-        foreach ($terms->offered() as $days) {
-            if (!$surcharge->pricesFee($days, $terms->defaultTerm(), $terms->isEndOfMonth())) {
-                continue;
-            }
-            $quote = $gross > 0 ? $services->fees->quote($surcharge, $terms, $days, $gross, $country, $currency, $shop) : null;
-            if ($quote !== null && $quote['net'] > 0) {
-                $shown = $this->tax->calculate($quote['net'], $surcharge->taxClassId, (bool) $this->config->get('config_tax'));
-                $fees[(string) $days] = htmlspecialchars(sprintf($this->language->get('text_fee_plus'), $this->currency->format($shown, $currency, 1.0)), ENT_QUOTES, 'UTF-8');
-            }
+        foreach ($model->previewFees() as $days => $net) {
+            $shown = $this->tax->calculate($net, $taxClass, (bool) $this->config->get('config_tax'));
+            $fees[(string) $days] = htmlspecialchars(sprintf($this->language->get('text_fee_plus'), $this->currency->format($shown, $currency, 1.0)), ENT_QUOTES, 'UTF-8');
         }
         $this->json(['fees' => (object) $fees]);
     }
@@ -566,6 +550,8 @@ class Two extends \Opencart\System\Engine\Controller
         $after = OrderFlow::afterCallback($kind, $result['outcome'], $order && !$this->unplaced($order));
         if ($after['place']) {
             $this->model_checkout_order->addHistory($orderId, (int) $this->config->get('config_order_status_id'), $this->language->get('text_history_prefix') . $result['reason']);
+            // The buyer's next checkout starts on the default chain again.
+            unset($this->session->data['two_payment_term'], $this->session->data['two_fee_quotes']);
         } elseif ($after['note']) {
             $this->note($orderId, $result['reason']);
         }

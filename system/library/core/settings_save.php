@@ -204,7 +204,7 @@ final class SettingsSave
             }
         }
         $record = PaymentTerms::recordTerms($this->records->record());
-        $configurable = (new PaymentTerms($record, null, $type, null, null))->configurable();
+        $configurable = (new PaymentTerms($record, [], $type, null, null))->configurable();
         $ticked = $this->settings->tickedPaymentTerms();
         if (isset($submitted['payment_terms']) && is_array($submitted['payment_terms'])) {
             $days = array_values(array_unique(array_map(static fn (mixed $day): string => trim((string) $day), $submitted['payment_terms'])));

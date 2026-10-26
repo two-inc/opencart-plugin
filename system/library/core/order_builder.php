@@ -60,7 +60,8 @@ final class OrderBuilder
      *     billing_address: array<string, string>, shipping_address?: array<string, string>|null,
      *     merchant_urls: array<string, string>,
      *     buyer_fields?: array<string, string>,
-     *     terms?: array<string, mixed>|null
+     *     terms?: array<string, mixed>|null,
+     *     fee_expected?: bool
      * } $order
      * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string}> $lines
      * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool}> $totals
@@ -99,6 +100,9 @@ final class OrderBuilder
             } else {
                 throw OrderRefused::because('unsupported_total', 'The order total "' . $code . '" is not one the plugin can send.');
             }
+        }
+        if (($order['fee_expected'] ?? false) && !in_array('two_fee', array_column($totals, 'code'), true)) {
+            throw OrderRefused::because('fee_missing', 'the payment terms fee for the order\'s term could not be quoted, so the order has no fee line.');
         }
         if ($discounts !== []) {
             $items[] = self::discountLine($discounts, $items, self::cents($order['tax_total'], $fx), $fx);

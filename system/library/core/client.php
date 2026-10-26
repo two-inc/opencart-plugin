@@ -58,6 +58,46 @@ final class Client
         bool $authenticated = true,
         array $headers = [],
     ): HttpResponse {
+        $call = $this->prepare($method, $path, $body, $authenticated, $headers);
+        $verifyTls = $this->settings->verifyTls();
+        $response = $this->transport->send($call['method'], $call['url'], $call['headers'], $call['payload'], $verifyTls, max(1, $timeoutSeconds));
+        $this->logExchange($call['method'], $path, $call['params'], $call['headers'], $call['custom'], $body, $verifyTls, $response);
+
+        return $response;
+    }
+
+    /**
+     * Several calls to Two at once, sharing one timeout, each prepared,
+     * checked and logged as request() does it. Answers in the order given.
+     *
+     * @param list<array{method: string, path: string, body: array<string, mixed>|null, headers: array<string, string>}> $calls
+     * @return list<HttpResponse>
+     */
+    public function requestAll(array $calls, int $timeoutSeconds = self::TIMEOUT_SECONDS): array
+    {
+        if ($calls === []) {
+            return [];
+        }
+        $prepared = array_map(fn (array $call): array => $this->prepare($call['method'], $call['path'], $call['body'], true, $call['headers']), $calls);
+        $verifyTls = $this->settings->verifyTls();
+        $responses = $this->transport->sendAll(array_map(static fn (array $call): array => ['method' => $call['method'], 'url' => $call['url'], 'headers' => $call['headers'], 'body' => $call['payload']], $prepared), $verifyTls, max(1, $timeoutSeconds));
+        foreach ($prepared as $index => $call) {
+            $responses[$index] ??= HttpResponse::unreachable('no response');
+            $this->logExchange($call['method'], $calls[$index]['path'], $call['params'], $call['headers'], $call['custom'], $calls[$index]['body'], $verifyTls, $responses[$index]);
+        }
+
+        return array_values($responses);
+    }
+
+    /**
+     * One call's method, URL, headers and body, checked.
+     *
+     * @param array<string, mixed>|null $body
+     * @param array<string, string>     $headers
+     * @return array{method: string, url: string, headers: array<string, string>, payload: string|null, params: array<string, string>, custom: list<string>}
+     */
+    private function prepare(string $method, string $path, ?array $body, bool $authenticated, array $headers): array
+    {
         $method = strtoupper($method);
         if (!in_array($method, self::METHODS, true)) {
             throw new \InvalidArgumentException('Unsupported HTTP method "' . $method . '".');
@@ -76,14 +116,8 @@ final class Client
         $payload = $body === null ? null : ($body === [] ? '{}' : json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
         $custom = $this->customHeaders->forRequest($this->settings->customHeaderRows());
         $headers = $this->headers($custom, $authenticated, $headers);
-        $verifyTls = $this->settings->verifyTls();
-        $timeoutSeconds = max(1, $timeoutSeconds);
 
-        $response = $this->transport->send($method, $url, $headers, $payload, $verifyTls, $timeoutSeconds);
-
-        $this->logExchange($method, $path, $params, $headers, array_keys($custom), $body, $verifyTls, $response);
-
-        return $response;
+        return ['method' => $method, 'url' => $url, 'headers' => $headers, 'payload' => $payload, 'params' => $params, 'custom' => array_keys($custom)];
     }
 
     public function pluginVersion(): string
