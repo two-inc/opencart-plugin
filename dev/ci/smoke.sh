@@ -182,15 +182,15 @@ curl -s -c "$shopper" -b "$shopper" -o /dev/null -X POST -d 'product_id=40&quant
 checkout_page=$(curl -s -c "$shopper" -b "$shopper" "$base/index.php?route=checkout/checkout&language=en-gb")
 contains "the checkout page carries the capture settings" "$checkout_page" 'id="two-checkout-config"'
 contains "the checkout page loads the capture script" "$checkout_page" 'two_checkout.js?v='
-contains "the company search refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.search&language=en-gb&q=acme&country=GB&two_token=wrong")" '"error":"forbidden"'
-contains "the token mint refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.soleTraderTokens&language=en-gb")" '"error":"forbidden"'
+contains "the company search refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.search&language=en-gb&q=acme&country=GB&two_token=wrong")" '"code":"forbidden"'
+contains "the token mint refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.soleTraderTokens&language=en-gb")" '"code":"forbidden"'
 two_token=$(printf '%s' "$checkout_page" | grep -o '"token":"[0-9a-f]*"' | head -1 | cut -d'"' -f4)
 # The term and fee relays, with no key so no merchant record is fetched: no term is offered and no surcharge is set.
 store api_key ''
-contains "the term save refuses a request without the session's token" "$(curl -s -b "$shopper" -X POST -d 'days=30' "$base/index.php?route=extension/two/payment/two.term&language=en-gb")" '"error":"forbidden"'
-contains "the term save refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.term&language=en-gb&days=30&two_token=$two_token")" '"error":"forbidden"'
+contains "the term save refuses a request without the session's token" "$(curl -s -b "$shopper" -X POST -d 'days=30' "$base/index.php?route=extension/two/payment/two.term&language=en-gb")" '"code":"forbidden"'
+contains "the term save refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.term&language=en-gb&days=30&two_token=$two_token")" '"code":"forbidden"'
 contains "the term save refuses a term the merchant record does not offer" "$(curl -s -c "$shopper" -b "$shopper" -X POST -d "days=30&two_token=$two_token" "$base/index.php?route=extension/two/payment/two.term&language=en-gb")" '"ok":false'
-contains "the fee preview refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.fees&language=en-gb")" '"error":"forbidden"'
+contains "the fee preview refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.fees&language=en-gb")" '"code":"forbidden"'
 contains "the fee preview answers with no surcharge set" "$(curl -s -c "$shopper" -b "$shopper" "$base/index.php?route=extension/two/payment/two.fees&language=en-gb&two_token=$two_token")" '"fees":{}'
 rm -f "$shopper"
 store api_key ''

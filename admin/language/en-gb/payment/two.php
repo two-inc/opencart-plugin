@@ -4,6 +4,8 @@
 
 // Heading
 $_['heading_title'] = 'Two';
+// The payment method title at checkout when none is set for a language: the same as the storefront file's.
+$_['text_title_default'] = 'Business invoice';
 
 // Text
 $_['text_extension'] = 'Extensions';
@@ -25,9 +27,9 @@ $_['text_merchant_short_name'] = 'Merchant short name';
 $_['text_record_fetched_at'] = 'Merchant profile fetched';
 $_['text_status_mapping_intro'] = 'Map %s payment states to OpenCart order statuses for workflow integration.';
 $_['text_default_mappings'] = 'Default mappings:';
-$_['text_default_fulfil'] = '%s: Order Fulfilled → Shipped';
-$_['text_default_cancel'] = '%s: Order Cancelled → Canceled';
-$_['text_default_refund'] = '%s: Order Refunded → Refunded';
+$_['text_default_fulfil'] = '%s: order fulfilled → Shipped';
+$_['text_default_cancel'] = '%s: order cancelled → Canceled';
+$_['text_default_refund'] = '%s: order refunded → Refunded';
 $_['text_currently_active'] = 'Currently active:';
 $_['text_none_selected'] = 'None selected';
 
@@ -47,17 +49,17 @@ $_['entry_sort_order'] = 'Sort order';
 $_['entry_environment'] = 'Environment';
 $_['entry_api_key'] = 'API key';
 $_['entry_title'] = 'Title';
-$_['entry_fulfil'] = '%s: Order Fulfilled - Trigger Statuses';
-$_['entry_cancel'] = '%s: Order Cancelled';
-$_['entry_refund'] = '%s: Order Refunded';
+$_['entry_fulfil'] = '%s: order fulfilled, trigger statuses';
+$_['entry_cancel'] = '%s: order cancelled';
+$_['entry_refund'] = '%s: order refunded';
 
 // Help
 $_['help_environment'] = 'Select the %s API environment to use. Production for live transactions, Sandbox for testing.';
 $_['help_api_key'] = 'Enter your API key which is provided by %s.';
 $_['help_title'] = 'Enter a title which will appear on the checkout page as the payment method title.';
-$_['help_fulfil'] = 'Select one or more order statuses that should trigger %1$s fulfillment. When any of these statuses are set, the order will be marked as fulfilled with %1$s. Buyer payment terms become active and payout cycle begins. You can select multiple statuses (Hold Ctrl/Cmd to select multiple). Default: Shipped';
+$_['help_fulfil'] = 'Select one or more order statuses that should trigger %1$s fulfillment. When any of these statuses are set, the order will be marked as fulfilled with %1$s. Buyer payment terms become active and payout cycle begins. You can select multiple statuses (hold Ctrl/Cmd to select multiple). Default: Shipped';
 $_['help_cancel'] = 'Order has been cancelled with %s. This prevents fulfillment and stops the payment process. Default: Canceled';
-$_['help_refund'] = 'Moving an order into this status refunds it in full with %s and issues a credit note to the buyer. Default: Refunded. Refunds are sent from a later release.';
+$_['help_refund'] = 'Moving an order into this status refunds it in full with %s and issues a credit note to the buyer. Default: Refunded.';
 
 // Error
 $_['error_permission'] = 'You do not have permission to modify the Two payment settings.';
@@ -68,7 +70,7 @@ $_['error_status_unknown'] = 'Select an order status this shop has.';
 $_['error_status_void'] = 'OpenCart uses this status for orders that are being edited, so it cannot be mapped. Select another order status.';
 $_['error_key_missing'] = 'Enter an API key.';
 $_['error_kept_malformed'] = 'This is not a valid API key: it may only contain printable characters, with no spaces or line breaks. The previously saved key was kept.';
-$_['error_kept_environment'] = 'Please select a valid environment.';
+$_['error_kept_environment'] = 'Select a valid environment.';
 $_['error_environment_unhealthy'] = 'The stored environment cannot be used on this shop, so sandbox is used. Select an environment and save.';
 $_['error_key_invalid'] = 'This API key was rejected by %1$s. It may be invalid or expired - check the key in your %1$s portal.';
 $_['error_key_service'] = '%s could not verify the API key right now (HTTP %d). This is usually temporary - try again shortly.';
@@ -95,11 +97,11 @@ $_['help_company_search_in_address'] = 'When enabled, the buyer may search for t
 $_['entry_enable_invoice_email'] = 'Show invoice email field';
 $_['help_enable_invoice_email'] = 'If you choose Yes then customers will see an invoice email field in the %s payment section at checkout. It sits with the payment method rather than the address so the buyer is prompted to consider a dedicated invoicing address even when their billing and shipping addresses match.';
 $_['entry_enable_po_number'] = 'Show PO number field';
-$_['help_enable_po_number'] = 'If you choose Yes then customers will see a PO Number field in the %s payment section at checkout.';
+$_['help_enable_po_number'] = 'If you choose Yes then customers will see a PO number field in the %s payment section at checkout.';
 $_['entry_enable_project'] = 'Show project field';
-$_['help_enable_project'] = 'If you choose Yes then customers will see a Project field in the %s payment section at checkout.';
+$_['help_enable_project'] = 'If you choose Yes then customers will see a project field in the %s payment section at checkout.';
 $_['entry_enable_department'] = 'Show department field';
-$_['help_enable_department'] = 'If you choose Yes then customers will see a Department field in the %s payment section at checkout.';
+$_['help_enable_department'] = 'If you choose Yes then customers will see a department field in the %s payment section at checkout.';
 $_['entry_min_order_amount'] = 'Minimum order value, %s';
 $_['help_min_order_amount'] = 'Hide the payment method below this order value (shop default currency, on the tax basis selected below). Leave empty for no minimum.';
 $_['entry_min_order_basis'] = 'Minimum order value tax basis';
@@ -155,6 +157,7 @@ $_['entry_refund_rate'] = 'Amount line, tax rate';
 $_['entry_refund_reason'] = 'Reason (on the credit note)';
 $_['button_refund'] = 'Send refund to Two';
 $_['error_refund_permission'] = 'You do not have permission to refund this order.';
+$_['error_refund_quantity'] = 'Not refunded: a quantity is not a whole number.';
 $_['text_refund_state_pending'] = 'Not answered';
 $_['text_refund_state_done'] = 'Refunded';
 $_['text_refund_state_refused'] = 'Refused';

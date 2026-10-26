@@ -759,10 +759,12 @@ class Two extends \Opencart\System\Engine\Controller
      */
     private function guarded(bool $write, string $action): bool
     {
+        // The refusals are shown to the buyer, so they come from the language file.
+        $this->load->language(self::ROUTE);
         $sent = (string) (($write ? $this->request->post : $this->request->get)['two_token'] ?? '');
         $token = $this->state()['token'] ?? '';
         if (($write && ($this->request->server['REQUEST_METHOD'] ?? '') !== 'POST') || !is_string($token) || $token === '' || !hash_equals($token, $sent)) {
-            $this->json(['error' => 'forbidden']);
+            $this->json(['error' => htmlspecialchars($this->language->get('error_forbidden'), ENT_QUOTES, 'UTF-8'), 'code' => 'forbidden']);
 
             return false;
         }
@@ -770,7 +772,7 @@ class Two extends \Opencart\System\Engine\Controller
         if (!$this->services()->settings->rateLimitDisabled() && !(new DbRateLimits($this->db))->allow($action, $this->caller(), time())) {
             $this->log->write('Two: rate limit exceeded on ' . $action . ' (more than ' . RateLimiter::CALLER_LIMITS[$action][0] . ' requests in ' . RateLimiter::CALLER_LIMITS[$action][1] . 's from one caller)');
             $this->response->addHeader(($this->request->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1') . ' 429 Too Many Requests');
-            $this->json(['error' => 'Too many requests']);
+            $this->json(['error' => htmlspecialchars($this->language->get('error_too_many'), ENT_QUOTES, 'UTF-8'), 'code' => 'rate_limited']);
 
             return false;
         }
