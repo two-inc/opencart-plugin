@@ -57,8 +57,18 @@ export async function confirmAndReturn(page: Page): Promise<number> {
   return latestOrderId();
 }
 
-export async function placeOrder(page: Page, quantity = 1, search = "E2E Trad"): Promise<number> {
+/** Applies a coupon code on the cart page. */
+export async function applyCoupon(page: Page, code: string): Promise<void> {
+  await page.goto("/index.php?route=checkout/cart");
+  await page.click('button[data-bs-target="#collapse-coupon"]');
+  await page.fill("#input-coupon", code);
+  await page.locator("#collapse-coupon button.btn-primary").click();
+  await expect(page.locator("#alert")).toContainText("Success");
+}
+
+export async function placeOrder(page: Page, quantity = 1, search = "E2E Trad", coupon = ""): Promise<number> {
   await addToCart(page, quantity);
+  if (coupon) await applyCoupon(page, coupon);
   const company = await guestDetails(page, search);
   await chooseTwo(page, company);
   return confirmAndReturn(page);

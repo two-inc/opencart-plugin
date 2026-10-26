@@ -12,7 +12,7 @@ export type StubOrder = {
   state: string;
   currency: string;
   gross_amount: string;
-  line_items: { id: string; name: string; quantity: number; gross_amount: string }[];
+  line_items: { id: string; name: string; quantity: number; net_amount: string; tax_amount: string; gross_amount: string }[];
   refunds: { id: string; amount: string }[];
 };
 

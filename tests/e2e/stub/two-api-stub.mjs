@@ -43,13 +43,42 @@ let requests = [];
 let faults = [];
 let checkoutOutcome = "verify";
 
-const cents = (value) => Math.round(Math.abs(Number(value || 0)) * 100);
+// Signed cents: a discount line is negative, and adds up as one.
+const cents = (value) => Math.round(Number(value || 0) * 100);
+const absCents = (value) => Math.abs(cents(value));
 const money = (c) => (c / 100).toFixed(2);
 const within = (a, b, tolerance) => Math.abs(a - b) <= tolerance;
 const sum = (items, field) => (items || []).reduce((total, item) => total + cents(item[field]), 0);
 
 // Two's error body.
 const error = (status, code, message, details) => [status, { error_code: code, error_message: message, error_details: details }];
+
+// The unit price Two checks a line with. Two takes a unit price given with too
+// few decimals as the exact one, net (plus discount) over quantity to at most
+// six places, when the two differ by no more than one step of the given
+// price's last decimal (a price with no decimals counts as two). So 100 at
+// 0.33 is 33.33 net, as Two allows. A whole-number price is kept.
+function unitPrice(line) {
+  const given = Number(line.unit_price);
+  const quantity = Number(line.quantity);
+  const net = cents(line.net_amount);
+  const discount = cents(line.discount_amount);
+  if (quantity === 0 || Math.round(given * quantity * 100) - discount === net) return given;
+  const text = String(line.unit_price);
+  if (!text.includes(".")) return given;
+  const places = text.replace(/0+$/, "").split(".")[1].length || 2;
+  const exact = Math.round(((net + discount) / 100 / quantity) * 1e6) / 1e6;
+  const step = 10 ** -places;
+  return Math.round(Math.abs(given - exact) / step) <= 1 ? exact : given;
+}
+
+// Each line's own identities, as Two checks them on an order and a refund:
+// gross is net plus tax, tax is net at the rate, net is quantity at the unit
+// price less the discount (each within two pence but gross on an order, which
+// is exact).
+const lineGrossOk = (l, tolerance) => within(cents(l.gross_amount), cents(l.net_amount) + cents(l.tax_amount), tolerance);
+const lineTaxOk = (l) => within(cents(l.tax_amount), cents(l.net_amount) * Number(l.tax_rate), 2);
+const lineNetOk = (l) => within(cents(l.net_amount), Math.round(unitPrice(l) * Number(l.quantity) * 100) - cents(l.discount_amount), 2);
 
 // What Two checks of an order or an edit, in cents with Two's tolerances: the
 // lines add up to the order's net and tax, net and tax to its gross, each line
@@ -61,52 +90,53 @@ function orderAmountsError(body) {
   if (!within(cents(body?.net_amount), sum(lines, "net_amount"), 2)) failures.push("Order net amount is not equal to total line item net amounts");
   if (!within(cents(body?.tax_amount), sum(lines, "tax_amount"), 99)) failures.push("Order tax amount is not equal to total line item tax amounts");
   if (cents(body?.gross_amount) !== cents(body?.net_amount) + cents(body?.tax_amount)) failures.push("Order invoice total is not equal to tax + net amount");
-  if (!lines.every((l) => cents(l.gross_amount) === cents(l.net_amount) + cents(l.tax_amount))) failures.push("Line item gross amount is not equal to net + tax amount");
-  if (!lines.every((l) => within(cents(l.tax_amount), cents(l.net_amount) * Number(l.tax_rate), 2))) failures.push("Line item tax amount differs from tax rate * net amount");
+  if (!lines.every((l) => lineGrossOk(l, 0))) failures.push("Line item gross amount is not equal to net + tax amount");
+  if (!lines.every(lineTaxOk)) failures.push("Line item tax amount differs from tax rate * net amount");
   if (Array.isArray(body?.tax_subtotals) && sum(body.tax_subtotals, "tax_amount") !== cents(body?.tax_amount)) failures.push("Order tax amount mismatch with tax subtotals");
-  if (!lines.every((l) => within(cents(l.net_amount), Math.round(cents(l.unit_price) * Number(l.quantity)) - cents(l.discount_amount), 2))) {
-    failures.push("Line item net amount is not equal to (quantity * unit price) - discount amount");
-  }
+  if (!lines.every(lineNetOk)) failures.push("Line item net amount is not equal to (quantity * unit price) - discount amount");
   return failures.length ? error(400, "INVALID_ORDER_AMOUNT_DATA", "Invalid data found in order/line amounts", failures.join(", ")) : null;
 }
 
-// What Two checks of a refund body: a full refund (no amount) carries no
-// amounts or currency; a partial one has an amount and the order's currency,
-// lines that each add up, an amount equal to its lines' gross, and tax
-// subtotals that agree with the lines. Two's 400, or null.
-const FULL_REFUND_FIELDS = ["reason", "refund_reference", "buyer_refund_surcharges", "upload_references"];
+// What Two checks of a refund body, in Two's order. Fields Two does not know
+// are ignored. A refund without an amount is a full refund, which takes no
+// prepaid amount or currency. A partial one has an amount and the order's
+// currency; the amount plus any prepaid amount equals its lines' gross less
+// any buyer refund surcharges (with their tax); its tax subtotals agree with
+// the lines within a pound; and each line adds up. Two's 400, or null.
+const SCHEMA = (details) => error(400, "SCHEMA_ERROR", "Error parsing schema", details);
 function refundBodyError(order, body) {
-  if (!body || body.amount == null) {
-    const extra = Object.keys(body || {}).filter((k) => !FULL_REFUND_FIELDS.includes(k) && body[k] != null);
-    return extra.length ? error(400, "SCHEMA_ERROR", "Error parsing schema", `A refund without an amount takes no ${extra.join(", ")}.`) : null;
+  if (body == null || body.amount == null) {
+    const named = ["prepaid_amount", "currency"].filter((k) => body?.[k] != null);
+    return named.length ? SCHEMA(`A refund without an amount takes no ${named.join(" or ")}.`) : null;
   }
-  if (!/^-?\d+(\.\d{1,2})?$/.test(String(body.amount)) || !body.currency) {
-    return error(400, "SCHEMA_ERROR", "Error parsing schema", "A partial refund needs an amount with at most two decimals and a currency.");
+  const isMoney = (v) => /^-?\d+(\.\d{1,2})?$/.test(String(v));
+  if (!isMoney(body.amount) || (body.prepaid_amount != null && !isMoney(body.prepaid_amount)) || !body.currency) {
+    return SCHEMA("A partial refund needs an amount with at most two decimals and a currency.");
   }
   if (body.currency !== order.currency) {
     return error(400, "REFUND_CURRENCY_ERROR", "Refund currency should be same as Order currency", `${body.currency} is not the order's ${order.currency}.`);
   }
   const lines = body.line_items || [];
-  for (const l of lines) {
-    const ok = within(cents(l.gross_amount), cents(l.net_amount) + cents(l.tax_amount), 2)
-      && within(cents(l.tax_amount), cents(l.net_amount) * Number(l.tax_rate), 2)
-      && within(cents(l.net_amount), Math.round(cents(l.unit_price) * Number(l.quantity)) - cents(l.discount_amount), 2);
-    if (!ok) return error(400, "REFUND_LINE_ITEMS_INVALID", "Refund line item amounts are invalid.", `Line ${l.name} does not add up.`);
+  if (!lines.length) return null;
+  const surcharges = (body.buyer_refund_surcharges || [])
+    .reduce((total, s) => total + Math.round(absCents(s.amount) * (1 + Number(s.tax_rate || 0))), 0);
+  const asked = absCents(body.amount) + absCents(body.prepaid_amount);
+  const covered = Math.abs(sum(lines, "gross_amount")) - surcharges;
+  if (asked !== covered) {
+    return error(400, "REFUND_AMOUNT_INCONSISTENT", "Refund amount is inconsistent with original invoice", `Refund amount ${money(asked)} does not equal the lines less surcharges, ${money(covered)}.`);
   }
-  if (lines.length && cents(body.amount) !== sum(lines, "gross_amount")) {
-    return error(400, "REFUND_AMOUNT_INCONSISTENT", "Refund amount is inconsistent with original invoice", `Refund amount ${body.amount} does not equal sum of line items ${money(sum(lines, "gross_amount"))}.`);
-  }
-  if (Array.isArray(body.tax_subtotals) && lines.length) {
+  if (Array.isArray(body.tax_subtotals)) {
     const given = body.tax_subtotals.reduce((t, s) => t + cents(s.taxable_amount) + cents(s.tax_amount), 0);
-    if (!within(given, sum(lines, "gross_amount"), 100)) {
+    if (!within(Math.abs(given), Math.abs(sum(lines, "gross_amount")), 100)) {
       return error(400, "REFUND_AMOUNT_INCONSISTENT", "Refund amount is inconsistent with original invoice", `Inconsistent refund tax subtotals: ${money(given)}.`);
     }
   }
-  return null;
+  const bad = lines.find((l) => !(lineGrossOk(l, 2) && lineTaxOk(l) && lineNetOk(l)));
+  return bad ? error(400, "REFUND_LINE_ITEMS_INVALID", "Refund line item amounts are invalid.", `Line ${bad.name} does not add up.`) : null;
 }
 
 function refundedCents(order) {
-  return order.refunds.reduce((total, refund) => total + cents(refund.total_amount), 0);
+  return order.refunds.reduce((total, refund) => total + absCents(refund.total_amount), 0);
 }
 
 // What is left per tax rate: the order's subtotals less every refund's.
@@ -115,8 +145,8 @@ function remainingSubtotals(order) {
   const add = (subtotals, sign) => {
     for (const s of subtotals || []) {
       const b = buckets.get(String(Number(s.tax_rate))) || { net: 0, tax: 0 };
-      b.net += sign * cents(s.taxable_amount);
-      b.tax += sign * cents(s.tax_amount);
+      b.net += sign * absCents(s.taxable_amount);
+      b.tax += sign * absCents(s.tax_amount);
       buckets.set(String(Number(s.tax_rate)), b);
     }
   };
@@ -131,7 +161,7 @@ function refund(order, body) {
   if (refused) return refused;
   const full = !body || body.amount == null;
   const remaining = cents(order.gross_amount) - refundedCents(order);
-  const amount = full ? remaining : cents(body.amount);
+  const amount = full ? remaining : absCents(body.amount) + absCents(body.prepaid_amount);
   if (amount <= 0 || amount > remaining) {
     return error(400, "INVALID_REFUND", "Invalid refund", `Refund of ${money(amount)} exceeds the ${money(remaining)} left.`);
   }

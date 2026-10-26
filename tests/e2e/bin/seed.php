@@ -13,6 +13,8 @@ declare(strict_types=1);
  *   UK buyer's order is in GBP, as in the sibling plugins' E2E stores: Two's
  *   sandbox approves a GB company's order in its own currency. OpenCart holds
  *   the default currency at 1 and every other relative to it.
+ * - Turns on the demo data's 10% coupon (2222), which has expired, with no
+ *   use limit, so a spec can send an order with a discount line.
  */
 
 // CLI only: the staging shops serve the whole repo under the web root.
@@ -50,3 +52,6 @@ if ($current !== 'GBP') {
     }
 }
 echo "[seed] the store's currency is GBP\n";
+
+$db->query("UPDATE `{$prefix}coupon` SET status = 1, date_start = '2020-01-01', date_end = '2099-12-31', uses_total = 0, uses_customer = '0' WHERE code = '2222'");
+echo "[seed] coupon 2222 (10% off) is on\n";

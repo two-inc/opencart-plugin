@@ -22,3 +22,15 @@ test("a buyer finds their company, places the order with Two and sees the confir
   // The stub refuses a wrong API key and amounts that do not add up as Two does.
   expect(sent.filter((r) => r.status !== 200 && r.status !== 201), "Two accepts every call the shop makes").toEqual([]);
 });
+
+test("a coupon reaches Two as a negative discount line, and Two accepts the order", async ({ page }) => {
+  const seen = (await requests("")).length;
+  const orderId = await placeOrder(page, 1, "E2E Trad", "2222");
+  const twoId = twoOrderId(orderId);
+  await expectState(twoId, "CONFIRMED");
+
+  const lines = (await stubOrder(twoId)).line_items;
+  expect(lines.filter((l) => Number(l.net_amount) < 0 && Number(l.tax_amount) < 0), "one discount line, net and tax below zero").toHaveLength(1);
+  const sent = (await requests("")).slice(seen);
+  expect(sent.filter((r) => r.status !== 200 && r.status !== 201), "Two accepts every call the shop makes").toEqual([]);
+});
