@@ -152,11 +152,11 @@ class Two extends \Opencart\System\Engine\Model
      * The fee line for the cart, when Two is the chosen method and its term
      * prices one: the title, and the net in the shop's default currency (as
      * OpenCart keeps every total). Null when no fee applies, or when it
-     * cannot be quoted: the method list then withholds Two, placement
-     * refuses an order whose fee is missing, and an edit rebuilt without it
-     * is refused (OrderBuilder, fee_expected).
+     * cannot be quoted: the method list then withholds Two and placement
+     * refuses an order whose fee is missing. An admin edit puts back the fee
+     * the order was placed with (FeeQuote::editLine), never a new quote.
      *
-     * @return array{title: string, value: float, tax_class_id: int, taxes?: array<int, float>}|null
+     * @return array{title: string, value: float, tax_class_id: int, taxes?: array<int, array{amount: float, name: string}>}|null
      */
     public function feeTotal(): ?array
     {
@@ -168,7 +168,7 @@ class Two extends \Opencart\System\Engine\Model
         // An admin edit keeps the fee the order was placed with, as the reference plugin replays it:
         // none stays none, and a placed fee goes back with its own net and tax rows, never repriced.
         if ($this->inAdminEdit()) {
-            $placed = FeeQuote::editLine($this->services()->orders->get($this->editedOrderId()) ?? []);
+            $placed = FeeQuote::editLine($this->services()->orders->get($this->editedOrderId()) ?? [], (float) $this->currency->getValue($this->sessionCurrency()));
 
             return $placed === null ? null : ['title' => $placed['title'], 'value' => $placed['value'], 'tax_class_id' => 0, 'taxes' => $placed['tax_rates']];
         }
@@ -505,7 +505,7 @@ class Two extends \Opencart\System\Engine\Model
                 $taxTotal += $total['value'];
             }
             $class = $this->chargeTaxClass($total['code'], $order);
-            $placed = $total['code'] === 'two_fee' && $terms !== null ? FeeQuote::decodePlaced((string) ($record['placed_fee'] ?? '')) : null;
+            $placed = $total['code'] === 'two_fee' && $terms !== null ? FeeQuote::decodePlaced((string) ($record['placed_fee'] ?? ''), (float) $order['currency_value']) : null;
             if ($placed !== null) {
                 // A rebuilt order's fee is the fee as placed: its stored tax and rate, never recomputed.
                 $total += ['tax' => $placed['tax'], 'rate' => $placed['rate'], 'tax_rates' => $placed['tax_rates']];
@@ -515,7 +515,7 @@ class Two extends \Opencart\System\Engine\Model
                 if ($total['code'] === 'two_fee') {
                     $total['tax_rates'] = [];
                     foreach ($class > 0 ? $tax->getRates($total['value'], $class) : [] as $id => $row) {
-                        $total['tax_rates'][(int) ($row['tax_rate_id'] ?? $id)] = (float) $row['amount'];
+                        $total['tax_rates'][(int) ($row['tax_rate_id'] ?? $id)] = ['amount' => (float) $row['amount'], 'name' => (string) ($row['name'] ?? '')];
                     }
                 }
             }
