@@ -24,6 +24,9 @@ function shop(answers) {
         const route = query.get('route');
         calls.push([route, params]);
         const answer = typeof answers[route] === 'function' ? answers[route](params) : answers[route];
+        if (answer instanceof Error) {
+            return Promise.reject(answer);
+        }
         return Promise.resolve({ ok: true, json: () => Promise.resolve(answer || {}), text: () => Promise.resolve(typeof answer === 'string' ? answer : '') });
     });
     return { calls, fetchImpl };
@@ -34,7 +37,7 @@ function chips(answers, terms, checked) {
     const config = {
         token: 'tok',
         urls: { term: 'index.php?route=term', fees: 'index.php?route=fees', totals: 'index.php?route=totals' },
-        i18n: { pay_in: 'Pay in %d days', pay_in_eom: 'Pay in %d days from end of month' }
+        i18n: { pay_in: 'Pay in %d days', pay_in_eom: 'Pay in %d days from end of month', totals_failed: 'reload the page' }
     };
     const scripted = shop(Object.assign({ fees: { fees: {} }, term: { ok: true }, totals: '<table><tfoot><tr><td>new</td></tr></tfoot></table>' }, answers));
     const alerts = [];
@@ -144,6 +147,23 @@ describe('a failed save', () => {
         const terms = result.calls.filter(([route]) => route === 'term').map(([, params]) => params.days);
         expect({ description, state: state(), terms, totals: document.querySelector('#checkout-confirm tfoot td').textContent })
             .toEqual({ description, state: expected, terms: saves, totals: totals });
+    });
+});
+
+describe('a saved term whose totals reload fails', () => {
+    test.each([
+        [1, 'new', [], 'one failed reload is tried again'],
+        [2, 'old', ['reload the page'], 'two failed reloads tell the buyer'],
+    ])('%#: %s', async (failures, totals, alerts, description) => {
+        let left = failures;
+        const result = chips({ totals: () => (left-- > 0 ? new Error('offline') : '<table><tfoot><tr><td>new</td></tr></tfoot></table>') }, [14, 30], 14);
+        await result.instance.choose(30);
+        for (let i = 0; i < 4; i += 1) {
+            await flush();
+        }
+        const reloads = result.calls.filter(([route]) => route === 'totals').length;
+        expect({ description, totals: document.querySelector('#checkout-confirm tfoot td').textContent, alerts: result.alerts, reloads })
+            .toEqual({ description, totals: totals, alerts: alerts, reloads: 2 });
     });
 });
 
