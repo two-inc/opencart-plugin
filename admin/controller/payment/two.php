@@ -322,7 +322,7 @@ class Two extends \Opencart\System\Engine\Controller
         $text = [];
         foreach (['text_two_order', 'text_two_state', 'text_no_two_order', 'button_invoice', 'help_invoice', 'button_credit_note', 'help_credit_note', 'text_refund', 'text_refunded', 'text_remaining',
             'text_refund_help', 'text_refund_unavailable', 'text_refund_unread', 'text_refunds', 'column_line', 'column_quantity', 'column_net', 'column_tax', 'column_rate', 'column_refund_quantity',
-            'column_date', 'column_amount', 'column_state', 'entry_refund_net', 'entry_refund_tax', 'entry_refund_rate', 'entry_refund_reason', 'button_refund', 'button_retry', 'text_refund_blocked', 'column_left'] as $key) {
+            'column_date', 'column_amount', 'column_state', 'entry_refund_net', 'entry_refund_tax', 'entry_refund_rate', 'entry_refund_reason', 'button_refund', 'button_retry', 'text_refund_blocked', 'column_left', 'error_ajax'] as $key) {
             $text[$key] = $this->language->get($key);
         }
         $unresolved = false;

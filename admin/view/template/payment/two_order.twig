@@ -74,6 +74,10 @@ $(document).off('submit.two', '#two-order-panel form.two-action').on('submit.two
   $.ajax({
     url: form.action.replaceAll('&amp;', '&'), type: 'post', data: $(form).serialize(), dataType: 'json',
     beforeSend: function () { button.prop('disabled', true); },
+    error: function (xhr) {
+      $('.alert-dismissible').remove();
+      $('#alert').prepend($('<div class="alert alert-danger alert-dismissible"></div>').text('{{ error_ajax|e('js') }} (HTTP ' + xhr.status + ')').append(' <button type="button" class="btn-close" data-bs-dismiss="alert"></button>'));
+    },
     success: function (json) {
       $('.alert-dismissible').remove();
       $('#alert').prepend($('<div class="alert alert-dismissible"></div>').addClass(json.success ? 'alert-success' : 'alert-danger').text(json.success || json.error || '').append(' <button type="button" class="btn-close" data-bs-dismiss="alert"></button>'));
