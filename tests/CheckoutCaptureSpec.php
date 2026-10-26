@@ -14,6 +14,7 @@ use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
+use Opencart\System\Library\Extension\Two\Core\RateLimiter;
 use Opencart\System\Library\Extension\Two\Core\RecordProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
@@ -30,10 +31,13 @@ final class CheckoutCaptureSpec
     public static function runAll(): void
     {
         self::testIntent();
+        self::testAfterIntent();
         self::testOptionalFields();
         self::testSearch();
         self::testSoleTrader();
         self::testKeys();
+        self::testRateLimits();
+        self::testDisplayLabel();
         self::testSettings();
         self::testSave();
     }
@@ -43,11 +47,12 @@ final class CheckoutCaptureSpec
         $cases = [
             [[self::json(200, ['approved' => true])], [], self::SESSION, OrderFlow::APPROVED, [], 1, 'approved'],
             [[self::json(200, ['approved' => false])], [], self::SESSION, OrderFlow::DECLINED, [], 1, 'declined'],
-            [[HttpResponse::unreachable('timeout')], [], self::SESSION, OrderFlow::UNDECIDED, [], 1, 'no answer is no decision'],
-            [[self::json(500, [])], [], self::SESSION, OrderFlow::UNDECIDED, [], 1, 'an error is no decision'],
-            [[self::json(200, ['approved' => 'yes'])], [], self::SESSION, OrderFlow::UNDECIDED, [], 1, 'an answer without a boolean decision is none'],
-            [[], [], '', OrderFlow::UNDECIDED, [], 0, 'no session: nothing sent, so no key is ever shared'],
-            [[], [], 'not-a-hash', OrderFlow::UNDECIDED, [], 0, 'a session value that is not a hash: nothing sent'],
+            [[HttpResponse::unreachable('timeout')], [], self::SESSION, OrderFlow::UNDECIDED, [OrderFlow::INTENT_CONNECTION], 1, 'no answer: the connection sentence'],
+            [[self::json(500, [])], [], self::SESSION, OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNAVAILABLE], 1, 'a 5xx: the provider-unavailable sentence'],
+            [[self::json(422, ['error_code' => 'SCHEMA_ERROR'])], [], self::SESSION, OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNPROCESSABLE], 1, 'a 4xx: the unable-to-process sentence, never Two\'s text'],
+            [[self::json(200, ['approved' => 'yes'])], [], self::SESSION, OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNPROCESSABLE], 1, 'an answer without a boolean decision: unable to process'],
+            [[], [], '', OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNPROCESSABLE], 0, 'no session: nothing sent, so no key is ever shared'],
+            [[], [], 'not-a-hash', OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNPROCESSABLE], 0, 'a session value that is not a hash: nothing sent'],
             [[], ['company' => ['company_name' => 'Acme AS', 'organization_number' => '', 'country_code' => 'NO']], self::SESSION, OrderFlow::REFUSED, [ErrorMapper::COMPANY_REQUIRED], 0, 'no organisation number: asked for, nothing sent'],
             [[], ['total' => 300], self::SESSION, OrderFlow::REFUSED, [ErrorMapper::GENERIC], 0, 'a failed shop-match check: nothing sent'],
         ];
@@ -68,6 +73,22 @@ final class CheckoutCaptureSpec
         $keys = array_map(static fn (array $call): ?string => IdempotencyKey::in($call['headers']), $transport->calls);
         TinyAssert::true(str_starts_with((string) $keys[0], 'intent_0123456789abcdef_'), 'order intent: keyed on the buyer\'s session');
         TinyAssert::same([true, false], [$keys[0] === $keys[1], $keys[1] === $keys[2]], 'order intent: the same question repeats its key, another company asks a new one');
+    }
+
+    /** Placement (section 6.3): only an approved intent lets the order be created. */
+    private static function testAfterIntent(): void
+    {
+        $cases = [
+            [OrderFlow::APPROVED, [], null, 'approved: the order is created'],
+            [OrderFlow::DECLINED, [], [OrderFlow::INTENT_DECLINED], 'declined: refused with the declined notice'],
+            [OrderFlow::UNDECIDED, [OrderFlow::INTENT_CONNECTION], [OrderFlow::INTENT_CONNECTION], 'no answer: refused, try again'],
+            [OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNAVAILABLE], [OrderFlow::INTENT_UNAVAILABLE], 'a 5xx: refused, try later'],
+            [OrderFlow::UNDECIDED, [], [OrderFlow::INTENT_UNPROCESSABLE], 'undecided with no sentence: unable to process'],
+            [OrderFlow::REFUSED, [ErrorMapper::COMPANY_REQUIRED], [ErrorMapper::COMPANY_REQUIRED], 'no company: asked for'],
+        ];
+        foreach ($cases as [$outcome, $buyer, $expected, $description]) {
+            TinyAssert::same($expected, OrderFlow::afterIntent(['outcome' => $outcome, 'reason' => '', 'buyer' => $buyer]), 'placement after the intent: ' . $description);
+        }
     }
 
     private static function testOptionalFields(): void
@@ -105,13 +126,13 @@ final class CheckoutCaptureSpec
     private static function testSearch(): void
     {
         $items = ['items' => [
-            ['name' => 'Acme AS', 'national_identifier' => ['id' => '123456789'], 'highlight' => '<mark>Acme</mark> AS', 'id' => 'L1'],
+            ['name' => 'Acme AS', 'national_identifier' => ['id' => '123456789'], 'highlight' => '<mark>Acme</mark> AS', 'lookup_id' => 'bEB0d2'],
             ['name' => 'Acme Ltd', 'company_number' => '01234567'],
             ['name' => ' ', 'national_identifier' => ['id' => '1']],
         ]];
         $cases = [
             [[self::json(200, $items)], 'acme', 'no', [
-                ['name' => 'Acme AS', 'organization_number' => '123456789', 'highlight' => '<mark>Acme</mark> AS', 'lookup_id' => 'L1'],
+                ['name' => 'Acme AS', 'organization_number' => '123456789', 'highlight' => '<mark>Acme</mark> AS', 'lookup_id' => 'bEB0d2'],
                 ['name' => 'Acme Ltd', 'organization_number' => '01234567', 'highlight' => '', 'lookup_id' => ''],
             ], ['/companies/v2/company?country=NO&q=acme&limit=50&offset=0'], 'results mapped, a nameless row dropped'],
             [[self::json(500, [])], 'acme', 'NO', null, ['/companies/v2/company?country=NO&q=acme&limit=50&offset=0'], 'a failed search is not an empty one'],
@@ -123,6 +144,15 @@ final class CheckoutCaptureSpec
             [$lookup, $transport] = self::lookup($responses);
             TinyAssert::same($expected, $lookup->search($term, $country), 'company search: ' . $description);
             TinyAssert::same($paths, self::paths($transport), 'company search: ' . $description . ' (requests)');
+        }
+        $details = [
+            [[self::json(200, ['national_identifier' => ['type' => 'GB_CRN', 'id' => '07844329'], 'addresses' => [['type' => 'BUSINESS_ADDRESS', 'street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'region' => null, 'country' => 'GB']]])], 'bEB0d2', ['organization_number' => '07844329', 'addresses' => [['street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'country' => 'GB']]], 1, 'the number and addresses a search result left out'],
+            [[self::json(404, [])], 'bEB0d2', null, 1, 'a failed lookup'],
+            [[], '../v1/merchant', null, 0, 'a lookup id that is not one: nothing asked'],
+        ];
+        foreach ($details as [$responses, $id, $expected, $calls, $description]) {
+            [$lookup, $transport] = self::lookup($responses);
+            TinyAssert::same([$expected, $calls], [$lookup->details($id), count($transport->calls)], 'company details: ' . $description);
         }
         $countries = [
             [[self::json(200, ['supported_countries' => ['gb', 'NO', 'x', 'GB']])], ['GB', 'NO'], 'the covered countries, uppercased and deduplicated'],
@@ -167,6 +197,47 @@ final class CheckoutCaptureSpec
             'sole trader tokens: each mint keyed on the attempt, with its scopes'
         );
         TinyAssert::same('https://checkout.sandbox.two.inc/soletrader/signup', $lookup->signupUrl(), 'sole trader: the signup page for the environment');
+    }
+
+    private static function testRateLimits(): void
+    {
+        $now = 1_800_000_000;
+        $hits = [
+            ['intent', null, ['window_start' => $now, 'hit_count' => 1, 'allowed' => true], 'a first request opens a window'],
+            ['intent', ['window_start' => $now - 30, 'hit_count' => 29], ['window_start' => $now - 30, 'hit_count' => 30, 'allowed' => true], 'the 30th intent in a minute is allowed'],
+            ['intent', ['window_start' => $now - 30, 'hit_count' => 30], ['window_start' => $now - 30, 'hit_count' => 31, 'allowed' => false], 'the 31st is refused'],
+            ['intent', ['window_start' => $now - 60, 'hit_count' => 500], ['window_start' => $now, 'hit_count' => 1, 'allowed' => true], 'a new minute starts a new window'],
+            ['soleTraderTokens', ['window_start' => $now - 5, 'hit_count' => 60], ['window_start' => $now - 5, 'hit_count' => 61, 'allowed' => false], 'token mints: 60 a minute'],
+            ['search', ['window_start' => $now - 5, 'hit_count' => 299], ['window_start' => $now - 5, 'hit_count' => 300, 'allowed' => true], 'searches: 300 a minute'],
+            ['countries', ['window_start' => $now, 'hit_count' => 10_000], ['window_start' => $now, 'hit_count' => 10_001, 'allowed' => true], 'an action with no limit'],
+        ];
+        foreach ($hits as [$action, $row, $expected, $description]) {
+            TinyAssert::same($expected, RateLimiter::hit($action, $row, $now), 'rate limit per caller: ' . $description);
+        }
+        $sessions = [
+            [[], ['stamps' => [$now], 'allowed' => true], 'the first intent of a session'],
+            [[$now - 10, $now - 20, $now - 30, $now - 40], ['stamps' => [$now - 10, $now - 20, $now - 30, $now - 40, $now], 'allowed' => true], 'the fifth in a minute'],
+            [[$now - 10, $now - 20, $now - 30, $now - 40, $now - 50], ['stamps' => [$now - 10, $now - 20, $now - 30, $now - 40, $now - 50], 'allowed' => false], 'the sixth is refused and not counted'],
+            [[$now - 60, $now - 70, $now - 80, $now - 90, $now - 100], ['stamps' => [$now], 'allowed' => true], 'older than a minute no longer counts'],
+        ];
+        foreach ($sessions as [$stamps, $expected, $description]) {
+            TinyAssert::same($expected, RateLimiter::sessionIntent($stamps, $now), 'rate limit per session: ' . $description);
+        }
+        TinyAssert::same(RateLimiter::key('intent', '2001:db8:1:2:3:4:5:6'), RateLimiter::key('intent', '2001:db8:1:2:ffff::1'), 'rate limit: an IPv6 caller counts as its /64');
+        TinyAssert::true(RateLimiter::key('intent', '192.0.2.1') !== RateLimiter::key('intent', '192.0.2.2') && RateLimiter::key('intent', '192.0.2.1') !== RateLimiter::key('search', '192.0.2.1'), 'rate limit: one count per IPv4 caller and action');
+    }
+
+    private static function testDisplayLabel(): void
+    {
+        $cases = [
+            ['Acme Ltd', '01234567', 'Acme Ltd (01234567)', 'a registered company with its number'],
+            ['Jo Bloggs', 'TWO:ST123', 'Jo Bloggs', 'a sole trader\'s TWO: number is never shown'],
+            ['Jo Bloggs', 'two:st123', 'Jo Bloggs', 'whatever its case'],
+            ['Acme Ltd', '', 'Acme Ltd', 'no number, no brackets'],
+        ];
+        foreach ($cases as [$name, $number, $expected, $description]) {
+            TinyAssert::same($expected, CompanyLookup::displayLabel($name, $number), 'company label: ' . $description);
+        }
     }
 
     private static function testKeys(): void

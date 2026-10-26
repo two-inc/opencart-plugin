@@ -29,6 +29,8 @@ final class CompanyLookup
     public const SOLE_TRADER = 'SOLE_TRADER';
     public const TOKEN_HEADER = 'two-delegated-authority-token';
     public const SIGNUP_PATH = '/soletrader/signup';
+    /** A search result's lookup id, as Two issues it; nothing else is put in a path. */
+    public const LOOKUP_ID = '~^[A-Za-z0-9._:-]{1,128}\z~';
 
     /** The two mints, each with the scopes the signup needs. */
     private const MINTS = [
@@ -71,11 +73,38 @@ final class CompanyLookup
                 'name' => trim($item['name']),
                 'organization_number' => self::organizationNumber($item),
                 'highlight' => is_string($item['highlight'] ?? null) ? $item['highlight'] : '',
-                'lookup_id' => is_scalar($item['id'] ?? null) ? (string) $item['id'] : '',
+                'lookup_id' => is_string($item['lookup_id'] ?? null) && preg_match(self::LOOKUP_ID, $item['lookup_id']) === 1 ? $item['lookup_id'] : '',
             ];
         }
 
         return $companies;
+    }
+
+    /**
+     * One company's register entry, by a search result's lookup id: its
+     * organisation number, which some registers leave out of the search
+     * results, and its addresses. Null when the lookup failed.
+     *
+     * @return array{organization_number: string, addresses: list<array<string, string>>}|null
+     */
+    public function details(string $lookupId): ?array
+    {
+        if (preg_match(self::LOOKUP_ID, $lookupId) !== 1) {
+            return null;
+        }
+        $response = $this->client->request('GET', '/companies/v2/company/' . rawurlencode($lookupId), null, self::TIMEOUT_SECONDS);
+        $body = $response->json();
+        if ($response->status !== 200 || $body === null) {
+            return null;
+        }
+        $addresses = [];
+        foreach (is_array($body['addresses'] ?? null) ? $body['addresses'] : [] as $address) {
+            if (is_array($address)) {
+                $addresses[] = array_map('strval', array_filter(array_intersect_key($address, array_flip(['street_address', 'postal_code', 'city', 'region', 'country'])), 'is_scalar'));
+            }
+        }
+
+        return ['organization_number' => self::organizationNumber($body), 'addresses' => $addresses];
     }
 
     /**
@@ -152,6 +181,22 @@ final class CompanyLookup
     public function apiBaseUrl(): string
     {
         return $this->environment->apiBaseUrl($this->settings->environment());
+    }
+
+    /**
+     * The company as the buyer reads it: the name, and the number in brackets
+     * unless there is none or it is one of Two's own internal identifiers
+     * (an enrolled sole trader's `TWO:` number), which the buyer never sees.
+     */
+    public static function displayLabel(string $name, string $number): string
+    {
+        return self::isInternalNumber($number) || trim($number) === '' ? $name : $name . ' (' . $number . ')';
+    }
+
+    /** A `TWO:` identifier Two issued itself: real for the order, never shown. */
+    public static function isInternalNumber(string $number): bool
+    {
+        return stripos(trim($number), 'TWO:') === 0;
     }
 
     /** @param array<string, mixed> $item */
