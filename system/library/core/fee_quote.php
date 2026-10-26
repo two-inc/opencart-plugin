@@ -26,8 +26,11 @@ final class FeeQuote
     /** @var array<string, array{net: float, currency: string}|null> answers this request, by payload hash */
     private array $answers = [];
 
-    /** @var array<string, array{net: float, currency: string}> quotes Two gave in this request, by payload hash, for the adapter to keep */
+    /** @var array<string, array{net: float, currency: string}|null> answers Two gave in this request (null for a failure), by payload hash, for the adapter to keep */
     private array $fresh = [];
+
+    /** False where Two must not be asked (a page outside the checkout): only quotes already held answer. */
+    public bool $askTwo = true;
 
     /** Why the last quote failed, for the log and the health row. */
     public string $failure = '';
@@ -43,7 +46,9 @@ final class FeeQuote
      * Quotes the adapter kept from earlier requests (the same payload has the
      * same answer), by payload hash.
      *
-     * @param array<string, array{net: float, currency: string}> $known
+     * A null is a failure kept for a short while, so an outage costs one wait, not one per page.
+     *
+     * @param array<string, array{net: float, currency: string}|null> $known
      */
     public function remember(array $known): void
     {
@@ -51,9 +56,9 @@ final class FeeQuote
     }
 
     /**
-     * The quotes Two gave in this request, by payload hash.
+     * The answers Two gave in this request, by payload hash, null for a failure.
      *
-     * @return array<string, array{net: float, currency: string}>
+     * @return array<string, array{net: float, currency: string}|null>
      */
     public function fresh(): array
     {
@@ -94,8 +99,13 @@ final class FeeQuote
             }
             $hash = hash('sha256', (string) json_encode($payload));
             if (array_key_exists($hash, $this->answers)) {
-                $this->failure = $this->answers[$hash] === null ? 'the fee quote for the ' . $term . '-day term failed earlier in this request' : '';
+                $this->failure = $this->answers[$hash] === null ? 'the fee quote for the ' . $term . '-day term failed within the last minute' : '';
                 $quotes[$term] = $this->answers[$hash];
+                continue;
+            }
+            if (!$this->askTwo) {
+                $this->failure = 'the fee for the ' . $term . '-day term is not quoted outside the checkout';
+                $quotes[$term] = null;
                 continue;
             }
             $ask[$term] = ['hash' => $hash, 'payload' => $payload];
@@ -125,6 +135,7 @@ final class FeeQuote
         if ($failure !== '') {
             $this->failure = $failure;
             $this->logger->error('Two ' . $failure . '.');
+            $this->fresh[$hash] = null;
 
             return $this->answers[$hash] = null;
         }
@@ -184,12 +195,28 @@ final class FeeQuote
      * offered term, a term that prices nothing, an empty cart); `net` is
      * null when one applies but cannot be quoted (the failure says why).
      *
+     * With $stored the term is the one an existing order was placed on, and
+     * is priced as it is, never swapped for the default: a term no longer
+     * offered, or one that no longer prices a fee, is a fee that cannot be
+     * priced (the order was placed with one).
+     *
      * @return array{applies: bool, days: int|null, net: float|null}
      */
-    public function charged(Surcharge $surcharge, PaymentTerms $terms, ?int $chosen, float $gross, string $buyerCountry, string $currency, string $shopCurrency): array
+    public function charged(Surcharge $surcharge, PaymentTerms $terms, ?int $chosen, float $gross, string $buyerCountry, string $currency, string $shopCurrency, bool $stored = false): array
     {
         $this->failure = '';
-        $days = $terms->selected($chosen);
+        $days = $stored ? $chosen : $terms->selected($chosen);
+        if ($stored && $gross > 0) {
+            $this->failure = match (true) {
+                $days === null => 'the order has no stored payment term to price its payment terms fee on',
+                !$terms->offers($days) => 'the order\'s ' . $days . '-day term is no longer one the merchant record offers, so its payment terms fee cannot be priced',
+                !$surcharge->isKnown() || !$surcharge->enabled() || !$surcharge->pricesFee($days, $terms->defaultTerm(), $terms->isEndOfMonth()) => 'the surcharge no longer prices a payment terms fee for the order\'s ' . $days . '-day term',
+                default => '',
+            };
+            if ($this->failure !== '') {
+                return ['applies' => true, 'days' => $days, 'net' => null];
+            }
+        }
         if (!$surcharge->isKnown()) {
             $this->failure = 'the stored surcharge method "' . $surcharge->type . '" is not one the plugin knows';
 

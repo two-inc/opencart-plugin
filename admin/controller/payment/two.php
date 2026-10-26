@@ -759,6 +759,10 @@ class Two extends \Opencart\System\Engine\Controller
         if ($health['refused_currencies'] !== []) {
             $clauses[] = sprintf($this->language->get('text_health_currencies'), implode(', ', $health['refused_currencies']));
         }
+        $fx = $services->fx->table();
+        if ($fx !== null && $fx['fetched_at'] > 0) {
+            $clauses[] = sprintf($this->language->get('text_health_fx'), $brand->productName, gmdate('Y-m-d H:i', $fx['fetched_at']) . 'Z');
+        }
         if ($health['fee_quote_failure'] !== null) {
             $clauses[] = sprintf($this->language->get('text_health_fee_quote'), gmdate('Y-m-d H:i', $health['fee_quote_failure']['at']) . 'Z', $health['fee_quote_failure']['detail'], $brand->productName);
         }
