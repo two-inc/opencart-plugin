@@ -167,7 +167,7 @@ final class OrderFlow
      *
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
      *        the shop's stored order as create's inputs, given the stored record (company included); null when it is gone
-     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null $rows
+     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null $rows
      *        the order's own rows, whose hash is kept once Two holds the order as placed, for the check before fulfilment
      * @return array{outcome: string, reason: string, two_order_id: string}
      */

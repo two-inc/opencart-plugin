@@ -7,6 +7,7 @@ use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
+use Opencart\System\Library\Extension\Two\Core\FeeQuote;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
@@ -64,11 +65,14 @@ final class OrderEditSpec
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'handlers' => $refuses, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the hook refuses the update: nothing sent'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => null, 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'description' => 'the order can no longer be read: refused'],
             ['stored' => 'CONFIRMED', 'rows' => 3, 'input' => 3, 'currency_refusal' => 'the order was placed with Two in NOK and its currency is now EUR', 'responses' => [self::get('CONFIRMED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'after' => 'placed', 'reason' => 'placed with Two in NOK and its currency is now EUR', 'description' => 'the edit changed the order\'s currency: refused with the reason, no PUT'],
+            ['stored' => 'CONFIRMED', 'rows' => 2, 'currency' => 'EUR', 'input' => 2, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'after' => 'placed', 'reason' => 'not sent to Two: the order was placed with Two in NOK and its currency is now EUR', 'description' => 'a currency-only edit (the rows alike, in the default currency): refused with the currency before the rows shortcut, nothing asked'],
+            ['stored' => 'CONFIRMED', 'rows' => 3, 'currency' => 'EUR', 'input' => 3, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'after' => 'placed', 'reason' => 'its currency is now EUR', 'description' => 'a currency change with another edit: refused with the currency, nothing asked'],
+            ['stored' => 'CONFIRMED', 'rows' => 2, 'currency' => 'NOK', 'input' => 2, 'responses' => [], 'outcome' => null, 'calls' => [], 'after' => 'placed', 'description' => 'the currency switched back, the rows as placed: nothing to send'],
             ['stored' => 'CONFIRMED', 'unhashed' => true, 'rows' => 3, 'input' => 3, 'responses' => [], 'outcome' => null, 'calls' => [], 'after' => 'unhashed', 'description' => 'no rows hash kept: nothing to compare, the fulfil check refuses instead'],
         ];
         foreach ($cases as $case) {
             [$edit, $transport, $records] = self::edit($case['responses'], $case['stored'], $case['handlers'] ?? [], !empty($case['unhashed']));
-            $result = $edit->sync(42, self::rows($case['rows']), static fn (array $record): ?array => $case['input'] === null ? null : array_replace_recursive(self::input($case['input']), ['order' => ['currency_refusal' => $case['currency_refusal'] ?? '']]));
+            $result = $edit->sync(42, self::rows($case['rows']) + (isset($case['currency']) ? ['currency' => $case['currency']] : []), static fn (array $record): ?array => $case['input'] === null ? null : array_replace_recursive(self::input($case['input']), ['order' => ['currency_refusal' => $case['currency_refusal'] ?? '']]));
             $d = 'edit: ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'] ?? null, $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
@@ -229,6 +233,7 @@ final class OrderEditSpec
         $records = new MemoryRecords([42 => [
             'two_order_id' => self::ID, 'two_order_state' => $stored, 'token_hash' => self::TOKEN_HASH,
             'payload_hash' => self::placedHash(), 'rows_hash' => $unhashed ? '' : OrderLifecycle::rowsHash(self::rows(2)),
+            'placed_fee' => FeeQuote::encodePlaced([], 1.0, 'NOK'),
         ]]);
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();

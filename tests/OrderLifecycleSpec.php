@@ -6,6 +6,7 @@ use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
+use Opencart\System\Library\Extension\Two\Core\FeeQuote;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
@@ -100,6 +101,8 @@ final class OrderLifecycleSpec
             ['stored' => 'CONFIRMED', 'responses' => [self::json(500, [])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'CONFIRMED', 'description' => 'Two\'s state cannot be read: refused, nothing sent'],
             ['stored' => 'VERIFIED', 'responses' => [$get('VERIFIED')], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'state' => 'VERIFIED', 'description' => 'not confirmed at Two: refused'],
             ['stored' => 'CONFIRMED', 'rows' => self::rows(['quantity' => '3']), 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'edited after it was placed', 'description' => 'the order was edited after it was placed: refused, nothing asked'],
+            ['stored' => 'CONFIRMED', 'rows' => self::rows() + ['currency' => 'EUR'], 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'not fulfilled: the order was placed with Two in NOK and its currency is now EUR', 'description' => 'a currency-only edit (the rows alike): refused with the currency, nothing asked'],
+            ['stored' => 'CONFIRMED', 'rows' => self::rows() + ['currency' => 'NOK'], 'responses' => [$get('CONFIRMED'), self::json(201, []), $get('FULFILLED')], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'state' => 'FULFILLED', 'description' => 'the currency switched back: fulfilled as usual'],
             ['stored' => 'CONFIRMED', 'rows' => null, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'description' => 'the shop order is gone: refused'],
             ['stored' => 'CONFIRMED', 'unknown_edit' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'fulfil the order in the Two merchant portal', 'description' => 'an edit with an unknown outcome: refused until Two has the order, even with the rows back as placed'],
             ['stored' => 'CONFIRMED', 'unhashed' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => 'CONFIRMED', 'reason' => 'merchant portal', 'description' => 'no rows hash kept (placed before it was stored): refused, never fulfilled unchecked'],
@@ -217,6 +220,7 @@ final class OrderLifecycleSpec
             'payload_hash' => OrderFlow::payloadHash((new OrderBuilder())->build(self::order(), self::lines(2), [])),
             'two_order_id' => self::ID, 'two_order_state' => $stored, 'company_name' => 'Acme AS',
             'rows_hash' => $unhashed ? '' : OrderLifecycle::rowsHash(self::rows()),
+            'placed_fee' => FeeQuote::encodePlaced([], 1.0, 'NOK'),
         ]];
         $records = new MemoryRecords($rows);
         $transport = new ScriptedTransport($responses);

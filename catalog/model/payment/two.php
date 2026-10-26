@@ -393,25 +393,6 @@ class Two extends \Opencart\System\Engine\Model
         return 'the order was placed with a payment terms fee but no longer carries one (is the Two payment terms fee order total enabled?)';
     }
 
-    /**
-     * Why a rebuilt order may not be sent, or '': an edit changed its
-     * currency from the one it was placed with Two in
-     * (FeeQuote::placedInOtherCurrency).
-     *
-     * @param array<string, string> $record the order's two_order row
-     */
-    private function currencyRefusal(array $record, string $currency): string
-    {
-        $placed = FeeQuote::placedInOtherCurrency($record, $currency);
-        if ($placed === null) {
-            return '';
-        }
-        // Prefixed: the edit sync runs inside OpenCart's own history write, whose language keys must not be overwritten.
-        $copy = $this->load->language('extension/two/payment/two', 'two_edit');
-
-        return sprintf((string) $copy['two_edit_error_edit_currency'], $placed, $currency);
-    }
-
     /** The cart's gross without the fee, in the session currency at the shop's own currency value (the factor the order is sent at). */
     public function grossWithoutFee(): float
     {
@@ -457,11 +438,12 @@ class Two extends \Opencart\System\Engine\Model
 
     /**
      * The order's own rows, as stored: its products (price, tax and
-     * quantity), its totals, and its billing and shipping addresses. Nothing
+     * quantity), its totals, its billing and shipping addresses, and its
+     * currency code (judged apart, not hashed with the rows). Nothing
      * from the catalogue or the tax setup, so only an edit of the order
      * itself changes them. Null when there is no such order.
      *
-     * @return array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null
+     * @return array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null
      */
     public function orderRows(int $orderId): ?array
     {
@@ -480,6 +462,8 @@ class Two extends \Opencart\System\Engine\Model
             'products' => array_values($this->db->query('SELECT `product_id`, `name`, `model`, `quantity`, `price`, `total`, `tax` FROM `' . DB_PREFIX . "order_product` WHERE `order_id` = '" . $orderId . "'")->rows),
             'totals' => array_values($this->db->query('SELECT `code`, `title`, `value` FROM `' . DB_PREFIX . "order_total` WHERE `order_id` = '" . $orderId . "'")->rows),
             'addresses' => $addresses,
+            // Not hashed with the rows: the edit sync and the fulfil check judge a currency change on their own.
+            'currency' => (string) $order['currency_code'],
         ];
     }
 
@@ -571,7 +555,7 @@ class Two extends \Opencart\System\Engine\Model
                 'buyer_fields' => $buyerFields,
                 'terms' => $terms ?? $this->termsBlock(),
                 'fee_refusal' => $terms === null ? '' : $this->feeRefusal($orderId, $totals),
-                'currency_refusal' => $terms === null ? '' : $this->currencyRefusal($record, (string) $order['currency_code']),
+                'currency_refusal' => $terms === null ? '' : FeeQuote::currencyChange($record, (string) $order['currency_code']) ?? '',
             ],
             'lines' => $lines,
             'totals' => $totals,

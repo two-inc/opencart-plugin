@@ -89,6 +89,17 @@ final class FeeQuoteSpec
             TinyAssert::same($expected, [number_format(($line['value'] ?? 0) * $fx, 2, '.', ''), number_format(($line['tax'] ?? 0) * $fx, 2, '.', '')], 'currency change, fee shown: ' . $description);
             TinyAssert::same($refused, FeeQuote::placedInOtherCurrency($record, $currency), 'currency change, refused from: ' . $description);
         }
+        TinyAssert::same([
+            'the order was placed with Two in NOK and its currency is now EUR. Two keeps an order in the currency it was placed in.',
+            'the order was placed with Two in NOK and its currency is now EUR. Two keeps an order in the currency it was placed in: set the order\'s currency back to NOK and save the status again.',
+            null,
+            null,
+        ], [
+            FeeQuote::currencyChange($nokRecord, 'EUR'),
+            FeeQuote::currencyChange($nokRecord, 'EUR', 'save the status again'),
+            FeeQuote::currencyChange($nokRecord, 'NOK', 'save the status again'),
+            FeeQuote::currencyChange($nokRecord, '', 'save the status again'),
+        ], 'currency change: the confirm\'s reason gives no advice, the edit and fulfil say to switch back; none when unchanged or not known');
     }
 
     /** The chips' preview: terms asked together, a kept quote reused, the fresh ones handed back to keep. */
