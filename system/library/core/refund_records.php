@@ -13,7 +13,7 @@ namespace Opencart\System\Library\Extension\Two\Core;
  */
 interface RefundRecords
 {
-    public const FIELDS = ['two_order_id', 'kind', 'amount', 'currency', 'payload', 'idempotency_key', 'state', 'reason'];
+    public const FIELDS = ['two_order_id', 'kind', 'amount', 'currency', 'payload', 'idempotency_key', 'state', 'reason', 'refunded_before'];
 
     public const KIND_PARTIAL = 'partial';
     public const KIND_REMAINDER = 'remainder';
@@ -40,6 +40,14 @@ interface RefundRecords
      * @param array<string, string> $fields keys from FIELDS
      */
     public function update(int $refundId, array $fields): void;
+
+    /**
+     * Takes the order's refund lock, waiting a while for another holder;
+     * false when it could not be had.
+     */
+    public function lock(int $orderId): bool;
+
+    public function unlock(int $orderId): void;
 
     /**
      * The order's rows, oldest first, each with its `refund_id` and `date_added`.

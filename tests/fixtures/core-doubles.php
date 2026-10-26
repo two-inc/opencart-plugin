@@ -138,8 +138,23 @@ final class MemoryRefunds implements \Opencart\System\Library\Extension\Two\Core
     /** @var array<int, array<string, string>> */
     public array $rows = [];
 
-    public function __construct(private readonly bool $fails = false)
+    /** @var list<string> lock and unlock calls, in order */
+    public array $locks = [];
+
+    public function __construct(private readonly bool $fails = false, private readonly bool $held = false)
     {
+    }
+
+    public function lock(int $orderId): bool
+    {
+        $this->locks[] = 'lock ' . $orderId;
+
+        return !$this->held;
+    }
+
+    public function unlock(int $orderId): void
+    {
+        $this->locks[] = 'unlock ' . $orderId;
     }
 
     public function create(int $orderId, array $fields): int

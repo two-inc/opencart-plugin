@@ -15,6 +15,12 @@ final class DbRefundRecords implements RefundRecords
 {
     public const TABLE = 'two_refund';
 
+    /** Seconds a refund waits for another refund on the same order to finish. */
+    public const LOCK_WAIT_SECONDS = 20;
+
+    /** Columns added after the table first shipped to dev shops, added in place. */
+    public const ADDED_COLUMNS = ['refunded_before' => "VARCHAR(32) NOT NULL DEFAULT ''"];
+
     public function __construct(private readonly \Opencart\System\Library\DB $db)
     {
     }
@@ -22,11 +28,17 @@ final class DbRefundRecords implements RefundRecords
     /**
      * Creates the table, for install() and configure.php. Idempotent.
      *
-     * @param \Closure(string): mixed $query runs one statement
+     * @param \Closure(string): list<array<string, mixed>> $query runs one statement, returning the rows of a SHOW
      */
     public static function install(\Closure $query, string $prefix): void
     {
         $query(self::createTableSql($prefix));
+        $columns = array_map(static fn (array $row): string => (string) $row['Field'], $query('SHOW COLUMNS FROM `' . $prefix . self::TABLE . '`'));
+        foreach (self::ADDED_COLUMNS as $column => $definition) {
+            if (!in_array($column, $columns, true)) {
+                $query('ALTER TABLE `' . $prefix . self::TABLE . '` ADD COLUMN `' . $column . '` ' . $definition);
+            }
+        }
     }
 
     public static function createTableSql(string $prefix): string
@@ -42,6 +54,7 @@ final class DbRefundRecords implements RefundRecords
             . '`idempotency_key` VARCHAR(100) NOT NULL DEFAULT \'\','
             . '`state` VARCHAR(16) NOT NULL DEFAULT \'\','
             . '`reason` TEXT NOT NULL,'
+            . '`refunded_before` VARCHAR(32) NOT NULL DEFAULT \'\','
             . '`date_added` DATETIME NOT NULL,'
             . '`date_modified` DATETIME NOT NULL,'
             . 'PRIMARY KEY (`refund_id`),'
@@ -69,6 +82,24 @@ final class DbRefundRecords implements RefundRecords
         if ($sets !== []) {
             $this->db->query('UPDATE `' . DB_PREFIX . self::TABLE . '` SET ' . implode(', ', $sets) . ", `date_modified` = NOW() WHERE `refund_id` = '" . $refundId . "'");
         }
+    }
+
+    public function lock(int $orderId): bool
+    {
+        $query = $this->db->query("SELECT GET_LOCK('" . $this->db->escape(self::lockName($orderId)) . "', " . self::LOCK_WAIT_SECONDS . ') AS `got`');
+
+        return is_object($query) && (int) ($query->row['got'] ?? 0) === 1;
+    }
+
+    public function unlock(int $orderId): void
+    {
+        $this->db->query("SELECT RELEASE_LOCK('" . $this->db->escape(self::lockName($orderId)) . "')");
+    }
+
+    /** One name per shop order, across the admin and catalog connections. */
+    private static function lockName(int $orderId): string
+    {
+        return DB_PREFIX . 'two_refund_' . $orderId;
     }
 
     public function forOrder(int $orderId): array

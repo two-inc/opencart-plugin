@@ -67,9 +67,10 @@ final class OrderRefundsSpec
             ['stored' => 'FULFILLED', 'responses' => [self::two('FULFILLED'), self::json(502, []), self::two('FULFILLED')], 'outcome' => OrderRefunds::UNKNOWN, 'calls' => [$read, $post, $read], 'row' => RefundRecords::UNKNOWN, 'description' => 'a 5xx and no rise: unknown'],
             ['stored' => 'FULFILLED', 'responses' => [self::two('FULFILLED'), self::json(201, ['id' => 'r0']), self::two('FULFILLED')], 'outcome' => OrderRefunds::NOT_APPLIED, 'calls' => [$read, $post, $read], 'row' => RefundRecords::NOT_APPLIED, 'description' => 'Two answers 201 but the total did not rise: an earlier refund under this key, not applied'],
             ['stored' => 'FULFILLED', 'blocked' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'row' => RefundRecords::UNKNOWN, 'description' => 'a refund awaits a retry: refused before asking Two'],
+            ['stored' => 'FULFILLED', 'held' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'row' => null, 'description' => 'a form refund holds the order\'s lock: the status-map refund is refused, never sent alongside'],
         ];
         foreach ($cases as $case) {
-            $shop = self::shop($case['responses'], $case['stored'], blocked: !empty($case['blocked']));
+            $shop = self::shop($case['responses'], $case['stored'], blocked: !empty($case['blocked']), held: !empty($case['held']));
             $result = $shop['refunds']->remainder(42);
             self::check('remainder: ' . $case['description'], $case, $result, $shop);
         }
@@ -96,14 +97,21 @@ final class OrderRefundsSpec
             ['request' => ['lines' => [self::LINE => 1]], 'responses' => [self::two('FULFILLED'), self::json(201, ['id' => 'r0']), self::two('FULFILLED')], 'outcome' => OrderRefunds::NOT_APPLIED, 'calls' => [$read, $post, $read], 'row' => RefundRecords::NOT_APPLIED, 'description' => 'Two answers with an earlier refund under this key: not applied'],
             ['request' => ['lines' => [self::LINE => 1]], 'responses' => [self::two('FULFILLED'), self::json(201, ['id' => 'r1']), $after('200.00', '160.00', '40.00')], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'row' => RefundRecords::DONE, 'description' => 'a larger rise (a refund made meanwhile elsewhere) is fine'],
             ['request' => ['lines' => [self::LINE => 1]], 'blocked' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'row' => RefundRecords::UNKNOWN, 'reason' => 'Retry it on the Two tab', 'description' => 'a refund awaits a retry: refused with a pointer to it'],
+            ['request' => ['lines' => [self::LINE => 1]], 'earlier' => [RefundRecords::DONE => 2], 'responses' => [self::two('REFUNDED', [self::refund('r1', '50.00', '40.00', '10.00')])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'row' => RefundRecords::DONE, 'reason' => 'left to refund (0 of 2)', 'description' => 'a second click on a line already refunded in full: refused, never refunded twice'],
+            ['request' => ['lines' => [self::LINE => 2]], 'earlier' => [RefundRecords::DONE => 1], 'responses' => [self::two('REFUNDED', [self::refund('r1', '125.00', '100.00', '25.00')])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read], 'row' => RefundRecords::DONE, 'reason' => 'left to refund (1 of 2)', 'description' => 'more than the line has left after an earlier refund: refused'],
+            ['request' => ['lines' => [self::LINE => 1]], 'earlier' => [RefundRecords::DONE => 1], 'responses' => [self::two('REFUNDED', [self::refund('r1', '125.00', '100.00', '25.00')]), self::json(201, ['id' => 'r2']), self::two('REFUNDED', [self::refund('r1', '125.00', '100.00', '25.00'), self::refund('r2', '125.00', '100.00', '25.00')])], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'row' => RefundRecords::DONE, 'line' => ['id' => self::LINE, 'quantity' => 1, 'net_amount' => '100.00', 'tax_amount' => '25.00'], 'description' => 'the last of a line takes what the earlier refund left'],
+            ['request' => ['lines' => [self::LINE => 2]], 'earlier' => [RefundRecords::REFUSED => 2], 'responses' => [self::two('FULFILLED'), self::json(201, ['id' => 'r1']), $after('250.00', '200.00', '50.00')], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'row' => RefundRecords::DONE, 'description' => 'a refused earlier refund took nothing from the line'],
+            ['request' => ['lines' => [self::LINE => 1]], 'held' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'row' => null, 'reason' => 'another refund on this order is being sent', 'description' => 'another refund holds the order\'s lock: refused before asking Two'],
         ];
         foreach ($cases as $case) {
-            $shop = self::shop($case['responses'], 'FULFILLED', !empty($case['store_fails']), !empty($case['blocked']));
+            $shop = self::shop($case['responses'], 'FULFILLED', !empty($case['store_fails']), !empty($case['blocked']), $case['earlier'] ?? [], !empty($case['held']));
             $result = $shop['refunds']->partial(42, $case['request']);
             $d = 'partial: ' . $case['description'];
             self::check($d, $case, $result, $shop);
+            TinyAssert::same(empty($case['held']) ? ['lock 42', 'unlock 42'] : ['lock 42'], $shop['rows']->locks, $d . ': the order\'s refund lock is taken and released');
             if (in_array($post, self::calls($shop['transport']), true)) {
                 $rowId = count($shop['rows']->rows);
+                TinyAssert::same(Postprocessing::money(OrderRefunds::refundedCents((array) json_decode($case['responses'][0]->body, true))), $shop['rows']->rows[$rowId]['refunded_before'] ?? null, $d . ': the refunded total before the first attempt is kept for a retry');
                 TinyAssert::same('refund_' . self::ID . '_' . $rowId, $shop['transport']->calls[1]['headers']['Idempotency-Key'] ?? null, $d . ': keyed on the row created before the call');
             }
             if (isset($case['line'])) {
@@ -126,15 +134,23 @@ final class OrderRefundsSpec
             ['row' => RefundRecords::UNKNOWN, 'responses' => [self::two('FULFILLED'), HttpResponse::unreachable('timeout'), self::two('FULFILLED')], 'outcome' => OrderRefunds::UNKNOWN, 'calls' => [$read, $post, $read], 'state' => RefundRecords::UNKNOWN, 'description' => 'no answer again: still unknown'],
             ['row' => RefundRecords::UNKNOWN, 'responses' => [self::json(500, [])], 'outcome' => OrderRefunds::UNKNOWN, 'calls' => [$read], 'state' => RefundRecords::UNKNOWN, 'description' => 'Two cannot be read: nothing sent, still unknown'],
             ['row' => RefundRecords::DONE, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'state' => RefundRecords::DONE, 'description' => 'a settled refund is never retried'],
+            ['row' => RefundRecords::UNKNOWN, 'first' => '0.00', 'responses' => [$applied, self::json(201, []), $applied], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'state' => RefundRecords::DONE, 'reason' => 'risen by the amount since the first attempt', 'description' => 'Two\'s answer has no id, but the total rose by the amount since the first attempt: done, not "not applied"'],
+            ['row' => RefundRecords::UNKNOWN, 'first' => '125.00', 'responses' => [$applied, self::json(201, []), $applied], 'outcome' => OrderRefunds::NOT_APPLIED, 'calls' => [$read, $post, $read], 'state' => RefundRecords::NOT_APPLIED, 'description' => 'no id and no rise since the first attempt: not applied'],
         ];
         $key = 'refund_' . self::ID . '_1';
         $body = '{"amount":"125.00","currency":"NOK"}';
         foreach ($cases as $case) {
             $shop = self::shop($case['responses'], 'FULFILLED');
-            $shop['rows']->create(42, ['two_order_id' => self::ID, 'kind' => RefundRecords::KIND_PARTIAL, 'amount' => '125.00', 'currency' => 'NOK', 'payload' => $body, 'idempotency_key' => $key, 'state' => $case['row']]);
+            $shop['rows']->create(42, ['two_order_id' => self::ID, 'kind' => RefundRecords::KIND_PARTIAL, 'amount' => '125.00', 'currency' => 'NOK', 'payload' => $body, 'idempotency_key' => $key, 'state' => $case['row'], 'refunded_before' => $case['first'] ?? '']);
             $result = $shop['refunds']->retry(42, 1);
             $d = 'retry: ' . $case['description'];
-            TinyAssert::same($case['outcome'], $result['outcome'], $d . ': outcome');
+            TinyAssert::same($case['outcome'], $result['outcome'], $d . ': outcome (' . $result['reason'] . ')');
+            if (isset($case['reason'])) {
+                TinyAssert::true(str_contains($result['reason'], $case['reason']), $d . ': the note says how it was judged');
+            }
+            if ($result['outcome'] === OrderLifecycle::DONE) {
+                TinyAssert::true(str_contains(implode("\n", $shop['logger']->at('info')), $key), $d . ': the key is logged at info');
+            }
             TinyAssert::same($case['calls'], self::calls($shop['transport']), $d . ': requests');
             TinyAssert::same($case['state'], $shop['rows']->rows[1]['state'], $d . ': row state');
             if (in_array($post, $case['calls'], true)) {
@@ -176,6 +192,10 @@ final class OrderRefundsSpec
         $last = $shop['rows']->rows === [] ? null : end($shop['rows']->rows)['state'];
         TinyAssert::same($case['row'], $last, $d . ': refund row state');
         TinyAssert::true($result['outcome'] === OrderLifecycle::SKIPPED || $result['reason'] !== '', $d . ': a reason for the order history');
+        if ($result['outcome'] === OrderLifecycle::DONE) {
+            $sent = array_values(array_filter($shop['transport']->calls, static fn (array $call): bool => $call['method'] === 'POST'));
+            TinyAssert::true(str_contains(implode("\n", $shop['logger']->at('info')), (string) ($sent[0]['headers']['Idempotency-Key'] ?? 'none')), $d . ': the key is logged at info whatever the debug setting');
+        }
         if (isset($case['reason'])) {
             TinyAssert::true(str_contains($result['reason'], $case['reason']), $d . ': the message says what to do');
         }
@@ -198,12 +218,17 @@ final class OrderRefundsSpec
 
     /**
      * @param list<HttpResponse> $responses
+     * @param array<string, int>  $earlier   earlier refund rows of the Widget line: state => quantity
      * @return array{refunds: OrderRefunds, transport: ScriptedTransport, rows: MemoryRefunds, logger: RecordingLogger}
      */
-    private static function shop(array $responses, ?string $stored, bool $storeFails = false, bool $blocked = false): array
+    private static function shop(array $responses, ?string $stored, bool $storeFails = false, bool $blocked = false, array $earlier = [], bool $held = false): array
     {
         $records = new MemoryRecords($stored === null ? [] : [42 => ['two_order_id' => self::ID, 'two_order_state' => $stored]]);
-        $rows = new MemoryRefunds($storeFails);
+        $rows = new MemoryRefunds($storeFails, $held);
+        foreach ($earlier as $state => $quantity) {
+            $rows->create(42, ['two_order_id' => self::ID, 'kind' => RefundRecords::KIND_PARTIAL, 'amount' => '0.00', 'currency' => 'NOK', 'state' => (string) $state,
+                'payload' => (string) json_encode(['line_items' => [['id' => self::LINE, 'quantity' => $quantity, 'net_amount' => Postprocessing::money(10000 * $quantity), 'tax_amount' => Postprocessing::money(2500 * $quantity)]]])]);
+        }
         if ($blocked) {
             $rows->rows[1] = ['refund_id' => '1', 'order_id' => '42', 'date_added' => '2026-10-25 12:00:00', 'two_order_id' => self::ID, 'amount' => '10.00', 'currency' => 'NOK', 'state' => RefundRecords::UNKNOWN, 'payload' => '{}', 'idempotency_key' => 'refund_' . self::ID . '_1'];
         }
