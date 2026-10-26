@@ -48,8 +48,6 @@ class Two extends \Opencart\System\Engine\Model
 
     private ?Services $services = null;
 
-    /** Why the fee of the order being edited in this request could not be priced. */
-    private string $editFeeFailure = '';
 
     /** Whether this request already logged why Two was withheld: OpenCart asks for the methods more than once per render. */
     private static bool $withholdLogged = false;
@@ -158,7 +156,7 @@ class Two extends \Opencart\System\Engine\Model
      * refuses an order whose fee is missing, and an edit rebuilt without it
      * is refused (OrderBuilder, fee_expected).
      *
-     * @return array{title: string, value: float, tax_class_id: int}|null
+     * @return array{title: string, value: float, tax_class_id: int, taxes?: array<int, float>}|null
      */
     public function feeTotal(): ?array
     {
@@ -167,14 +165,14 @@ class Two extends \Opencart\System\Engine\Model
         if (self::$feeSuspended || $code !== 'two.two') {
             return null;
         }
-        // An admin edit keeps the fee the order was placed with: none stays none, one is repriced on the stored term.
-        if ($this->inAdminEdit() && ($this->services()->orders->get($this->editedOrderId())['payment_fee'] ?? '') !== '1') {
-            return null;
+        // An admin edit keeps the fee the order was placed with, as the reference plugin replays it:
+        // none stays none, and a placed fee goes back with its own net and tax rows, never repriced.
+        if ($this->inAdminEdit()) {
+            $placed = FeeQuote::editLine($this->services()->orders->get($this->editedOrderId()) ?? []);
+
+            return $placed === null ? null : ['title' => $placed['title'], 'value' => $placed['value'], 'tax_class_id' => 0, 'taxes' => $placed['tax_rates']];
         }
         $fee = $this->cartFee();
-        if ($this->inAdminEdit() && $fee['applies'] && $fee['net'] === null) {
-            $this->editFeeFailure = $fee['failure'];
-        }
         $value = FeeQuote::lineValue($fee, $code, (float) $this->currency->getValue($this->sessionCurrency()));
         if ($value === null || $fee['days'] === null) {
             return null;
@@ -206,7 +204,7 @@ class Two extends \Opencart\System\Engine\Model
         $this->rememberQuotes();
         // Outside the checkout (the header cart on every page) only a quote already held answers.
         $services->fees->askTwo = $this->inCheckout();
-        $charged = $services->fees->charged($services->surcharge(), $services->paymentTerms(), $this->chosenTerm(), $this->grossWithoutFee(), $this->buyerCountry($address) ?? '', $this->sessionCurrency(), (string) $this->config->get('config_currency'), $this->inAdminEdit());
+        $charged = $services->fees->charged($services->surcharge(), $services->paymentTerms(), $this->chosenTerm(), $this->grossWithoutFee(), $this->buyerCountry($address) ?? '', $this->sessionCurrency(), (string) $this->config->get('config_currency'));
         $this->keepQuotes();
 
         return $charged + ['failure' => $services->fees->failure];
@@ -288,6 +286,10 @@ class Two extends \Opencart\System\Engine\Model
      */
     public function feeFailure(array $address = []): ?string
     {
+        // An admin edit keeps the placed fee (feeTotal), so no quote can withhold Two there.
+        if ($this->inAdminEdit()) {
+            return null;
+        }
         $services = $this->services();
         $currencyFailure = $services->fees->currencyFailure($services->surcharge(), $services->paymentTerms(), $this->sessionCurrency(), (string) $this->config->get('config_currency'));
         if ($currencyFailure !== null) {
@@ -388,7 +390,7 @@ class Two extends \Opencart\System\Engine\Model
             return '';
         }
 
-        return $this->editFeeFailure !== '' ? $this->editFeeFailure : 'the order was placed with a payment terms fee but no longer carries one';
+        return 'the order was placed with a payment terms fee but no longer carries one (is the Two payment terms fee order total enabled?)';
     }
 
     /** The cart's gross without the fee, in the session currency at the shop's own currency value (the factor the order is sent at). */
@@ -494,6 +496,7 @@ class Two extends \Opencart\System\Engine\Model
             ] + OrderTax::rateOf($tax, (float) $row['price'], (int) ($product['tax_class_id'] ?? 0));
         }
 
+        $record = $this->services()->orders->get($orderId) ?? [];
         $taxTotal = 0.0;
         $totals = [];
         foreach ($this->model_checkout_order->getTotals($orderId) as $row) {
@@ -502,9 +505,19 @@ class Two extends \Opencart\System\Engine\Model
                 $taxTotal += $total['value'];
             }
             $class = $this->chargeTaxClass($total['code'], $order);
-            if ($class !== null) {
+            $placed = $total['code'] === 'two_fee' && $terms !== null ? FeeQuote::decodePlaced((string) ($record['placed_fee'] ?? '')) : null;
+            if ($placed !== null) {
+                // A rebuilt order's fee is the fee as placed: its stored tax and rate, never recomputed.
+                $total += ['tax' => $placed['tax'], 'rate' => $placed['rate'], 'tax_rates' => $placed['tax_rates']];
+            } elseif ($class !== null) {
                 $rate = OrderTax::rateOf($tax, $total['value'], $class);
                 $total += $rate + ['tax' => $class > 0 ? $tax->getTax($total['value'], $class) : 0.0];
+                if ($total['code'] === 'two_fee') {
+                    $total['tax_rates'] = [];
+                    foreach ($class > 0 ? $tax->getRates($total['value'], $class) : [] as $id => $row) {
+                        $total['tax_rates'][(int) ($row['tax_rate_id'] ?? $id)] = (float) $row['amount'];
+                    }
+                }
             }
             $totals[] = $total;
         }

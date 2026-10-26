@@ -42,11 +42,16 @@ class TwoFee extends \Opencart\System\Engine\Model
             'value' => $fee['value'],
             'sort_order' => (int) $this->config->get('total_two_fee_sort_order'),
         ];
-        if ($fee['tax_class_id'] > 0) {
+        // A placed fee put back on an edit carries its own tax rows; a new fee is taxed by the shop's engine.
+        $rows = $fee['taxes'] ?? null;
+        if ($rows === null && $fee['tax_class_id'] > 0) {
+            $rows = [];
             foreach ($this->tax->getRates($fee['value'], $fee['tax_class_id']) as $rate) {
-                $id = (int) $rate['tax_rate_id'];
-                $taxes[$id] = ($taxes[$id] ?? 0.0) + (float) $rate['amount'];
+                $rows[(int) $rate['tax_rate_id']] = (float) $rate['amount'];
             }
+        }
+        foreach ($rows ?? [] as $id => $amount) {
+            $taxes[$id] = ($taxes[$id] ?? 0.0) + $amount;
         }
         $total += $fee['value'];
     }

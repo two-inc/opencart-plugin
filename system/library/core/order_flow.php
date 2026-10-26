@@ -127,6 +127,7 @@ final class OrderFlow
             'payment_terms' => is_array($order['terms'] ?? null) ? (string) json_encode($order['terms']) : '',
             // An edit reprices the fee only on an order placed with one, and never adds one.
             'payment_fee' => in_array('two_fee', array_column($totals, 'code'), true) ? '1' : '0',
+            'placed_fee' => FeeQuote::encodePlaced($totals),
         ];
         $this->records->put($orderId, $stored);
         $record = $this->records->get($orderId) ?? [];

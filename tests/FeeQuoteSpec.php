@@ -35,6 +35,27 @@ final class FeeQuoteSpec
         self::testQuoteAll();
         self::testLineValue();
         self::testPlacementRefusal();
+        self::testPlacedFee();
+    }
+
+    /** An admin edit puts back the fee the order was placed with, or none: never a new quote. */
+    private static function testPlacedFee(): void
+    {
+        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => 2.5]];
+        $placed = FeeQuote::encodePlaced([['code' => 'sub_total', 'value' => 100], $fee]);
+        $line = ['title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => 2.5]];
+        $cases = [
+            [['payment_fee' => '1', 'placed_fee' => $placed], $line, 'placed with a fee: that fee, its tax rows as stored'],
+            [['payment_fee' => '0', 'placed_fee' => ''], null, 'placed without a fee (a shop with no surcharge, or a term with none): none, and nothing to quote'],
+            [['payment_fee' => '1', 'placed_fee' => ''], null, 'a fee flag with no stored fee: none'],
+            [['payment_fee' => '0', 'placed_fee' => $placed], null, 'a stored fee on an order flagged without one: none'],
+            [[], null, 'no Two record: none'],
+        ];
+        foreach ($cases as [$record, $expected, $description]) {
+            TinyAssert::same($expected, FeeQuote::editLine($record), 'edit line: ' . $description);
+        }
+        TinyAssert::same('', FeeQuote::encodePlaced([['code' => 'shipping', 'value' => 5]]), 'placed fee: none when the order has no fee line');
+        TinyAssert::same(null, FeeQuote::decodePlaced('{"value":0,"tax":0}'), 'placed fee: a zero fee is none');
     }
 
     /** The chips' preview: terms asked together, a kept quote reused, the fresh ones handed back to keep. */
@@ -188,19 +209,6 @@ final class FeeQuoteSpec
         foreach ($cases as [$settings, $chosen, $gross, $responses, $expected, $description]) {
             [$quotes, , $settings] = self::quotes($settings, $responses);
             TinyAssert::same($expected, $quotes->charged(Surcharge::from($settings), PaymentTerms::from(['available_terms' => [30, 60]], $settings), $chosen, $gross, 'NO', 'NOK', 'NOK'), 'charged: ' . $description);
-        }
-
-        // An existing order (an admin edit) is priced on its stored term, never the default.
-        $stored = [
-            [['surcharge_type' => 'percentage'], 60, [$ok], ['applies' => true, 'days' => 60, 'net' => 7.0], '', 'the stored term is priced as it is'],
-            [['surcharge_type' => 'percentage', 'payment_terms' => '[30]'], 60, [$ok], ['applies' => true, 'days' => 60, 'net' => null], 'no longer one the merchant record offers', 'a stored term no longer offered is not swapped for the default'],
-            [['surcharge_type' => 'percentage', 'surcharge_grid' => '{"30":{"percentage":"2"}}'], 60, [$ok], ['applies' => true, 'days' => 60, 'net' => null], 'no longer prices a payment terms fee', 'a stored term that no longer prices a fee'],
-            [['surcharge_type' => 'percentage'], null, [], ['applies' => true, 'days' => null, 'net' => null], 'no stored payment term', 'no stored term'],
-        ];
-        foreach ($stored as [$settings, $days, $responses, $expected, $failure, $description]) {
-            [$quotes, , $settings] = self::quotes($settings, $responses);
-            TinyAssert::same($expected, $quotes->charged(Surcharge::from($settings), PaymentTerms::from(['available_terms' => [30, 60]], $settings), $days, 100.0, 'NO', 'NOK', 'NOK', true), 'charged on a stored term: ' . $description);
-            TinyAssert::true($failure === '' ? $quotes->failure === '' : str_contains($quotes->failure, $failure), 'charged on a stored term, the reason: ' . $description . ' (' . $quotes->failure . ')');
         }
     }
 

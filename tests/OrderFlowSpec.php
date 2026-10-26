@@ -6,6 +6,7 @@ use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
+use Opencart\System\Library\Extension\Two\Core\FeeQuote;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
@@ -118,7 +119,7 @@ final class OrderFlowSpec
     private static function testCreateKeepsTermsAndFee(): void
     {
         $created = self::json(201, ['id' => self::ID, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);
-        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 0, 'rate' => 0.0];
+        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 0, 'rate' => 0.0, 'tax_rates' => []];
         $cases = [
             [['terms' => ['type' => 'NET_TERMS', 'duration_days' => 30]], [$fee], ['{"type":"NET_TERMS","duration_days":30}', '1'], 'placed on a term with a fee'],
             [['terms' => ['type' => 'NET_TERMS', 'duration_days' => 60]], [], ['{"type":"NET_TERMS","duration_days":60}', '0'], 'placed on a term without a fee'],
@@ -131,6 +132,7 @@ final class OrderFlowSpec
             $order['total'] = (float) $order['total'] + array_sum(array_column($totals, 'value'));
             $flow->create($order, self::lines(2), $totals, self::TOKEN);
             TinyAssert::same($expected, [$records->rows[42]['payment_terms'] ?? null, $records->rows[42]['payment_fee'] ?? null], 'create keeps the term and the fee: ' . $description);
+            TinyAssert::same($totals === [] ? null : ['title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 0.0, 'rate' => 0.0, 'tax_rates' => []], FeeQuote::decodePlaced($records->rows[42]['placed_fee'] ?? ''), 'create keeps the placed fee line: ' . $description);
         }
     }
 
