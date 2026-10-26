@@ -54,7 +54,7 @@ $_['entry_cancel'] = '%s: Order avbruten';
 $_['entry_refund'] = '%s: Order återbetalad';
 
 // Help
-$_['help_environment'] = 'Välj vilken %s API-miljö som ska användas. Produktion för skarpa transaktioner, Sandbox för test.';
+$_['help_environment'] = 'Sandbox är för test och flyttar inga riktiga pengar. Använd API-nyckeln som utfärdats för den miljö du väljer.';
 $_['help_api_key'] = 'Ange din API-nyckel som du fått från %s.';
 $_['help_title'] = 'Ange en titel som visas i kassan som betalningsmetodens titel.';
 $_['help_fulfil'] = 'Välj en eller flera orderstatusar som ska utlösa leveransrapportering till %1$s. När någon av dessa statusar sätts markeras ordern som levererad hos %1$s. Köparens betalningsvillkor aktiveras och utbetalningscykeln startar. Du kan välja flera statusar (håll ned Ctrl/Cmd för att välja flera). Standard: Skickad';

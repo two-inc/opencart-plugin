@@ -7,6 +7,11 @@ parameters:
         - catalog
         - system
         - dev
+    # The environment parity check is byte-identical across the four plugin
+    # repos (dev/environment-parity.php), and the contract runs inside it.
+    excludePaths:
+        - dev/environment-parity.php
+        - dev/environment-contract.php
     # tests/ is left out: its OpenCart DB double shares the real class name.
     bootstrapFiles:
         - dev/ci/phpstan-bootstrap.php

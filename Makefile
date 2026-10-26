@@ -33,7 +33,20 @@ OPENCART_FLOOR        := 4.1.0.0
 OPENCART_FLOOR_SHA256 := 5d9883de4e37852dbb71c83b8833b9aa4419bc3e71d808e62e38522b2fd1b294
 CACHE                 := .cache
 
-.PHONY: help install configure smoke run stop clean logs test test-js lint phpstan archive patch minor major
+# E2E shop (tests/e2e/compose.yml): its own compose project and ports, so it
+# runs beside the `make install` shop. One leg per OpenCart version in CI.
+E2E_PROJECT         ?= two-opencart-e2e
+E2E_PORT            ?= 1240
+E2E_OPENCART        ?= 4.1.0.4
+E2E_OPENCART_SHA256 ?= cdef537f5a0a7e1b4ddbe16f589dd2e80b10150a09bfbe93ce76ef2d5c3218c0
+E2E_PHP             ?= 8.4
+TWO_API_STUB_PORT   ?= 8099
+# Empty runs against the stub. A sandbox API key runs against Two's sandbox.
+E2E_SANDBOX_API_KEY ?=
+E2E_COMPOSE         := docker compose -f tests/e2e/compose.yml $(if $(E2E_SANDBOX_API_KEY),,--profile stub)
+export E2E_PROJECT E2E_PORT E2E_OPENCART E2E_OPENCART_SHA256 E2E_PHP TWO_API_STUB_PORT E2E_SANDBOX_API_KEY
+
+.PHONY: help install configure smoke run stop clean logs test test-js lint phpstan archive patch minor major e2e e2e-up e2e-test e2e-down
 
 .DEFAULT_GOAL := help
 
@@ -112,6 +125,26 @@ $(CACHE)/phpstan-$(PHPSTAN_VERSION).phar:
 	curl -fsSL -o $@.tmp "https://github.com/phpstan/phpstan/releases/download/$(PHPSTAN_VERSION)/phpstan.phar"
 	echo "$(PHPSTAN_SHA256)  $@.tmp" | sha256sum -c --quiet -
 	mv $@.tmp $@
+
+## Start the E2E shop and the Two API stub (or Two's sandbox with E2E_SANDBOX_API_KEY): make e2e-up E2E_OPENCART=4.1.0.0 E2E_OPENCART_SHA256=...
+e2e-up:
+	tests/e2e/bin/tls.sh
+	$(E2E_COMPOSE) up -d --build --wait db
+	$(E2E_COMPOSE) up -d --build
+	tests/e2e/bin/prepare.sh
+
+## Run the Playwright suite against the E2E shop (make e2e-up first)
+e2e-test:
+	cd tests/e2e && npm ci --no-audit --no-fund && npx playwright test
+
+## Start the E2E shop, run the suite, take the shop down
+e2e:
+	$(MAKE) e2e-up
+	$(MAKE) e2e-test; status=$$?; $(MAKE) e2e-down; exit $$status
+
+## Remove the E2E shop, the stub and their data
+e2e-down:
+	$(E2E_COMPOSE) --profile stub down -v --remove-orphans
 
 ## Build dist/two.ocmod.zip from HEAD
 archive:

@@ -54,7 +54,7 @@ $_['entry_cancel'] = '%s: Bestelling geannuleerd';
 $_['entry_refund'] = '%s: Bestelling terugbetaald';
 
 // Help
-$_['help_environment'] = 'Kies de %s API-omgeving die je wilt gebruiken. Productie voor echte transacties, Sandbox om te testen.';
+$_['help_environment'] = 'Sandbox is bedoeld om te testen en verplaatst geen echt geld. Gebruik de API-sleutel die is uitgegeven voor de omgeving die je selecteert.';
 $_['help_api_key'] = 'Vul de API-sleutel in die je van %s hebt gekregen.';
 $_['help_title'] = 'Vul een titel in die op de afrekenpagina wordt weergegeven als titel van de betaalmethode.';
 $_['help_fulfil'] = 'Selecteer een of meer bestelstatussen die uitlevering bij %1$s moeten activeren. Zodra een van deze statussen wordt ingesteld, wordt de bestelling bij %1$s als uitgeleverd gemarkeerd. De betaaltermijnen van de koper worden actief en de uitbetalingscyclus start. Je kunt meerdere statussen selecteren (houd Ctrl/Cmd ingedrukt om meerdere te selecteren). Standaard: Verzonden';

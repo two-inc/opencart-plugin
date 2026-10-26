@@ -1,0 +1,36 @@
+import { expect, test } from "@playwright/test";
+
+import { orderStatusId, twoOrderId } from "../pages/shop";
+import { placeOrder } from "../pages/storefront";
+import { expectState, requests, stubOrder } from "../pages/stub";
+
+test("a buyer finds their company, places the order with Two and sees the confirmation", async ({ page }) => {
+  const seen = (await requests("")).length;
+  const orderId = await placeOrder(page);
+
+  const twoId = twoOrderId(orderId);
+  expect(twoId, "the shop order is linked to a Two order").not.toBe("");
+  await expectState(twoId, "CONFIRMED");
+  expect(orderStatusId(orderId), "the order is placed at the shop's default status").toBe(1);
+
+  const created = await stubOrder(twoId);
+  expect((created as any).buyer.company.organization_number, "the searched company's number is sent").toBe("12345678");
+  const sent = (await requests("")).slice(seen);
+  const writes = sent.filter((r) => r.path.startsWith("/v1/order") && r.method !== "GET");
+  expect(writes.map((r) => r.path), "the order is created and confirmed").toEqual(expect.arrayContaining(["/v1/order", `/v1/order/${twoId}/confirm`]));
+  expect(writes.filter((r) => !r.key), "every write carries an Idempotency-Key").toEqual([]);
+  // The stub refuses a wrong API key and amounts that do not add up as Two does.
+  expect(sent.filter((r) => r.status !== 200 && r.status !== 201), "Two accepts every call the shop makes").toEqual([]);
+});
+
+test("a coupon reaches Two as a negative discount line, and Two accepts the order", async ({ page }) => {
+  const seen = (await requests("")).length;
+  const orderId = await placeOrder(page, 1, "E2E Trad", "2222");
+  const twoId = twoOrderId(orderId);
+  await expectState(twoId, "CONFIRMED");
+
+  const lines = (await stubOrder(twoId)).line_items;
+  expect(lines.filter((l) => Number(l.net_amount) < 0 && Number(l.tax_amount) < 0), "one discount line, net and tax below zero").toHaveLength(1);
+  const sent = (await requests("")).slice(seen);
+  expect(sent.filter((r) => r.status !== 200 && r.status !== 201), "Two accepts every call the shop makes").toEqual([]);
+});
