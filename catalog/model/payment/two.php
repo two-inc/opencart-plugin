@@ -159,11 +159,13 @@ class Two extends \Opencart\System\Engine\Model
      */
     public function feeTotal(): ?array
     {
-        if (self::$feeSuspended) {
+        $code = (string) ($this->session->data['payment_method']['code'] ?? '');
+        // Only while Two is chosen: every other cart render must not read the record or ask Two.
+        if (self::$feeSuspended || $code !== 'two.two') {
             return null;
         }
         $fee = $this->cartFee();
-        $value = FeeQuote::lineValue($fee, (string) ($this->session->data['payment_method']['code'] ?? ''), (float) $this->currency->getValue($this->sessionCurrency()));
+        $value = FeeQuote::lineValue($fee, $code, (float) $this->currency->getValue($this->sessionCurrency()));
         if ($value === null || $fee['days'] === null) {
             return null;
         }
