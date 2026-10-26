@@ -33,7 +33,7 @@ OPENCART_FLOOR        := 4.1.0.0
 OPENCART_FLOOR_SHA256 := 5d9883de4e37852dbb71c83b8833b9aa4419bc3e71d808e62e38522b2fd1b294
 CACHE                 := .cache
 
-.PHONY: help install configure smoke run stop clean logs test lint phpstan archive patch minor major
+.PHONY: help install configure smoke run stop clean logs test test-js lint phpstan archive patch minor major
 
 .DEFAULT_GOAL := help
 
@@ -90,6 +90,11 @@ logs:
 ## Run the offline PHP test suite
 test:
 	php tests/run.php
+
+## Run the Jest suite over the browser scripts
+test-js:
+	npm ci --no-audit --no-fund
+	npm run test:js
 
 ## Syntax-check every PHP file
 lint:

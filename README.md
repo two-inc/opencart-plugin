@@ -2,7 +2,7 @@
 
 The Two payment extension for OpenCart 4.1: pay by invoice for business buyers.
 
-**Status: being rewritten.** This branch holds the new OpenCart 4.1 foundation. It installs and appears under Extensions > Payments, but does not offer Two at checkout yet. The 1.x releases for OpenCart 3 call API hosts that no longer exist, so they cannot reach Two.
+**Status: being rewritten.** This branch holds the new OpenCart 4.1 foundation. It installs, appears under Extensions > Payments and offers Two at checkout with company search; payment terms, the surcharge and more languages are still to come. The 1.x releases for OpenCart 3 call API hosts that no longer exist, so they cannot reach Two.
 
 ## Requirements
 

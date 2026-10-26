@@ -8,7 +8,8 @@ use Opencart\System\Library\Extension\Two\Opencart\OrderTax;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
- * Checkout adapter for the Two payment method: whether the tile is offered,
+ * Checkout adapter for the Two payment method: whether the tile is offered
+ * (the availability chain over the session's cart),
  * and the shop's stored order mapped into OrderBuilder's neutral shapes.
  *
  * Every amount is read from the order's own rows (order, order_product,
@@ -25,27 +26,37 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Library\Language $language
  * @property-read \Opencart\System\Library\DB $db
  * @property-read \Opencart\System\Library\Log $log
+ * @property-read \Opencart\System\Library\Session $session
+ * @property-read \Opencart\System\Library\Cart\Currency $currency
  * @property-read \Opencart\Catalog\Model\Checkout\Order $model_checkout_order
+ * @property-read object{getTotals: \Closure} $model_checkout_cart the loader's proxy: getTotals is a closure, so its arguments pass by reference
  */
 class Two extends \Opencart\System\Engine\Model
 {
     /** Tax classes of the charge totals the shop's own extensions add, by total code. */
     private const CHARGE_TAX_CLASS_KEYS = ['handling' => 'total_handling_tax_class_id', 'low_order_fee' => 'total_low_order_fee_tax_class_id'];
 
+    /** Whether this request already logged why Two was withheld: OpenCart asks for the methods more than once per render. */
+    private static bool $withholdLogged = false;
+
     /**
-     * The tile, offered while the extension is enabled with an API key. The
-     * full availability chain (Build Guide section 18) lands in P6.
+     * The tile, when the availability chain (Build Guide section 18) offers
+     * Two for this cart. A withheld tile is silent for the buyer; the log
+     * names the reason once per request.
      *
-     * @param array<string, mixed> $address
+     * @param array<string, mixed> $address the payment address OpenCart passes, empty when it collects none
      * @return array<string, mixed>
      */
     public function getMethods(array $address = []): array
     {
-        if (!$this->config->get('payment_two_status')) {
-            return [];
-        }
         $services = new Services($this->db, $this->log, (int) $this->config->get('config_store_id'));
-        if ($services->settings->apiKey() === '') {
+        $withheld = $services->availability->withholdReason($this->checkoutFacts($address), $this->converter());
+        if ($withheld !== null) {
+            if (!self::$withholdLogged) {
+                self::$withholdLogged = true;
+                $this->log->write('Two: payment method hidden (' . $withheld['reason'] . '): ' . $withheld['detail']);
+            }
+
             return [];
         }
         // OpenCart 4.1 renders method names unescaped, and the title is stored as typed.
@@ -57,6 +68,70 @@ class Two extends \Opencart\System\Engine\Model
             'option' => ['two' => ['code' => 'two.two', 'name' => $title]],
             'sort_order' => $this->config->get('payment_two_sort_order'),
         ];
+    }
+
+    /**
+     * The cart as the availability chain reads it. OpenCart keeps every
+     * amount in the shop's default currency and shows the session's, so the
+     * gate checks the session currency and the minimum judges the default.
+     *
+     * @param array<string, mixed> $address
+     * @return array{enabled: bool, currency: string, shop_currency: string, gross: float, net: float, buyer_country: string|null, value_currency: string}
+     */
+    public function checkoutFacts(array $address = []): array
+    {
+        $this->load->model('checkout/cart');
+        $totals = [];
+        $taxes = [];
+        $total = 0;
+        ($this->model_checkout_cart->getTotals)($totals, $taxes, $total);
+        $shop = (string) $this->config->get('config_currency');
+
+        return [
+            'enabled' => (bool) $this->config->get('payment_two_status'),
+            'currency' => (string) ($this->session->data['currency'] ?? $shop),
+            'shop_currency' => $shop,
+            'gross' => (float) $total,
+            'net' => (float) $total - (float) array_sum($taxes),
+            'buyer_country' => $this->buyerCountry($address),
+            'value_currency' => $shop,
+        ];
+    }
+
+    /**
+     * The buyer's country: the payment address, else the shipping address.
+     *
+     * @param array<string, mixed> $address
+     */
+    public function buyerCountry(array $address = []): ?string
+    {
+        foreach ([$address, $this->session->data['payment_address'] ?? [], $this->session->data['shipping_address'] ?? []] as $candidate) {
+            $code = is_array($candidate) ? strtoupper(trim((string) ($candidate['iso_code_2'] ?? ''))) : '';
+            if ($code === '' && is_array($candidate) && (int) ($candidate['country_id'] ?? 0) > 0) {
+                $row = $this->db->query('SELECT `iso_code_2` FROM `' . DB_PREFIX . "country` WHERE `country_id` = '" . (int) $candidate['country_id'] . "'")->row;
+                $code = strtoupper(trim((string) ($row['iso_code_2'] ?? '')));
+            }
+            if (preg_match('~^[A-Z]{2}\z~', $code) === 1) {
+                return $code;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Converts at the shop's own currency rates (Localisation > Currencies),
+     * or null when the shop does not hold one of the two currencies.
+     *
+     * @return \Closure(float, string, string): ?float
+     */
+    public function converter(): \Closure
+    {
+        $currency = $this->currency;
+
+        return static fn (float $amount, string $from, string $to): ?float => $currency->has($from) && $currency->has($to) && $currency->getValue($from) > 0 && $currency->getValue($to) > 0
+            ? round($currency->convert($amount, $from, $to), 2)
+            : null;
     }
 
     /** The address columns the order keeps for each role, hashed as stored. */
@@ -96,9 +171,10 @@ class Two extends \Opencart\System\Engine\Model
      *
      * @param array{company_name: string, organization_number: string, country_code: string} $company
      * @param array<string, string>                                                           $urls
+     * @param array<string, string>                                                           $buyerFields the optional buyer fields (BuyerFields)
      * @return array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context: array<string, mixed>}|null
      */
-    public function orderInput(int $orderId, array $company, array $urls): ?array
+    public function orderInput(int $orderId, array $company, array $urls, array $buyerFields = []): ?array
     {
         $this->load->model('checkout/order');
         $order = $this->model_checkout_order->getOrder($orderId);
@@ -162,6 +238,7 @@ class Two extends \Opencart\System\Engine\Model
                 'billing_address' => $this->address($order, 'payment'),
                 'shipping_address' => $shipping,
                 'merchant_urls' => $urls,
+                'buyer_fields' => $buyerFields,
             ],
             'lines' => $lines,
             'totals' => $totals,

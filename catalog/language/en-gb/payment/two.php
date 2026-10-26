@@ -3,12 +3,59 @@
 // Storefront copy. %s is the brand's product name (Brand::default()).
 $_['heading_title'] = 'Two';
 
-// Tile: manual company entry until company search lands (P6).
+// Tile. %s is the brand's product name.
 $_['entry_company_name'] = 'Company name';
 $_['entry_organization_number'] = 'Organisation number';
 $_['entry_country'] = 'Company country';
-$_['text_company_intro'] = 'Enter the company you are buying for.';
+$_['text_company_intro'] = 'Search for the company you are buying for.';
+// %s here is the company as the buyer reads it.
+$_['text_company_from_address'] = 'Buying for %s.';
+$_['text_company_missing'] = 'To pay with %s, search for your company name and select your company from the results to verify your business.';
 $_['button_confirm'] = 'Confirm order';
+
+// Optional fields (Build Guide section 6.1), in the order the tile shows them.
+$_['entry_invoice_email'] = 'Invoice email address';
+$_['entry_purchase_order_number'] = 'PO Number';
+$_['entry_project'] = 'Project';
+$_['entry_department'] = 'Department';
+$_['text_optional'] = 'optional';
+$_['error_field_too_long'] = '%1$s must be %2$d characters or fewer.';
+
+// Order intent notices (section 6.3).
+$_['text_intent_approved'] = 'Your invoice with %s is likely to be accepted, subject to additional checks.';
+$_['text_intent_declined'] = 'Your invoice with %s cannot be approved at this time. Please select an alternative payment method.';
+
+// Company search and sole trader, read by the checkout script. %1$s is the
+// brand's product name, %2$d the shortest search term.
+$_['js_search_label'] = 'Search for a company';
+$_['js_search_hint'] = 'Enter %2$d or more characters';
+$_['js_searching'] = 'Searching...';
+$_['js_no_matches'] = 'No matches found';
+$_['js_search_unavailable'] = 'Company search is temporarily unavailable. Please try again.';
+$_['js_select_country'] = 'Select your country above to search for your company.';
+$_['js_country_not_covered'] = 'Company search does not cover this country. Enter your company manually.';
+$_['js_manual_entry'] = 'Enter manually';
+$_['js_back_to_search'] = 'Search for company';
+$_['js_sole_trader_entry'] = 'I\'m a sole trader';
+$_['js_sole_trader_error'] = 'The sole trader sign-up could not be started. Please try again.';
+$_['js_sole_trader_popup_blocked'] = 'Your browser blocked the sole trader sign-up window. Allow pop-ups for this site and try again.';
+$_['js_change_company'] = 'Search for a different company';
+$_['js_organization_number'] = 'Organisation number';
+$_['js_checking'] = 'Checking %1$s payment eligibility...';
+$_['js_selected'] = 'Selected';
+$_['js_settle_timeout'] = 'We are still saving your company details. Please try again in a moment.';
+$_['js_confirm_failed'] = 'We could not hear back about your order. It may still be processing: please wait a moment and check your order history before trying again.';
+$_['error_order_in_progress'] = 'Your order is still being placed. Please wait a moment and check your order history before trying again.';
+$_['js_number_missing'] = 'Enter your organisation number to continue.';
+$_['error_too_many'] = 'Too many requests. Please wait and try again.';
+
+// Placement refused (section 6.3): the intent, and what changed since the method list.
+$_['error_intent_connection'] = 'Connection error with payment provider. Please try again.';
+$_['error_intent_unavailable'] = 'Payment provider temporarily unavailable. Please try again later.';
+$_['error_intent_unprocessable'] = 'Unable to process your order with %s payment.';
+$_['error_placement_currency'] = '%1$s is not available for orders in %2$s. Please choose another currency or payment method.';
+$_['error_placement_buyer_country'] = 'This payment method is not available.';
+$_['error_sole_trader'] = 'The sole trader sign-up could not be started. Please try again.';
 
 // Callbacks.
 $_['text_returning'] = 'Returning to the shop';

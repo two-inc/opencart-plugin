@@ -30,6 +30,7 @@ declare(strict_types=1);
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
+use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\DbRefundRecords;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
@@ -184,11 +185,20 @@ if (query($db, "SELECT `event_id` FROM `{$p}event` WHERE `code` = ?", [Services:
     say('registered event ' . Services::EVENT_CODE);
 }
 
+// 6a. The checkout capture script on the checkout page, as install() registers it.
+if (query($db, "SELECT `event_id` FROM `{$p}event` WHERE `code` = ?", [Services::CHECKOUT_EVENT_CODE]) === []) {
+    query($db, "INSERT INTO `{$p}event` SET `code` = ?, `description` = ?, `trigger` = ?, `action` = ?, `status` = 1, `sort_order` = 0", [Services::CHECKOUT_EVENT_CODE, Services::CHECKOUT_EVENT_DESCRIPTION, Services::CHECKOUT_EVENT_TRIGGER, Services::CHECKOUT_EVENT_ACTION]);
+    say('registered event ' . Services::CHECKOUT_EVENT_CODE);
+}
+
 // 7. The order-scoped table, as install() creates it.
 $renamed = DbOrderRecords::install(static fn (string $sql): array => query($db, $sql), $p);
 if ($renamed !== null) {
     say('renamed the old ' . $p . DbOrderRecords::TABLE . ' table to ' . $renamed);
 }
 DbRefundRecords::install(static fn (string $sql): array => query($db, $sql), $p);
+
+// 8. The checkout relays' rate-limit counts, as install() creates them.
+query($db, DbRateLimits::createTableSql($p));
 
 say('extension ' . TWO_CODE . ' ' . $manifest['version'] . ' installed and enabled');

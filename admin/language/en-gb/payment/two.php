@@ -89,6 +89,46 @@ $_['error_invoice_state'] = 'No invoice is available because the order is in sta
 $_['error_invoice_no_reference'] = 'No Two order is linked to this order.';
 $_['error_invoice'] = 'The invoice could not be retrieved. Please try again later.';
 
+// Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
+$_['entry_company_search_in_address'] = 'Enable company search in address entry';
+$_['help_company_search_in_address'] = 'When enabled, the buyer may search for their company within the address entry section of the checkout. Otherwise, company search will be visible within the payment method.';
+$_['entry_enable_invoice_email'] = 'Show invoice email field';
+$_['help_enable_invoice_email'] = 'If you choose Yes then customers will see an invoice email field in the %s payment section at checkout. It sits with the payment method rather than the address so the buyer is prompted to consider a dedicated invoicing address even when their billing and shipping addresses match.';
+$_['entry_enable_po_number'] = 'Show PO number field';
+$_['help_enable_po_number'] = 'If you choose Yes then customers will see a PO Number field in the %s payment section at checkout.';
+$_['entry_enable_project'] = 'Show project field';
+$_['help_enable_project'] = 'If you choose Yes then customers will see a Project field in the %s payment section at checkout.';
+$_['entry_enable_department'] = 'Show department field';
+$_['help_enable_department'] = 'If you choose Yes then customers will see a Department field in the %s payment section at checkout.';
+$_['entry_min_order_amount'] = 'Minimum order value, %s';
+$_['help_min_order_amount'] = 'Hide the payment method below this order value (shop default currency, on the tax basis selected below). Leave empty for no minimum.';
+$_['entry_min_order_basis'] = 'Minimum order value tax basis';
+$_['help_min_order_basis'] = 'Whether the basket is compared against the minimum including or excluding tax.';
+$_['text_basis_default'] = 'As the platform minimum (including tax when there is none)';
+$_['text_basis_option_gross'] = 'Including tax (gross)';
+$_['text_basis_option_net'] = 'Excluding tax (net)';
+$_['error_switch_invalid'] = 'Choose Yes or No.';
+$_['error_minimum_invalid'] = 'Enter an amount above zero with at most two decimals, or leave the field empty.';
+$_['error_basis_invalid'] = 'Choose a tax basis from the list.';
+
+// Health row (Build Guide section 18). %1$s is the provider's full name, %2$s the shop's default currency.
+$_['entry_health'] = 'Payment method at checkout';
+$_['text_health_hidden'] = 'Not shown at checkout';
+$_['text_health_shown'] = 'Shown at checkout';
+$_['text_withheld_disabled'] = 'the extension is not enabled. Switch Status on.';
+$_['text_withheld_no_api_key'] = 'no API key is saved. Check API key.';
+$_['text_withheld_key_rejected'] = 'the API key was rejected. Check API key and Environment.';
+$_['text_withheld_buyer_countries_empty'] = 'no buyer countries are currently enabled for your account. Contact %1$s to have them enabled.';
+$_['text_withheld_buyer_countries_malformed'] = 'the buyer countries on your account could not be read. Contact %1$s.';
+$_['text_withheld_merchant_unidentified'] = 'your merchant account has not been identified yet. Save General to verify the API key.';
+$_['text_withheld_currency'] = 'none of the shop\'s enabled currencies is one invoices can be issued in.';
+$_['text_health_below'] = 'hidden for baskets below %s';
+$_['text_health_floor'] = '%1$s %2$s %3$s';
+$_['text_basis_gross'] = 'including tax';
+$_['text_basis_net'] = 'excluding tax';
+$_['text_or'] = 'or';
+$_['text_health_countries'] = 'offered only to buyers in %s';
+$_['text_health_currencies'] = 'hidden for baskets in %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Download credit note';
 $_['help_credit_note'] = 'The latest credit note Two issued for this order.';
@@ -126,3 +166,10 @@ $_['column_left'] = 'Left to refund';
 $_['text_panel_loading'] = 'Asking Two for this order...';
 $_['error_panel'] = 'The Two tab could not be loaded. Open the tab again to retry, or reload the page.';
 $_['error_ajax'] = 'The shop did not answer as expected. Check the order history and the Two tab before trying again.';
+
+// Diagnostics: trusted proxies for the checkout's rate limits.
+$_['entry_trusted_proxies'] = 'Trusted proxies';
+$_['help_trusted_proxies'] = 'Addresses of your own reverse proxies, load balancers or CDN egress, as IPs or CIDR ranges, separated by commas or new lines. These IP addresses will be exempt from rate limiting.';
+$_['error_proxy_invalid'] = 'Trusted proxies: "%s" is not a valid IP address or CIDR range.';
+$_['entry_disable_rate_limit'] = 'Disable checkout rate limiting';
+$_['help_disable_rate_limit'] = 'Removes the per-caller ceiling on the checkout AJAX endpoints. The ceiling is on by default. If this store sits behind a CDN, load balancer or reverse proxy and Trusted proxies above is empty, every buyer arrives as that one address and shares a single ceiling - buyers are then refused mid-checkout with a too-many-requests message. The fix is to fill in Trusted proxies, which lets the ceiling tell buyers apart; switch this On only as a stopgap while you get that list, and back Off afterwards.';

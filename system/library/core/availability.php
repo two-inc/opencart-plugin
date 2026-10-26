@@ -6,27 +6,161 @@ namespace Opencart\System\Library\Extension\Two\Core;
 
 /**
  * Whether Two may be offered at checkout (Build Guide section 18): an ordered
- * chain of silent checks (API key verdict, merchant record, currency, buyer
- * country, minimum order, fee quote). The first failing check names the
- * withhold reason, which the admin health row shows; the buyer sees nothing.
+ * chain of silent checks. The first that fails names the withhold reason;
+ * the buyer sees nothing, the log and the admin's health row say why.
  *
- * Behaviour lands in P6.
+ * Only a definitive rejection of the API key withholds on Two's account: an
+ * unreachable or erroring Two falls through to the cached merchant record,
+ * which has no expiry, so an incident at Two never empties the checkout.
+ * The fee-quote gate joins the chain with the surcharge (P7).
  */
 final class Availability
 {
+    public const DISABLED = 'disabled';
+    public const NO_API_KEY = 'no_api_key';
+    public const MERCHANT_UNIDENTIFIED = 'merchant_unidentified';
+    public const KEY_REJECTED = 'key_rejected';
+    public const BUYER_COUNTRIES_EMPTY = 'buyer_countries_empty';
+    public const BUYER_COUNTRIES_MALFORMED = 'buyer_countries_malformed';
+    public const CURRENCY = 'currency';
+    public const BUYER_COUNTRY = 'buyer_country';
+    public const NO_COUNTRY = 'no_country';
+    public const BELOW_MINIMUM = 'below_minimum';
+
+    /** The currencies Two invoices in. */
+    public const SUPPORTED_CURRENCIES = ['NOK', 'GBP', 'SEK', 'USD', 'DKK', 'EUR'];
+
     public function __construct(
         private readonly SettingsProvider $settings,
         private readonly RecordProvider $records,
+        private readonly ApiKeyVerdict $verdict,
     ) {
     }
 
     /**
-     * Null when Two may be offered, otherwise the withhold reason code.
+     * Null when Two may be offered for this cart, otherwise the withhold
+     * reason (one of the constants) and its detail for the log.
      *
-     * @param array{currency: string, gross: float, net: float, buyer_country: string|null} $checkout
+     * The cart's gross and net are in value_currency when given (a shop that
+     * keeps its amounts in its default currency), else in the cart's currency.
+     *
+     * @param array{enabled: bool, currency: string, shop_currency: string, gross: float, net: float, buyer_country: string|null, value_currency?: string} $checkout
+     * @param \Closure(float, string, string): ?float $convert puts an amount from one currency into another, null when it cannot
+     * @return array{reason: string, detail: string}|null
      */
-    public function withholdReason(array $checkout): ?string
+    public function withholdReason(array $checkout, \Closure $convert): ?array
     {
-        throw NotImplemented::inPhase('Availability::withholdReason', 'P6');
+        $shop = $this->shopReason($checkout['enabled']);
+        if ($shop !== null) {
+            return ['reason' => $shop, 'detail' => $shop];
+        }
+        $placement = $this->placementReason($checkout);
+        if ($placement !== null) {
+            return $placement;
+        }
+        $country = self::country($checkout['buyer_country']);
+        if (!$this->settings->companySearchInAddressArea() && $country === null) {
+            return ['reason' => self::NO_COUNTRY, 'detail' => 'no country resolves from the billing or shipping address, so the tile\'s search could not run'];
+        }
+        $currency = strtoupper(trim($checkout['currency']));
+        $shortfall = MinimumOrder::from($this->records->record(), $this->settings, $checkout['shop_currency'])->shortfall($checkout['gross'], $checkout['net'], $checkout['value_currency'] ?? $currency, $convert);
+        if ($shortfall !== null) {
+            return ['reason' => self::BELOW_MINIMUM, 'detail' => $shortfall];
+        }
+
+        return null;
+    }
+
+    /**
+     * The checks placement repeats, since the page may be stale (the buyer
+     * switched currency or address after picking Two): the cart currency,
+     * then the buyer country.
+     *
+     * @param array{currency: string, buyer_country: string|null} $checkout
+     * @return array{reason: string, detail: string}|null
+     */
+    public function placementReason(array $checkout): ?array
+    {
+        $currency = strtoupper(trim($checkout['currency']));
+        if (!in_array($currency, self::SUPPORTED_CURRENCIES, true)) {
+            return ['reason' => self::CURRENCY, 'detail' => 'cart currency ' . ($currency === '' ? 'unresolved' : $currency) . ' is not one Two invoices in'];
+        }
+        $country = self::country($checkout['buyer_country']);
+        $countries = BuyerCountries::fromRecord($this->records->record());
+        if (!$countries->allows($country)) {
+            return ['reason' => self::BUYER_COUNTRY, 'detail' => 'buyer country ' . ($country ?? 'unresolved') . ', supported buyer country list ' . $countries->state];
+        }
+
+        return null;
+    }
+
+    /**
+     * The withhold reasons that hold for every cart, in chain order: the
+     * health row names the first.
+     */
+    public function shopReason(bool $enabled): ?string
+    {
+        if (!$enabled) {
+            return self::DISABLED;
+        }
+        if ($this->settings->apiKey() === '') {
+            return self::NO_API_KEY;
+        }
+        $record = $this->records->record();
+        if (!is_scalar($record['short_name'] ?? null) || trim((string) $record['short_name']) === '') {
+            // No merchant record names the merchant yet: every restriction it carries is unknown.
+            return self::MERCHANT_UNIDENTIFIED;
+        }
+        // The heartbeat: the cached verdict, checked live once it is due.
+        if (ApiKeyVerdict::isDefinitive($this->verdict->status())) {
+            return self::KEY_REJECTED;
+        }
+        $state = BuyerCountries::fromRecord($record)->state;
+        if ($state === BuyerCountries::EMPTY) {
+            return self::BUYER_COUNTRIES_EMPTY;
+        }
+        if ($state === BuyerCountries::MALFORMED) {
+            return self::BUYER_COUNTRIES_MALFORMED;
+        }
+
+        return null;
+    }
+
+    /**
+     * The admin's health row: why Two is not shown, or that it is, with the
+     * per-cart constraints that may still withhold it. Not shown for the
+     * currency only when none of the shop's enabled currencies is one Two
+     * invoices in; otherwise the others are a per-cart constraint.
+     *
+     * @param list<string> $shopCurrencies the shop's enabled currencies
+     * @return array{shown: bool, reason: string|null, floors: list<array{amount: float, currency: string, basis: string}>, buyer_countries: list<string>, refused_currencies: list<string>}
+     */
+    public function health(bool $enabled, string $shopCurrency, array $shopCurrencies): array
+    {
+        $refused = [];
+        $usable = false;
+        foreach ($shopCurrencies as $code) {
+            $code = strtoupper(trim($code));
+            if (in_array($code, self::SUPPORTED_CURRENCIES, true)) {
+                $usable = true;
+            } elseif ($code !== '' && !in_array($code, $refused, true)) {
+                $refused[] = $code;
+            }
+        }
+        $reason = $this->shopReason($enabled) ?? ($usable ? null : self::CURRENCY);
+        $record = $reason === null ? $this->records->record() : null;
+
+        return [
+            'shown' => $reason === null,
+            'reason' => $reason,
+            'floors' => $reason === null ? MinimumOrder::from($record, $this->settings, $shopCurrency)->bindingFloors() : [],
+            'buyer_countries' => $reason === null ? BuyerCountries::fromRecord($record)->allowed : [],
+            'refused_currencies' => $reason === null ? $refused : [],
+        ];
+    }
+
+    private static function country(?string $country): ?string
+    {
+        return $country === null || trim($country) === '' ? null : strtoupper(trim($country));
     }
 }

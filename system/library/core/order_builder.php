@@ -57,7 +57,8 @@ final class OrderBuilder
      *     company: array{company_name: string, organization_number: string, country_code: string},
      *     buyer: array{email: string, first_name: string, last_name: string, phone_number: string},
      *     billing_address: array<string, string>, shipping_address?: array<string, string>|null,
-     *     merchant_urls: array<string, string>
+     *     merchant_urls: array<string, string>,
+     *     buyer_fields?: array<string, string>
      * } $order
      * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string}> $lines
      * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool}> $totals
@@ -140,6 +141,16 @@ final class OrderBuilder
             'line_items' => $items,
             'tax_subtotals' => [],
         ];
+        // The optional buyer fields (section 6.1), sent only when the buyer gave one.
+        $fields = is_array($order['buyer_fields'] ?? null) ? $order['buyer_fields'] : [];
+        foreach (['department' => 'buyer_department', 'project' => 'buyer_project', 'purchase_order_number' => 'buyer_purchase_order_number'] as $field => $key) {
+            if (trim((string) ($fields[$field] ?? '')) !== '') {
+                $payload[$key] = trim((string) $fields[$field]);
+            }
+        }
+        if (trim((string) ($fields['invoice_email'] ?? '')) !== '') {
+            $payload['invoice_details'] = ['invoice_emails' => [trim((string) $fields['invoice_email'])]];
+        }
 
         return Postprocessing::recomputeTotals($payload);
     }

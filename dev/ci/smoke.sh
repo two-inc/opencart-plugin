@@ -161,6 +161,25 @@ location=$(curl -s -o /dev/null -w '%{redirect_url}' "$base/${cb}&token=${token}
 grep -q 'checkout/cart' <<<"$location" || fail "a callback for an unknown order did not go back to the cart (got '${location}')"
 ok "a callback for an unknown order goes back to the cart"
 
+# Checkout capture: the script is served, the checkout page carries it and
+# its settings once a key is saved, the relays refuse a request without the
+# session's token, and the admin names why Two is or is not shown.
+[ "$(status 'extension/two/catalog/view/javascript/two_checkout.js')" = 200 ] || fail "the checkout script is not served"
+ok "the checkout script is served"
+kept_key=$(setting api_key)
+store api_key 'smoke-not-a-real-key'
+shopper=$(mktemp)
+curl -s -c "$shopper" -b "$shopper" -o /dev/null -X POST -d 'product_id=40&quantity=1' "$base/index.php?route=checkout/cart.add&language=en-gb"
+checkout_page=$(curl -s -c "$shopper" -b "$shopper" "$base/index.php?route=checkout/checkout&language=en-gb")
+contains "the checkout page carries the capture settings" "$checkout_page" 'id="two-checkout-config"'
+contains "the checkout page loads the capture script" "$checkout_page" 'two_checkout.js?v='
+contains "the company search refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.search&language=en-gb&q=acme&country=GB&two_token=wrong")" '"error":"forbidden"'
+contains "the token mint refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.soleTraderTokens&language=en-gb")" '"error":"forbidden"'
+rm -f "$shopper"
+store api_key ''
+contains "the health row names why Two is not shown" "$(admin extension/two/payment/two)" 'Not shown at checkout - no API key is saved.'
+store api_key "$kept_key"
+
 # Order lifecycle: an admin status change runs the catalog event in the store
 # instance. A Two order with no Two order linked moves to Shipped and to
 # Canceled: each refusal is noted at the merchant's status, never undone,

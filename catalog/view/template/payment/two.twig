@@ -1,29 +1,56 @@
 {# OpenCart 4.1 renders Twig with autoescape off: every value is escaped here. #}
-<form id="form-two" class="mb-3">
-  <p>{{ text_company_intro|e }}</p>
-  <div class="mb-3">
-    <label for="input-two-company-name" class="form-label">{{ entry_company_name|e }}</label>
-    <input type="text" name="two_company_name" id="input-two-company-name" value="{{ company_name|e }}" class="form-control" autocomplete="organization" required>
-  </div>
-  <div class="mb-3">
-    <label for="input-two-organization-number" class="form-label">{{ entry_organization_number|e }}</label>
-    <input type="text" name="two_organization_number" id="input-two-organization-number" value="" class="form-control" required>
-  </div>
-  <div class="mb-3">
-    <label for="input-two-country" class="form-label">{{ entry_country|e }}</label>
-    <select name="two_country" id="input-two-country" class="form-select" required>
-      {% for item in countries %}
-        <option value="{{ item.code|e }}"{% if item.code == country %} selected{% endif %}>{{ item.name|e }}</option>
-      {% endfor %}
-    </select>
-  </div>
+<form id="form-two" class="mb-3" data-two-tile="{{ in_tile ? 'search' : 'address' }}">
+  {% if in_tile %}
+    <p>{{ text_company_intro|e }}</p>
+    <div class="mb-3">
+      <label for="input-two-country" class="form-label">{{ entry_country|e }}</label>
+      <select name="two_country" id="input-two-country" class="form-select" required data-two-country>
+        {% for item in countries %}
+          <option value="{{ item.code|e }}"{% if item.code == country %} selected{% endif %}>{{ item.name|e }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-3">
+      <label for="input-two-company-name" class="form-label">{{ entry_company_name|e }}</label>
+      <input type="text" name="two_company_name" id="input-two-company-name" value="{{ company.company_name|default('')|e }}" class="form-control" autocomplete="organization" required data-two-company>
+    </div>
+    <div class="mb-3" data-two-organization>
+      <label for="input-two-organization-number" class="form-label">{{ entry_organization_number|e }}</label>
+      <input type="text" name="two_organization_number" id="input-two-organization-number" value="{{ company.organization_number|default('')|e }}" class="form-control" required>
+    </div>
+  {% else %}
+    <p data-two-company-summary>{{ text_company_from_address|format(company_label)|e }}</p>
+  {% endif %}
+  {% for field in fields %}
+    <div class="mb-3">
+      <label for="input-two-{{ field.name|e }}" class="form-label">{{ field.label|e }} <span class="text-muted">({{ text_optional|e }})</span></label>
+      <input type="{{ field.type|e }}" name="two_{{ field.name|e }}" id="input-two-{{ field.name|e }}" value="" class="form-control" maxlength="255" data-two-optional-field>
+    </div>
+  {% endfor %}
+  <div id="two-intent-notice" role="status" aria-live="polite"></div>
 </form>
 <div class="text-end">
   <button type="button" id="button-two-confirm" class="btn btn-primary">{{ button_confirm|e }}</button>
 </div>
 <script type="text/javascript"><!--
+if (window.TwoCheckout) {
+    window.TwoCheckout.tileReady(document.getElementById('form-two'));
+}
+
 $('#button-two-confirm').on('click', function() {
+    if (window.TwoCheckout) {
+        // One confirm however often it is pressed, after pending company saves.
+        window.TwoCheckout.confirm(this, document.getElementById('form-two'));
+
+        return;
+    }
+
+    // The capture script did not load: place the order directly, once.
     var element = this;
+
+    if (element.disabled) {
+        return;
+    }
 
     $.ajax({
         url: 'index.php?route=extension/two/payment/two.confirm&language={{ language|e('url') }}',

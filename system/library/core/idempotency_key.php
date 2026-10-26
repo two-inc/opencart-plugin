@@ -53,6 +53,37 @@ final class IdempotencyKey
     }
 
     /**
+     * The order intent: one buyer's checkout session and the payload asked
+     * about. A retry of the same question repeats the key; a changed cart or
+     * company asks a new one. Never shared between buyers: with no session
+     * there is no key, and the caller sends nothing.
+     */
+    public static function orderIntent(string $sessionHash, string $payloadHash): string
+    {
+        return self::checked('intent_' . self::part($sessionHash) . '_' . self::part($payloadHash));
+    }
+
+    /**
+     * One mint of a sole-trader signup token ('delegation' or 'autofill').
+     * $keyBase names the buyer's enrolment attempt (soleTraderAttempt), so
+     * each click mints afresh and a retry of one click repeats its key.
+     */
+    public static function soleTraderMint(string $token, string $keyBase): string
+    {
+        if (!in_array($token, ['delegation', 'autofill'], true)) {
+            throw new \InvalidArgumentException('Unknown sole-trader token "' . $token . '".');
+        }
+
+        return self::checked('soletrader_' . $token . '_' . $keyBase);
+    }
+
+    /** The base of one buyer's enrolment attempt: the session's hash and the attempt's number in it. */
+    public static function soleTraderAttempt(string $sessionHash, int $attempt): string
+    {
+        return self::part($sessionHash) . '_' . max(1, $attempt);
+    }
+
+    /**
      * Order edit (PUT on the order): chained on the last accepted edit's key,
      * or the create key for the first edit, plus this payload's hash. Every
      * edit in a sequence gets its own key (A to B to A gives three), so Two
@@ -117,6 +148,17 @@ final class IdempotencyKey
         }
 
         return null;
+    }
+
+    /** The first 16 characters of a hex hash, which must be one. */
+    private static function part(string $hash): string
+    {
+        $hash = strtolower($hash);
+        if (preg_match('~^[0-9a-f]{16,}\z~', $hash) !== 1) {
+            throw new \InvalidArgumentException('An idempotency key part is a hex hash of at least 16 characters.');
+        }
+
+        return substr($hash, 0, 16);
     }
 
     private static function checked(string $key): string

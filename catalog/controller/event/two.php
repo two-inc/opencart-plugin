@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Opencart\Catalog\Controller\Extension\Two\Event;
 
+use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Opencart\OrderStatusEvent;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
@@ -55,11 +56,7 @@ class Two extends \Opencart\System\Engine\Controller
                     'refunds' => $services->orderRefunds($this->event),
                     'edit' => $services->orderEdit($this->event),
                     // The payload's identity leaves out the callback URLs, so an edit rebuilds without them.
-                    'rebuild' => static fn (array $record): ?array => $model->orderInput((int) $order['order_id'], [
-                        'company_name' => $record['company_name'] ?? '',
-                        'organization_number' => $record['organization_number'] ?? '',
-                        'country_code' => $record['country_code'] ?? '',
-                    ], []),
+                    'rebuild' => OrderFlow::rebuildFrom(static fn (array $company, array $fields): ?array => $model->orderInput((int) $order['order_id'], $company, [], $fields)),
                     'fulfil' => $services->settings->fulfilStatusIds(),
                     'cancel' => $services->settings->cancelStatusId(),
                     'refund' => $services->settings->refundStatusId(),

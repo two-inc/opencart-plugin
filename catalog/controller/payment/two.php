@@ -5,13 +5,21 @@ declare(strict_types=1);
 namespace Opencart\Catalog\Controller\Extension\Two\Payment;
 
 use Opencart\System\Library\Extension\Two\Core\Brand;
+use Opencart\System\Library\Extension\Two\Core\BuyerFields;
+use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
+use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
+use Opencart\System\Library\Extension\Two\Core\OrderRecords;
+use Opencart\System\Library\Extension\Two\Core\RateLimiter;
+use Opencart\System\Library\Extension\Two\Opencart\DbOrderLock;
+use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
- * Storefront adapter for the Two payment method: the tile with manual
- * company entry, placing the order (create the Two order, send the buyer to
+ * Storefront adapter for the Two payment method: the tile, the checkout
+ * capture's endpoints (company search, sole-trader signup tokens, the saved
+ * company per address role, the order intent), placing the order (create the Two order, send the buyer to
  * Two's hosted checkout), and the confirm and cancel callbacks Two sends the
  * buyer back to. The rules live in the core's OrderFlow.
  *
@@ -44,10 +52,30 @@ class Two extends \Opencart\System\Engine\Controller
     /** The named lock this request holds, released before every redirect (Response::redirect exits, so a finally never runs). */
     private ?string $lock = null;
 
-    /** The tile under the payment step: company fields and the confirm button. */
+    /** The address roles a company is captured for, and the tile's own. */
+    public const ROLES = ['payment', 'shipping', 'tile'];
+    private const SESSION_KEY = 'two_checkout';
+    /** How long the registry's per-country answers are kept in the session. */
+    private const CACHE_SECONDS = 3600;
+
+    /**
+     * The tile under the payment step: the company (searched here, or the
+     * one captured in the address form), the optional fields and the
+     * confirm button. Rendered once Two is the chosen method, so the order
+     * intent it asks never slows the method list.
+     */
     public function index(): string
     {
         $this->load->language(self::ROUTE);
+        $services = $this->services();
+        $inAddress = $services->settings->companySearchInAddressArea();
+        $captured = $this->companyFor($this->buyerRole(!$inAddress));
+        // A buyer on a saved address has no company field to search in (OpenCart
+        // shows it only for a new address), so the tile searches when the
+        // address forms captured nothing, keeping what the tile captured.
+        $inTile = !$inAddress || $captured === null;
+        $company = $inTile ? $this->companyFor('tile') : $captured;
+        $this->load->model(self::ROUTE);
         $this->load->model('localisation/country');
         $countries = [];
         foreach ($this->model_localisation_country->getCountries() as $country) {
@@ -55,18 +83,31 @@ class Two extends \Opencart\System\Engine\Controller
                 $countries[] = ['code' => (string) $country['iso_code_2'], 'name' => (string) $country['name']];
             }
         }
-        $address = $this->session->data['payment_address'] ?? $this->session->data['shipping_address'] ?? [];
+        $fields = [];
+        foreach ($services->settings->optionalFields() as $field) {
+            $fields[] = ['name' => $field, 'label' => $this->language->get('entry_' . $field), 'type' => $field === 'invoice_email' ? 'email' : 'text'];
+        }
+        $brand = Brand::default()->productName;
 
         return $this->load->view(self::ROUTE, [
             'language' => $this->config->get('config_language'),
+            'in_tile' => $inTile,
             'countries' => $countries,
-            'country' => (string) ($address['iso_code_2'] ?? ''),
-            'company_name' => (string) ($address['company'] ?? ''),
-            'brand' => Brand::default()->productName,
+            'country' => $company['country_code'] ?? $this->model_extension_two_payment_two->buyerCountry() ?? '',
+            'company' => $company,
+            'company_label' => $company === null ? '' : CompanyLookup::displayLabel($company['company_name'], $company['organization_number']),
+            'fields' => $fields,
+            'text_company_intro' => sprintf($this->language->get($inAddress ? 'text_company_missing' : 'text_company_intro'), $brand),
+            'text_company_from_address' => $this->language->get('text_company_from_address'),
+            'entry_company_name' => $this->language->get('entry_company_name'),
+            'entry_organization_number' => $this->language->get('entry_organization_number'),
+            'entry_country' => $this->language->get('entry_country'),
+            'text_optional' => $this->language->get('text_optional'),
+            'button_confirm' => $this->language->get('button_confirm'),
         ]);
     }
 
-    /** Places the order: creates the Two order and answers with Two's payment URL. */
+    /** Places the order: asks the intent again, creates the Two order and answers with Two's payment URL. */
     public function confirm(): void
     {
         $this->load->language(self::ROUTE);
@@ -79,41 +120,273 @@ class Two extends \Opencart\System\Engine\Controller
         } elseif (($this->session->data['payment_method']['code'] ?? '') !== 'two.two') {
             $json['error'] = $this->language->get('error_payment_method');
         }
-
+        $services = $this->services();
+        $fields = BuyerFields::fromPost($this->postedFields(), $services->settings->optionalFields());
+        if (!$json && $fields['refused'] !== []) {
+            $json['error'] = $this->fieldMessage($fields['refused']);
+        }
         if (!$json) {
-            $post = fn (string $key): string => trim(html_entity_decode((string) ($this->request->post[$key] ?? ''), ENT_QUOTES, 'UTF-8'));
-            $country = strtoupper($post('two_country'));
-            $company = [
-                'company_name' => $post('two_company_name'),
-                'organization_number' => $post('two_organization_number'),
-                'country_code' => preg_match('~^[A-Z]{2}\z~', $country) === 1 ? $country : '',
-            ];
-            $token = OrderFlow::newToken();
-            $urls = [
-                'merchant_confirmation_url' => $this->callbackUrl(OrderFlow::CALLBACK_CONFIRM, $orderId, $token, false),
-                'merchant_cancel_order_url' => $this->callbackUrl(OrderFlow::CALLBACK_CANCEL, $orderId, $token, false),
-                'merchant_edit_order_url' => '',
-                'merchant_order_verification_failed_url' => '',
-                'merchant_invoice_url' => '',
-                'merchant_shipping_document_url' => '',
-            ];
+            // The page may be stale: OpenCart keeps the chosen method through a currency or address change.
             $this->load->model(self::ROUTE);
-            $input = $this->model_extension_two_payment_two->orderInput($orderId, $company, $urls);
-            $result = $input === null
-                ? ['ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'reason' => 'The order could not be read.']
-                : $this->services()->orderFlow($this->event)->create($input['order'], $input['lines'], $input['totals'], $token, $input['context']);
-            if ($result['ok']) {
-                $json['redirect'] = $result['redirect'];
-            } else {
-                if ($result['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
-                    $this->note($orderId, $result['reason']);
-                }
-                $json['error'] = $this->buyerMessage($result['buyer']);
+            $facts = $this->model_extension_two_payment_two->checkoutFacts();
+            $stale = $services->availability->placementReason($facts);
+            if ($stale !== null) {
+                $this->log->write('Two: order ' . $orderId . ' not placed: ' . $stale['detail']);
+                $json['error'] = htmlspecialchars(sprintf($this->language->get('error_placement_' . $stale['reason']), Brand::default()->productName, strtoupper((string) $facts['currency'])), ENT_QUOTES, 'UTF-8');
             }
         }
 
-        $this->response->addHeader('Content-Type: application/json');
-        $this->response->setOutput((string) json_encode($json));
+        if (!$json) {
+            // One placement of an order at a time: a second press or a retry while
+            // the first is still talking to Two is refused, never run alongside it.
+            $placed = OrderFlow::exclusively(new DbOrderLock($this->db), $orderId, fn (): array => $this->place($orderId, $services, $fields['fields']));
+            $json = $placed['ok'] ? ['redirect' => $placed['redirect'] ?? ''] : ['error' => $placed['error'] ?? $this->buyerMessage($placed['buyer'] ?? [ErrorMapper::GENERIC])];
+        }
+
+        $this->json($json);
+    }
+
+    /**
+     * One placement, under the order's lock: the intent again, then the
+     * create. The buyer's notice comes back escaped.
+     *
+     * @param array<string, string> $fields the optional buyer fields
+     * @return array{ok: bool, redirect?: string, error?: string}
+     */
+    private function place(int $orderId, Services $services, array $fields): array
+    {
+        $company = $this->buyerCompany($services->settings->companySearchInAddressArea());
+        $token = OrderFlow::newToken();
+        $urls = [
+            'merchant_confirmation_url' => $this->callbackUrl(OrderFlow::CALLBACK_CONFIRM, $orderId, $token, false),
+            'merchant_cancel_order_url' => $this->callbackUrl(OrderFlow::CALLBACK_CANCEL, $orderId, $token, false),
+            'merchant_edit_order_url' => '',
+            'merchant_order_verification_failed_url' => '',
+            'merchant_invoice_url' => '',
+            'merchant_shipping_document_url' => '',
+        ];
+        $this->load->model(self::ROUTE);
+        $input = $this->model_extension_two_payment_two->orderInput($orderId, $company, $urls, $fields);
+        $flow = $services->orderFlow($this->event);
+        // Section 6.3: the intent is asked again at placement.
+        $intent = $input === null ? null : $flow->intent($input['order'], $input['lines'], $input['totals'], $this->sessionHash(), $input['context'] + ['merchant_short_name' => $this->merchantShortName($services)]);
+        $refusal = $intent === null ? null : OrderFlow::afterIntent($intent);
+        if ($intent !== null && $refusal !== null) {
+            // Section 6.3: only an approved intent lets the order be created.
+            if ($intent['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
+                $this->note($orderId, $intent['reason']);
+            }
+
+            return ['ok' => false, 'error' => $refusal === [OrderFlow::INTENT_DECLINED] ? $this->declinedNotice() : $this->buyerMessage($refusal)];
+        }
+        $result = $input === null
+            ? ['ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'reason' => 'The order could not be read.']
+            : $flow->create($input['order'], $input['lines'], $input['totals'], $token, $input['context']);
+        if ($result['ok']) {
+            return ['ok' => true, 'redirect' => $result['redirect']];
+        }
+        if ($result['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
+            $this->note($orderId, $result['reason']);
+        }
+
+        return ['ok' => false, 'error' => $this->buyerMessage($result['buyer'])];
+    }
+
+    /**
+     * The order intent for the session's order, asked from the tile once the
+     * company is known (never from the method list). Answers the outcome and
+     * the notice to show, if the brand shows one.
+     */
+    public function intent(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->guarded(true, 'intent')) {
+            return;
+        }
+        $limit = RateLimiter::sessionIntent(array_map('intval', (array) ($this->state()['intent_stamps'] ?? [])), time());
+        $this->remember('intent_stamps', $limit['stamps']);
+        if (!$limit['allowed']) {
+            $this->json(['outcome' => OrderFlow::UNDECIDED, 'notice' => htmlspecialchars($this->language->get('error_too_many'), ENT_QUOTES, 'UTF-8')]);
+
+            return;
+        }
+        $orderId = (int) ($this->session->data['order_id'] ?? 0);
+        $this->load->model('checkout/order');
+        $order = $orderId > 0 ? $this->model_checkout_order->getOrder($orderId) : [];
+        if (!$order || !$this->unplaced($order) || ($this->session->data['payment_method']['code'] ?? '') !== 'two.two') {
+            $this->json(['outcome' => OrderFlow::UNDECIDED, 'notice' => '']);
+
+            return;
+        }
+        $services = $this->services();
+        $this->load->model(self::ROUTE);
+        $input = $this->model_extension_two_payment_two->orderInput($orderId, $this->buyerCompany($services->settings->companySearchInAddressArea()), []);
+        if ($input === null) {
+            $this->json(['outcome' => OrderFlow::UNDECIDED, 'notice' => '']);
+
+            return;
+        }
+        $result = $services->orderFlow($this->event)->intent($input['order'], $input['lines'], $input['totals'], $this->sessionHash(), $input['context'] + ['merchant_short_name' => $this->merchantShortName($services)]);
+        $brand = Brand::default();
+        $notice = match (true) {
+            $result['outcome'] === OrderFlow::APPROVED && $brand->intentApprovedNoticeEnabled => htmlspecialchars($brand->intentApprovedNotice ?? sprintf($this->language->get('text_intent_approved'), $brand->productName), ENT_QUOTES, 'UTF-8'),
+            $result['outcome'] === OrderFlow::DECLINED && $brand->intentDeclinedNoticeEnabled => $this->declinedNotice(),
+            $result['buyer'] !== [] => $this->buyerMessage($result['buyer']),
+            default => '',
+        };
+        $this->json(['outcome' => $result['outcome'], 'notice' => $notice]);
+    }
+
+    /** The company search, relayed so the API key stays on the server. */
+    public function search(): void
+    {
+        if (!$this->guarded(false, 'search')) {
+            return;
+        }
+        $companies = $this->services()->companies->search((string) ($this->request->get['q'] ?? ''), (string) ($this->request->get['country'] ?? ''));
+        $this->json($companies === null ? ['error' => 'unavailable'] : ['items' => $companies]);
+    }
+
+    /** One company's organisation number and addresses, by its search result's lookup id. */
+    public function companyDetails(): void
+    {
+        if (!$this->guarded(false, 'companyDetails')) {
+            return;
+        }
+        $details = $this->services()->companies->details((string) ($this->request->get['lookup_id'] ?? ''));
+        $this->json($details ?? ['error' => 'unavailable']);
+    }
+
+    /** The countries the company search covers, kept in the session for an hour. */
+    public function countries(): void
+    {
+        if (!$this->guarded(false, 'countries')) {
+            return;
+        }
+        $cached = $this->state()['countries'] ?? null;
+        if (!is_array($cached) || ($cached['at'] ?? 0) < time() - self::CACHE_SECONDS) {
+            $countries = $this->services()->companies->supportedCountries();
+            $cached = $countries === null ? null : ['at' => time(), 'list' => $countries];
+            if ($cached !== null) {
+                $this->remember('countries', $cached);
+            }
+        }
+        $this->json(['countries' => $cached['list'] ?? null]);
+    }
+
+    /** Whether a buyer in a country may enrol as a sole trader; one country kept in the session. */
+    public function soleTrader(): void
+    {
+        if (!$this->guarded(false, 'soleTrader')) {
+            return;
+        }
+        $country = strtoupper(trim((string) ($this->request->get['country'] ?? '')));
+        $cached = $this->state()['sole_trader'] ?? null;
+        if (is_array($cached) && ($cached['country'] ?? '') === $country && ($cached['at'] ?? 0) >= time() - self::CACHE_SECONDS) {
+            $this->json(['available' => (bool) $cached['available']]);
+
+            return;
+        }
+        $available = $this->services()->companies->soleTraderAvailable($country);
+        if ($available !== null) {
+            // One slot, so a caller cannot grow the session one country at a time.
+            $this->remember('sole_trader', ['country' => $country, 'available' => $available, 'at' => time()]);
+        }
+        $this->json(['available' => $available]);
+    }
+
+    /** Mints the hosted sole-trader signup's tokens for this buyer's enrolment attempt. */
+    public function soleTraderTokens(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->guarded(true, 'soleTraderTokens')) {
+            return;
+        }
+        $country = strtoupper(trim((string) ($this->request->post['country'] ?? '')));
+        if (preg_match('~^[A-Z]{2}\z~', $country) !== 1) {
+            $this->json(['error' => $this->language->get('error_sole_trader')]);
+
+            return;
+        }
+        $attempt = (int) ($this->state()['sole_trader_attempt'] ?? 0) + 1;
+        $this->remember('sole_trader_attempt', $attempt);
+        $companies = $this->services()->companies;
+        $tokens = $companies->soleTraderTokens(IdempotencyKey::soleTraderAttempt($this->sessionHash(), $attempt));
+        $this->json($tokens === null
+            ? ['error' => $this->language->get('error_sole_trader')]
+            : $tokens + ['signup_url' => $companies->signupUrl(), 'api_base' => $companies->apiBaseUrl(), 'country' => $country]);
+    }
+
+    /**
+     * Keeps the company captured for one address role (or the tile) in the
+     * session, each role on its own. An empty name clears the role.
+     */
+    public function saveCompany(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->guarded(true, 'saveCompany')) {
+            return;
+        }
+        $post = fn (string $key): string => trim(html_entity_decode((string) ($this->request->post[$key] ?? ''), ENT_QUOTES, 'UTF-8'));
+        $role = $post('role');
+        $company = [
+            'company_name' => $post('company_name'),
+            'organization_number' => $post('organization_number'),
+            'country_code' => strtoupper($post('country')),
+            'source' => $post('source'),
+        ];
+        $valid = in_array($role, self::ROLES, true)
+            && in_array($company['source'], ['search', 'manual', 'sole_trader'], true)
+            && preg_match('~^[A-Z]{2}\z~', $company['country_code']) === 1
+            && preg_match('~[\x00-\x1F\x7F]~', $company['company_name'] . $company['organization_number']) !== 1;
+        foreach (OrderRecords::MAX_LENGTHS as $field => $max) {
+            $valid = $valid && mb_strlen($company[$field]) <= $max;
+        }
+        if (!$valid) {
+            $this->json(['ok' => false]);
+
+            return;
+        }
+        $companies = $this->state()['companies'] ?? [];
+        if ($company['company_name'] === '') {
+            unset($companies[$role]);
+        } else {
+            $companies[$role] = $company;
+        }
+        $this->remember('companies', $companies);
+        $this->json(['ok' => true]);
+    }
+
+    /**
+     * The settings the checkout script reads, for the checkout page event.
+     *
+     * @return array<string, mixed>
+     */
+    public function scriptConfig(): array
+    {
+        $this->load->language(self::ROUTE);
+        $services = $this->services();
+        $this->load->model('localisation/country');
+        $isoById = [];
+        foreach ($this->model_localisation_country->getCountries() as $country) {
+            $isoById[(string) $country['country_id']] = (string) $country['iso_code_2'];
+        }
+        $link = fn (string $action): string => str_replace('&amp;', '&', $this->url->link(self::ROUTE . '.' . $action, 'language=' . $this->config->get('config_language')));
+        $brand = Brand::default()->productName;
+        $copy = [];
+        foreach (['search_label', 'search_hint', 'searching', 'no_matches', 'search_unavailable', 'select_country', 'country_not_covered', 'manual_entry', 'back_to_search', 'sole_trader_entry', 'sole_trader_error', 'sole_trader_popup_blocked', 'change_company', 'organization_number', 'checking', 'selected', 'number_missing', 'settle_timeout', 'confirm_failed'] as $key) {
+            $copy[$key] = sprintf($this->language->get('js_' . $key), $brand, CompanyLookup::MIN_TERM_LENGTH);
+        }
+
+        return [
+            'token' => $this->csrfToken(),
+            'in_address' => $services->settings->companySearchInAddressArea(),
+            'urls' => ['search' => $link('search'), 'countries' => $link('countries'), 'sole_trader' => $link('soleTrader'), 'sole_trader_tokens' => $link('soleTraderTokens'), 'save_company' => $link('saveCompany'), 'intent' => $link('intent'), 'company_details' => $link('companyDetails'), 'confirm' => $link('confirm')],
+            'countries' => $isoById,
+            'companies' => $this->state()['companies'] ?? (object) [],
+            'min_length' => CompanyLookup::MIN_TERM_LENGTH,
+            'i18n' => $copy,
+        ];
     }
 
     /** Two sent the buyer back after verifying: confirm, then the shop's success page. */
@@ -152,7 +425,7 @@ class Two extends \Opencart\System\Engine\Controller
         // cannot go stale under a concurrent hit (the bounce page's link and its
         // refresh). A guarded UPDATE cannot do this: OpenCart's addHistory must
         // see the old status itself, since the order mail and stock keep off it.
-        $lock = 'two_order_' . substr(sha1(DB_DATABASE . DB_PREFIX), 0, 12) . '_' . $orderId;
+        $lock = DbOrderLock::name($orderId);
         $held = (int) ($this->db->query("SELECT GET_LOCK('" . $lock . "', " . self::LOCK_SECONDS . ") AS `held`")->row['held'] ?? 0) === 1;
         if (!$held) {
             // Another hit on this order is still talking to Two and may yet place it.
@@ -211,11 +484,7 @@ class Two extends \Opencart\System\Engine\Controller
         } else {
             $this->load->model(self::ROUTE);
             $model = $this->model_extension_two_payment_two;
-            $rebuild = static fn (array $record): ?array => $model->orderInput($orderId, [
-                'company_name' => $record['company_name'] ?? '',
-                'organization_number' => $record['organization_number'] ?? '',
-                'country_code' => $record['country_code'] ?? '',
-            ], []);
+            $rebuild = OrderFlow::rebuildFrom(static fn (array $company, array $fields): ?array => $model->orderInput($orderId, $company, [], $fields));
             $result = $flow->confirm($orderId, $token, $rebuild, $model->orderRows($orderId));
         }
 
@@ -326,6 +595,172 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         return htmlspecialchars(implode(' ', array_keys($sentences)), ENT_QUOTES, 'UTF-8');
+    }
+
+    /** The role whose company is the buyer: the tile's own, else the billing address when the shop collects one, else the shipping address. */
+    private function buyerRole(bool $inTile): string
+    {
+        return $inTile ? 'tile' : ($this->config->get('config_checkout_payment_address') ? 'payment' : 'shipping');
+    }
+
+    /**
+     * The company the order is placed for: what the buyer captured in the
+     * address forms, else what the tile posts.
+     *
+     * @return array{company_name: string, organization_number: string, country_code: string}
+     */
+    private function buyerCompany(bool $inAddress): array
+    {
+        $captured = $inAddress ? $this->companyFor($this->buyerRole(false)) : null;
+        if ($captured !== null) {
+            $company = $captured;
+        } else {
+            $post = fn (string $key): string => trim(html_entity_decode((string) ($this->request->post[$key] ?? ''), ENT_QUOTES, 'UTF-8'));
+            $company = ['company_name' => $post('two_company_name'), 'organization_number' => $post('two_organization_number'), 'country_code' => strtoupper($post('two_country'))];
+        }
+        $country = $company['country_code'];
+
+        return [
+            'company_name' => $company['company_name'],
+            'organization_number' => $company['organization_number'],
+            'country_code' => preg_match('~^[A-Z]{2}\z~', $country) === 1 ? $country : '',
+        ];
+    }
+
+    /** @return array{company_name: string, organization_number: string, country_code: string, source: string}|null */
+    private function companyFor(string $role): ?array
+    {
+        $company = $this->state()['companies'][$role] ?? null;
+
+        return is_array($company) ? $company : null;
+    }
+
+    /** @return array<string, mixed> the posted optional fields, by field name */
+    private function postedFields(): array
+    {
+        $fields = [];
+        foreach (BuyerFields::FIELDS as $field) {
+            $fields[$field] = html_entity_decode((string) ($this->request->post['two_' . $field] ?? ''), ENT_QUOTES, 'UTF-8');
+        }
+
+        return $fields;
+    }
+
+    /** @param list<string> $refused */
+    private function fieldMessage(array $refused): string
+    {
+        $sentences = [];
+        foreach ($refused as $field) {
+            $sentences[] = $field === 'invoice_email'
+                ? sprintf($this->language->get(ErrorMapper::INVOICE_EMAILS), Brand::default()->productName)
+                : sprintf($this->language->get('error_field_too_long'), $this->language->get('entry_' . $field), BuyerFields::MAX_LENGTH);
+        }
+
+        return htmlspecialchars(implode(' ', $sentences), ENT_QUOTES, 'UTF-8');
+    }
+
+    private function declinedNotice(): string
+    {
+        $brand = Brand::default();
+
+        return htmlspecialchars($brand->intentDeclinedNotice ?? sprintf($this->language->get('text_intent_declined'), $brand->productName), ENT_QUOTES, 'UTF-8');
+    }
+
+    private function merchantShortName(Services $services): string
+    {
+        $record = $services->records->record();
+
+        return is_string($record['short_name'] ?? null) ? $record['short_name'] : '';
+    }
+
+    /**
+     * Names the buyer's checkout session for idempotency keys: a hash, never
+     * the session id. Empty without a session, so nothing keyed on it is sent.
+     */
+    private function sessionHash(): string
+    {
+        $id = $this->session->getId();
+
+        return $id === '' ? '' : hash('sha256', 'two-checkout|' . $id);
+    }
+
+    /** The checkout's token against requests from other sites, one per session. */
+    private function csrfToken(): string
+    {
+        $token = $this->state()['token'] ?? '';
+        if (!is_string($token) || strlen($token) !== 32) {
+            $token = bin2hex(random_bytes(16));
+            $this->remember('token', $token);
+        }
+
+        return $token;
+    }
+
+    /**
+     * Whether the request carries this session's token (and, for a write, is
+     * a POST) and is within the caller's rate limit for the action
+     * (RateLimiter); answers the refusal itself, a 429 for the limit.
+     */
+    private function guarded(bool $write, string $action): bool
+    {
+        $sent = (string) (($write ? $this->request->post : $this->request->get)['two_token'] ?? '');
+        $token = $this->state()['token'] ?? '';
+        if (($write && ($this->request->server['REQUEST_METHOD'] ?? '') !== 'POST') || !is_string($token) || $token === '' || !hash_equals($token, $sent)) {
+            $this->json(['error' => 'forbidden']);
+
+            return false;
+        }
+        // The merchant's switch removes the per-caller ceiling only; the per-session intent limit stays.
+        if (!$this->services()->settings->rateLimitDisabled() && !(new DbRateLimits($this->db))->allow($action, $this->caller(), time())) {
+            $this->log->write('Two: rate limit exceeded on ' . $action . ' (more than ' . RateLimiter::CALLER_LIMITS[$action][0] . ' requests in ' . RateLimiter::CALLER_LIMITS[$action][1] . 's from one caller)');
+            $this->response->addHeader(($this->request->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1') . ' 429 Too Many Requests');
+            $this->json(['error' => 'Too many requests']);
+
+            return false;
+        }
+
+        return true;
+    }
+
+
+    /** @return array<string, mixed> */
+    private function state(): array
+    {
+        $state = $this->session->data[self::SESSION_KEY] ?? [];
+
+        return is_array($state) ? $state : [];
+    }
+
+    private function remember(string $key, mixed $value): void
+    {
+        $state = $this->state();
+        $state[$key] = $value;
+        $this->session->data[self::SESSION_KEY] = $state;
+    }
+
+    /** @param array<string, mixed> $json */
+    private function json(array $json): void
+    {
+        $this->response->addHeader('Content-Type: application/json');
+        $this->response->addHeader('Cache-Control: no-store');
+        $this->response->setOutput((string) json_encode($json));
+    }
+
+    /**
+     * The caller the rate limits count: the socket address, read from the
+     * server's own environment, because OpenCart's startup overwrites
+     * REMOTE_ADDR with the client-sent Client-IP header. Through the
+     * merchant's trusted proxies, the nearest forwarded hop that is not one.
+     */
+    private function caller(): string
+    {
+        $socket = getenv('REMOTE_ADDR');
+        if (!is_string($socket) || $socket === '') {
+            // No server environment: REMOTE_ADDR is only the socket when no Client-IP header replaced it.
+            $socket = isset($this->request->server['HTTP_CLIENT_IP']) ? '' : (string) ($this->request->server['REMOTE_ADDR'] ?? '');
+        }
+
+        return RateLimiter::callerIdentity($socket, (string) ($this->request->server['HTTP_X_FORWARDED_FOR'] ?? ''), $this->services()->settings->trustedProxies());
     }
 
     private function services(): Services

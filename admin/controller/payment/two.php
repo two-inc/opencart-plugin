@@ -10,9 +10,11 @@ use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\RefundRecords;
+use Opencart\System\Library\Extension\Two\Core\RateLimiter;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
+use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\DbRefundRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
@@ -43,6 +45,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Engine\Event $event
  * @property-read \Opencart\Admin\Model\Localisation\Language $model_localisation_language
  * @property-read \Opencart\Admin\Model\Localisation\OrderStatus $model_localisation_order_status
+ * @property-read \Opencart\Admin\Model\Localisation\Currency $model_localisation_currency
  */
 class Two extends \Opencart\System\Engine\Controller
 {
@@ -104,6 +107,22 @@ class Two extends \Opencart\System\Engine\Controller
             $data['titles'][$language['language_id']] = $settings->title((int) $language['language_id']);
         }
 
+        // Checkout fields: the placement switch, the optional fields and the minimum order.
+        $data['company_search_in_address'] = $settings->companySearchInAddressArea();
+        $data['optional_fields'] = [];
+        foreach (SettingsProvider::OPTIONAL_FIELDS as $field => $key) {
+            $data['optional_fields'][] = ['key' => $key, 'on' => in_array($field, $settings->optionalFields(), true), 'label' => $this->language->get('entry_' . $key), 'help' => sprintf($this->language->get('help_' . $key), $brand)];
+        }
+        $data['min_order_amount'] = trim((string) $settings->store()->get('min_order_amount'));
+        $data['min_order_basis'] = $settings->merchantMinimumOrderBasis() ?? '';
+        $data['trusted_proxies'] = trim((string) $settings->store()->get('trusted_proxies'));
+        $data['disable_rate_limit'] = $settings->rateLimitDisabled();
+        $shopCurrency = (string) $this->config->get('config_currency');
+        $data['entry_min_order_amount'] = sprintf($this->language->get('entry_min_order_amount'), $shopCurrency);
+
+        // The health row (section 18): why Two is not offered, or the constraints that may still withhold it.
+        $data['health'] = $this->healthRow($services, $shopCurrency);
+
         // Order management.
         $this->load->model('localisation/order_status');
         $data['order_statuses'] = $this->model_localisation_order_status->getOrderStatuses();
@@ -114,7 +133,7 @@ class Two extends \Opencart\System\Engine\Controller
         $data['cancel_status_id'] = $settings->cancelStatusId();
         $data['refund_status_id'] = $settings->refundStatusId();
 
-        foreach (['help_environment', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro', 'text_default_fulfil', 'text_default_cancel', 'text_default_refund'] as $key) {
+        foreach (['help_company_search_in_address', 'help_environment', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro', 'text_default_fulfil', 'text_default_cancel', 'text_default_refund'] as $key) {
             $data[$key] = sprintf($this->language->get($key), $brand);
         }
         $data['brand_name'] = $brand;
@@ -162,6 +181,11 @@ class Two extends \Opencart\System\Engine\Controller
 
         foreach ($result['errors'] as $field => $code) {
             $json['error'][$field] = $this->language->get('error_' . $code);
+        }
+        if (isset($result['errors']['trusted_proxies'])) {
+            // Name the first entry that is not an IP or a range, as the reference plugin does.
+            $bad = array_values(array_filter(RateLimiter::parseProxies(self::raw($post[self::CODE . '_trusted_proxies'] ?? '')), static fn (string $entry): bool => !RateLimiter::isValidProxyEntry($entry)));
+            $json['error']['trusted_proxies'] = htmlspecialchars(sprintf($this->language->get('error_proxy_invalid'), $bad[0] ?? ''), ENT_QUOTES, 'UTF-8');
         }
         $key = $this->credentialsMessage($result);
         if ($key !== null && $key['refused']) {
@@ -248,6 +272,8 @@ class Two extends \Opencart\System\Engine\Controller
         $this->load->model('setting/event');
         $this->model_setting_event->deleteEventByCode(Services::EVENT_CODE);
         $this->model_setting_event->addEvent(['code' => Services::EVENT_CODE, 'description' => Services::EVENT_DESCRIPTION, 'trigger' => Services::EVENT_TRIGGER, 'action' => Services::EVENT_ACTION, 'status' => true, 'sort_order' => 0]);
+        $this->model_setting_event->deleteEventByCode(Services::CHECKOUT_EVENT_CODE);
+        $this->model_setting_event->addEvent(['code' => Services::CHECKOUT_EVENT_CODE, 'description' => Services::CHECKOUT_EVENT_DESCRIPTION, 'trigger' => Services::CHECKOUT_EVENT_TRIGGER, 'action' => Services::CHECKOUT_EVENT_ACTION, 'status' => true, 'sort_order' => 0]);
 
         // The order-scoped table. Kept on uninstall: it holds the Two order ids of placed orders.
         DbOrderRecords::install(function (string $sql): array {
@@ -255,6 +281,8 @@ class Two extends \Opencart\System\Engine\Controller
 
             return is_object($result) ? $result->rows : [];
         }, DB_PREFIX);
+        // The checkout relays' per-caller rate-limit counts.
+        $this->db->query(DbRateLimits::createTableSql(DB_PREFIX));
         DbRefundRecords::install(function (string $sql): array {
             $result = $this->db->query($sql);
 
@@ -272,6 +300,7 @@ class Two extends \Opencart\System\Engine\Controller
 
         $this->load->model('setting/event');
         $this->model_setting_event->deleteEventByCode(Services::EVENT_CODE);
+        $this->model_setting_event->deleteEventByCode(Services::CHECKOUT_EVENT_CODE);
     }
 
     /**
@@ -570,13 +599,13 @@ class Two extends \Opencart\System\Engine\Controller
      * decoded here and escaped again when rendered.
      *
      * @param array<string, mixed> $post
-     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string}
+     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string}
      */
     private function submitted(array $post): array
     {
         $field = static fn (string $key): mixed => $post[self::CODE . '_' . $key] ?? null;
         $submitted = [];
-        foreach (['api_key', 'environment', 'cancel_status_id', 'refund_status_id'] as $key) {
+        foreach (array_merge(['api_key', 'environment', 'cancel_status_id', 'refund_status_id', 'min_order_amount', 'min_order_basis', 'trusted_proxies'], SettingsSave::SWITCHES) as $key) {
             if (is_scalar($field($key))) {
                 $submitted[$key] = self::raw($field($key));
             }
@@ -610,6 +639,37 @@ class Two extends \Opencart\System\Engine\Controller
         $this->load->model('localisation/order_status');
 
         return array_map(static fn (array $status): int => (int) $status['order_status_id'], $this->model_localisation_order_status->getOrderStatuses());
+    }
+
+    /**
+     * The health row's sentence: "Not shown at checkout" and the first
+     * reason that holds for every cart, or "Shown at checkout" and the
+     * per-cart constraints.
+     *
+     * @return array{ok: bool, text: string}
+     */
+    private function healthRow(Services $services, string $shopCurrency): array
+    {
+        $this->load->model('localisation/currency');
+        $currencies = array_values(array_map(static fn (array $row): string => (string) $row['code'], array_filter($this->model_localisation_currency->getCurrencies(), static fn (array $row): bool => (bool) $row['status'])));
+        $health = $services->availability->health((bool) $this->config->get(self::CODE . '_status'), $shopCurrency, $currencies);
+        $brand = Brand::default();
+        if (!$health['shown']) {
+            return ['ok' => false, 'text' => $this->language->get('text_health_hidden') . ' - ' . sprintf($this->language->get('text_withheld_' . $health['reason']), $brand->providerFullName, $shopCurrency)];
+        }
+        $clauses = [];
+        $floors = array_map(fn (array $floor): string => sprintf($this->language->get('text_health_floor'), number_format($floor['amount'], 2, '.', ''), $floor['currency'], $this->language->get('text_basis_' . $floor['basis'])), $health['floors']);
+        if ($floors !== []) {
+            $clauses[] = sprintf($this->language->get('text_health_below'), implode(' ' . $this->language->get('text_or') . ' ', $floors));
+        }
+        if ($health['buyer_countries'] !== []) {
+            $clauses[] = sprintf($this->language->get('text_health_countries'), implode(', ', $health['buyer_countries']));
+        }
+        if ($health['refused_currencies'] !== []) {
+            $clauses[] = sprintf($this->language->get('text_health_currencies'), implode(', ', $health['refused_currencies']));
+        }
+
+        return ['ok' => true, 'text' => $this->language->get('text_health_shown') . ($clauses === [] ? '' : ' - ' . implode('; ', $clauses))];
     }
 
     /** The merchant-facing sentence for a verdict, empty for ok. */

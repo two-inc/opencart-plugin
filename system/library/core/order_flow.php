@@ -33,6 +33,23 @@ final class OrderFlow
     public const CHANGED = 'changed';
     public const UNAUTHORISED = 'unauthorised';
 
+    public const APPROVED = 'approved';
+    public const DECLINED = 'declined';
+    /** The intent could not be asked (no answer, an error, an answer without a decision). */
+    public const UNDECIDED = 'undecided';
+
+    /** The buyer's sentence when another placement of the same order is still running. */
+    public const IN_PROGRESS = 'error_order_in_progress';
+
+    /** The buyer's sentences when placement is refused on the intent (language keys). */
+    public const INTENT_DECLINED = 'text_intent_declined';
+    public const INTENT_CONNECTION = 'error_intent_connection';
+    public const INTENT_UNAVAILABLE = 'error_intent_unavailable';
+    public const INTENT_UNPROCESSABLE = 'error_intent_unprocessable';
+
+    /** What the order intent asks about: the create payload without what only an order needs. */
+    public const INTENT_KEYS = ['gross_amount', 'net_amount', 'tax_amount', 'discount_amount', 'currency', 'invoice_type', 'buyer', 'billing_address', 'shipping_address', 'line_items'];
+
     public const CALLBACK_CONFIRM = 'confirmation';
     public const CALLBACK_CANCEL = 'cancel';
 
@@ -109,6 +126,7 @@ final class OrderFlow
             'company_name' => trim((string) $company['company_name']),
             'organization_number' => trim((string) $company['organization_number']),
             'country_code' => trim((string) $company['country_code']),
+            'buyer_fields' => BuyerFields::encode(is_array($order['buyer_fields'] ?? null) ? $order['buyer_fields'] : []),
         ];
         $this->records->put($orderId, $stored);
         $record = $this->records->get($orderId) ?? [];
@@ -305,12 +323,147 @@ final class OrderFlow
      * @param array<string, mixed>       $context
      * @return array<string, mixed>
      */
-    private function payload(array $order, array $lines, array $totals, array $context, string $trigger): array
+    private function payload(array $order, array $lines, array $totals, array $context, string $trigger, string $requestType = Postprocessing::ORDER_CREATE): array
     {
         $payload = $this->builder->build($order, $lines, $totals);
         $failures = OrderBuilder::shopMatchFailures($payload, $order);
+        $intent = $requestType === Postprocessing::ORDER_INTENT;
+        $payload = $intent ? self::intentPayload($payload, $context) : $payload;
 
-        return $this->postprocessing->apply(Postprocessing::ORDER_CREATE, $trigger, '/v1/order', $payload, $context + ['order_id' => (int) $order['order_id']], $failures);
+        return $this->postprocessing->apply($requestType, $trigger, $intent ? '/v1/order_intent' : '/v1/order', $payload, $context + ['order_id' => (int) $order['order_id']], $failures);
+    }
+
+    /**
+     * The create payload cut to what the order intent asks about.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $context
+     * @return array<string, mixed>
+     */
+    private static function intentPayload(array $payload, array $context): array
+    {
+        $payload = array_intersect_key($payload, array_flip(self::INTENT_KEYS));
+        $shortName = $context['merchant_short_name'] ?? null;
+
+        return is_string($shortName) && $shortName !== '' ? $payload + ['merchant_short_name' => $shortName] : $payload;
+    }
+
+    /**
+     * Runs one placement of an order while holding its lock. A second
+     * placement of the same order never runs alongside the first: it is
+     * refused at once with IN_PROGRESS, and the buyer is told the order is
+     * still being placed. Once the first has finished, a new placement runs
+     * as a re-create (the earlier Two order is cancelled first).
+     *
+     * @template T of array<string, mixed>
+     * @param \Closure(): T $place
+     * @return T|array{ok: false, buyer: list<string>, reason: string}
+     */
+    public static function exclusively(OrderLock $lock, int $orderId, \Closure $place): array
+    {
+        if (!$lock->acquire($orderId)) {
+            return ['ok' => false, 'buyer' => [self::IN_PROGRESS], 'reason' => 'Another placement of this order is still running.'];
+        }
+        try {
+            return $place();
+        } finally {
+            $lock->release($orderId);
+        }
+    }
+
+    /**
+     * The rebuild of a placed order from its record, for the confirm and the
+     * edit sync alike: the company and the optional buyer fields as stored
+     * with the order, so a rebuild hashes to what Two was sent. $orderInput
+     * maps the shop order with that company and those fields, without
+     * callback URLs (the payload's identity leaves them out).
+     *
+     * @param \Closure(array{company_name: string, organization_number: string, country_code: string}, array<string, string>): (array<string, mixed>|null) $orderInput
+     * @return \Closure(array<string, string>): (array<string, mixed>|null)
+     */
+    public static function rebuildFrom(\Closure $orderInput): \Closure
+    {
+        return static fn (array $record): ?array => $orderInput([
+            'company_name' => $record['company_name'] ?? '',
+            'organization_number' => $record['organization_number'] ?? '',
+            'country_code' => $record['country_code'] ?? '',
+        ], BuyerFields::decode($record['buyer_fields'] ?? ''));
+    }
+
+    /**
+     * Whether placement goes on after the intent (section 6.3): only an
+     * approval lets the order be created. Anything else (a decline, no
+     * answer, an error, an answer without a decision, a refused build)
+     * refuses it, with the buyer's sentences; null to go on.
+     *
+     * @param array{outcome: string, reason: string, buyer: list<string>} $intent
+     * @return list<string>|null never empty
+     */
+    public static function afterIntent(array $intent): ?array
+    {
+        if ($intent['outcome'] === self::APPROVED) {
+            return null;
+        }
+        if ($intent['outcome'] === self::DECLINED) {
+            return [self::INTENT_DECLINED];
+        }
+
+        return $intent['buyer'] === [] ? [self::INTENT_UNPROCESSABLE] : $intent['buyer'];
+    }
+
+    /**
+     * Asks Two whether it would take this order (Build Guide section 6.3),
+     * built server-side from the shop's stored order by the same builder as
+     * the create, through the hook as `order_intent`. An outage or an error
+     * is UNDECIDED, with the buyer's sentence for its cause; afterIntent says
+     * what placement does with each outcome.
+     *
+     * $sessionHash names the buyer's checkout session (a hex hash, never the
+     * session id itself); without one nothing is sent, since the key must
+     * never be shared between buyers.
+     *
+     * @param array<string, mixed>       $order
+     * @param list<array<string, mixed>> $lines
+     * @param list<array<string, mixed>> $totals
+     * @param array<string, mixed>       $context
+     * @return array{outcome: string, reason: string, buyer: list<string>}
+     */
+    public function intent(array $order, array $lines, array $totals, string $sessionHash, array $context = []): array
+    {
+        $orderId = (int) $order['order_id'];
+        $company = is_array($order['company'] ?? null) ? $order['company'] : [];
+        foreach (['company_name', 'organization_number', 'country_code'] as $field) {
+            if (trim((string) ($company[$field] ?? '')) === '') {
+                return ['outcome' => self::REFUSED, 'reason' => 'No company was entered.', 'buyer' => [ErrorMapper::COMPANY_REQUIRED]];
+            }
+        }
+        if (preg_match('~^[0-9a-f]{16,}\z~', $sessionHash) !== 1) {
+            return ['outcome' => self::UNDECIDED, 'reason' => 'Order intent not sent: no checkout session.', 'buyer' => [self::INTENT_UNPROCESSABLE]];
+        }
+        try {
+            $payload = $this->payload($order, $lines, $totals, $context, 'checkout', Postprocessing::ORDER_INTENT);
+        } catch (OrderRefused $refused) {
+            $this->logger->error('Order ' . $orderId . ': order intent not sent: ' . $refused->detail);
+
+            return ['outcome' => self::REFUSED, 'reason' => 'Order intent not sent: ' . $refused->detail, 'buyer' => [ErrorMapper::GENERIC]];
+        }
+
+        $response = $this->client->request('POST', '/v1/order_intent', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderIntent($sessionHash, self::payloadHash($payload))));
+        $body = $response->json();
+        if ($response->reachedTwo() && $response->status < 300 && is_bool($body['approved'] ?? null)) {
+            return $body['approved']
+                ? ['outcome' => self::APPROVED, 'reason' => 'Two approved the order intent.', 'buyer' => []]
+                : ['outcome' => self::DECLINED, 'reason' => 'Two declined the order intent.', 'buyer' => []];
+        }
+        $reason = $response->reachedTwo() && $response->status < 300 ? 'Two answered the order intent without a decision (HTTP ' . $response->status . ').' : 'Order intent not answered: ' . $this->errors->reason($response);
+        $this->logger->error('Order ' . $orderId . ': ' . $reason);
+        $buyer = match (true) {
+            !$response->reachedTwo() => self::INTENT_CONNECTION,
+            $response->status >= 500 => self::INTENT_UNAVAILABLE,
+            default => self::INTENT_UNPROCESSABLE,
+        };
+
+        return ['outcome' => self::UNDECIDED, 'reason' => $reason, 'buyer' => [$buyer]];
     }
 
     /**
