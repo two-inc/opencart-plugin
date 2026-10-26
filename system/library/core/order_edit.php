@@ -76,11 +76,15 @@ final class OrderEdit
         // An edit whose outcome is unknown cleared payload_hash: whatever the rows are now, even back as
         // they were, Two may hold something else, so the order is always sent.
         $unknown = ($record['payload_hash'] ?? '') === '';
-        if ($stored === 'CANCELLED' || (!$unknown && (hash_equals($record['rows_hash'], $rowsHash) || hash_equals($record['edit_refused_hash'] ?? '', $rowsHash)))) {
+        if ($stored === 'CANCELLED') {
             return null;
         }
         if (in_array($stored, OrderLifecycle::FULFILLED_STATES, true)) {
-            return $this->afterFulfilment($orderId, $twoOrderId, $rowsHash);
+            // Noted once for these rows: nothing is sent after Two has invoiced, whatever the edit's outcome.
+            return hash_equals($record['rows_hash'], $rowsHash) ? null : $this->afterFulfilment($orderId, $twoOrderId, $rowsHash);
+        }
+        if (!$unknown && (hash_equals($record['rows_hash'], $rowsHash) || hash_equals($record['edit_refused_hash'] ?? '', $rowsHash))) {
+            return null;
         }
 
         $state = $this->flow->readState($orderId, $twoOrderId);
@@ -150,7 +154,7 @@ final class OrderEdit
     {
         $this->records->put($orderId, ['rows_hash' => $rowsHash]);
 
-        return $this->refused($orderId, 'The order was edited after Two invoiced all or part of order ' . $twoOrderId . ', so the change was not sent to Two. Two invoices the order as it was; refund any difference from the Two tab.');
+        return $this->refused($orderId, 'Two has invoiced all or part of order ' . $twoOrderId . ', so this order\'s edit was not sent to Two. Two invoices the order as it holds it; refund any difference from the Two tab.');
     }
 
     /** @return array{outcome: string, reason: string} */

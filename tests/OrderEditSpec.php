@@ -31,6 +31,7 @@ final class OrderEditSpec
         self::testSync();
         self::testKeyChain();
         self::testSequences();
+        self::testFulfilledNoteOnce();
     }
 
     private static function testSync(): void
@@ -151,6 +152,28 @@ final class OrderEditSpec
             TinyAssert::same(OrderLifecycle::rowsHash(self::rows($accepted)), $records->rows[42]['rows_hash'], $d . ': the rows Two last accepted');
             TinyAssert::same(count(array_filter($outcomes)), count($puts), $d . ': a note only for an edit sent');
             TinyAssert::same($records->rows[42]['edit_refused_hash'] ?? '', in_array($description, $refusedKept, true) ? OrderLifecycle::rowsHash(self::rows(3)) : '', $d . ': a refused rows hash only for a refusal of the edit itself');
+        }
+    }
+
+    /**
+     * Fulfilled in the Two merchant portal while an edit's outcome was
+     * unknown: each save notes it at most once per rows hash, and nothing is
+     * sent. Each case is the saves (Widgets each time) and the notes written.
+     */
+    private static function testFulfilledNoteOnce(): void
+    {
+        $cases = [
+            [[3, 3, 3], 1, 'the same rows saved three times: one note'],
+            [[3, 3, 4], 2, 'another edit after the note: noted again, once'],
+        ];
+        foreach ($cases as [$saves, $notes, $description]) {
+            [$edit, $transport, $records] = self::edit([], 'FULFILLED');
+            $records->rows[42]['payload_hash'] = '';
+            $written = 0;
+            foreach ($saves as $quantity) {
+                $written += $edit->sync(42, self::rows($quantity), static fn (array $record): array => self::input($quantity)) === null ? 0 : 1;
+            }
+            TinyAssert::same([$notes, []], [$written, $transport->calls], 'fulfilled with an unknown edit: ' . $description);
         }
     }
 

@@ -68,7 +68,7 @@ final class OrderStatusEventSpec
             ['status' => 3, 'stored' => 'CONFIRMED', 'edited' => true, 'responses' => [new HttpResponse(200, '{"state":"CONFIRMED","status":"APPROVED"}')],
                 'calls' => [$read], 'notes' => ['3|The edit to this order was not sent to Two: the order can no longer be read.', '3|Two order ' . self::ID . ' not fulfilled: the order was edited after it was placed with Two. Two still holds the order as placed.'], 'description' => 'an edit that cannot be sent is noted, and the fulfil then refuses'],
             ['status' => 2, 'stored' => 'FULFILLED', 'edited' => true, 'responses' => [],
-                'calls' => [], 'notes' => ['2|The order was edited after Two invoiced all or part of order ' . self::ID . ', so the change was not sent to Two. Two invoices the order as it was; refund any difference from the Two tab.'], 'description' => 'an edit after fulfilment is refused with a note, even at an unmapped status'],
+                'calls' => [], 'notes' => ['2|Two has invoiced all or part of order ' . self::ID . ', so this order\'s edit was not sent to Two. Two invoices the order as it holds it; refund any difference from the Two tab.'], 'description' => 'an edit after fulfilment is refused with a note, even at an unmapped status'],
         ];
         foreach ($cases as $case) {
             $shop = self::shop('two.two', $case['status'], $case['stored'], $case['responses'], 7, refundStatus: 11, edited: $case['edited']);
