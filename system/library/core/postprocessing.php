@@ -54,7 +54,7 @@ final class Postprocessing
      *
      * @param array<string, mixed> $payload           the plugin's own payload
      * @param array<string, mixed> $context           platform objects and request facts; the v1 keys are added here
-     * @param list<string>|null    $shopMatchFailures what the default handler refuses, worked out on $payload; null for a request with no shop-match checks
+     * @param list<Message>|null   $shopMatchFailures what the default handler refuses, worked out on $payload; null for a request with no shop-match checks
      * @return array<string, mixed>
      *
      * @throws OrderRefused when a subscriber faults, or the default handler refuses
@@ -80,25 +80,26 @@ final class Postprocessing
             $result = $this->subscribers->dispatch($payload, $context);
         } catch (\Throwable $e) {
             $this->logger->error(self::HOOK_FAILED, $facts + ['exception' => get_class($e), 'at' => basename($e->getFile()) . ':' . $e->getLine()]);
-            throw OrderRefused::because('postprocessing_hook_failed', 'A postprocessing subscriber threw ' . get_class($e) . '.');
+            throw OrderRefused::because('postprocessing_hook_failed', Message::of('refusal_hook_threw', get_class($e)));
         }
         if (!is_array($result)) {
             $this->logger->error(self::HOOK_FAILED, $facts + ['returned' => get_debug_type($result)]);
-            throw OrderRefused::because('postprocessing_hook_failed', 'A postprocessing subscriber returned ' . get_debug_type($result) . ', not an array.');
+            throw OrderRefused::because('postprocessing_hook_failed', Message::of('refusal_hook_returned', get_debug_type($result)));
         }
         try {
             json_encode($result, JSON_THROW_ON_ERROR);
         } catch (\JsonException $e) {
             $this->logger->error(self::HOOK_FAILED, $facts + ['returned' => 'unencodable array']);
-            throw OrderRefused::because('postprocessing_hook_failed', 'A postprocessing subscriber returned a payload that cannot be JSON-encoded.');
+            throw OrderRefused::because('postprocessing_hook_failed', Message::of('refusal_hook_unencodable'));
         }
         /** @var array<string, mixed> $result */
 
         if ($shopMatchFailures !== null) {
             if ($handlers === []) {
                 if ($shopMatchFailures !== []) {
-                    $this->logger->error(self::SHOP_MATCH_FAILED, $facts + ['failures' => $shopMatchFailures]);
-                    throw OrderRefused::because('shop_match_failed', implode(' ', $shopMatchFailures));
+                    $this->logger->error(self::SHOP_MATCH_FAILED, $facts + ['failures' => array_map(static fn (Message $failure): string => $failure->english(), $shopMatchFailures)]);
+                    // At most two checks: the gross, then the tax.
+                    throw OrderRefused::because('shop_match_failed', count($shopMatchFailures) === 1 ? $shopMatchFailures[0] : Message::of('refusal_shop_match_both', ...$shopMatchFailures));
                 }
             } else {
                 $this->logger->info('Two order postprocessing: shop-match checks delegated to ' . implode(', ', $handlers), $facts);

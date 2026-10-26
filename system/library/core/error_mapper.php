@@ -59,13 +59,26 @@ final class ErrorMapper
     }
 
     /**
-     * The full reason, for the log and the merchant: the status, Two's error
-     * code and Two's own message, cut to REASON_LIMIT characters.
+     * The full reason, for the log: the status, Two's error code and Two's
+     * own message, cut to REASON_LIMIT characters.
      */
     public function reason(HttpResponse $response): string
     {
+        $reason = $this->noteReason($response);
+
+        return $reason instanceof Message ? $reason->english() : $reason;
+    }
+
+    /**
+     * The reason for a merchant's note: the status, Two's error code and
+     * Two's own message as Two sent them, cut to REASON_LIMIT characters; or,
+     * when Two was not reached, the plugin's own words as a Message, so the
+     * note reads in one language.
+     */
+    public function noteReason(HttpResponse $response): Message|string
+    {
         if (!$response->reachedTwo()) {
-            return 'Two could not be reached (' . ($response->transportError === '' ? 'no response' : $response->transportError) . ').';
+            return $response->transportError === HttpResponse::NO_RESPONSE ? Message::of('reason_no_response') : Message::of('reason_unreachable', $response->transportError);
         }
         $body = $response->json() ?? [];
         $parts = ['HTTP ' . $response->status];

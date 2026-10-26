@@ -17,6 +17,9 @@ if (!defined('DB_PREFIX')) {
 if (!class_exists('Opencart\\System\\Library\\DB', false)) {
     require __DIR__ . '/fixtures/opencart-db-double.php';
 }
+if (!class_exists('Opencart\\System\\Library\\Language', false)) {
+    require __DIR__ . '/fixtures/opencart-language-doubles.php';
+}
 require_once __DIR__ . '/fixtures/core-doubles.php';
 
 /** The harness's assertions. Every message names the case that failed. */

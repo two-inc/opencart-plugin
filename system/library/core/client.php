@@ -83,7 +83,7 @@ final class Client
         $verifyTls = $this->settings->verifyTls();
         $responses = $this->transport->sendAll(array_map(static fn (array $call): array => ['method' => $call['method'], 'url' => $call['url'], 'headers' => $call['headers'], 'body' => $call['payload']], $prepared), $verifyTls, max(1, $timeoutSeconds));
         foreach ($prepared as $index => $call) {
-            $responses[$index] ??= HttpResponse::unreachable('no response');
+            $responses[$index] ??= HttpResponse::unreachable(HttpResponse::NO_RESPONSE);
             $this->logExchange($call['method'], $calls[$index]['path'], $call['params'], $call['headers'], $call['custom'], $calls[$index]['body'], $verifyTls, $responses[$index]);
         }
 

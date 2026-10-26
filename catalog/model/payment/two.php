@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Opencart\Catalog\Model\Extension\Two\Payment;
 
 use Opencart\System\Library\Extension\Two\Core\FeeQuote;
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\PaymentTerms;
 use Opencart\System\Library\Extension\Two\Opencart\OrderTax;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
@@ -73,7 +74,9 @@ class Two extends \Opencart\System\Engine\Model
             return [];
         }
         // OpenCart 4.1 renders method names unescaped, and the title is stored as typed.
-        $title = htmlspecialchars($services->settings->title((int) $this->config->get('config_language_id')), ENT_QUOTES, 'UTF-8');
+        // Prefixed and read back through the registry, as for the fee line below.
+        $this->load->language('extension/two/payment/two', 'two_title');
+        $title = htmlspecialchars($services->settings->title((int) $this->config->get('config_language_id'), $this->language->get('two_title_text_title_default')), ENT_QUOTES, 'UTF-8');
 
         return [
             'code' => 'two',
@@ -178,11 +181,13 @@ class Two extends \Opencart\System\Engine\Model
             return null;
         }
         // Prefixed: the totals run inside other pages' rendering, whose own language keys must not be overwritten.
-        $copy = $this->load->language('extension/two/payment/two', 'two_fee');
+        // Read back through the registry: the loader returns the default language's copy, and OpenCart's
+        // language event then loads the shop language's over it.
+        $this->load->language('extension/two/payment/two', 'two_fee');
         $services = $this->services();
 
         return [
-            'title' => $services->surcharge()->label($fee['days'], $services->paymentTerms()->isEndOfMonth(), (string) $copy['two_fee_text_fee_line'], (string) $copy['two_fee_text_fee_line_eom']),
+            'title' => $services->surcharge()->label($fee['days'], $services->paymentTerms()->isEndOfMonth(), $this->language->get('two_fee_text_fee_line'), $this->language->get('two_fee_text_fee_line_eom')),
             'value' => $value,
             'tax_class_id' => $services->surcharge()->taxClassId,
         ];
@@ -378,19 +383,19 @@ class Two extends \Opencart\System\Engine\Model
 
     /**
      * Why a rebuilt order (a confirm or an edit sync, on its stored term)
-     * may not be sent, or '': it was placed with a payment terms fee and no
+     * may not be sent, or null: it was placed with a payment terms fee and no
      * longer carries one. Judged against what the order was placed with,
      * never the current surcharge setting.
      *
      * @param array<int, array{code: string}> $totals
      */
-    private function feeRefusal(int $orderId, array $totals): string
+    private function feeRefusal(int $orderId, array $totals): ?Message
     {
         if (($this->services()->orders->get($orderId)['payment_fee'] ?? '') !== '1' || in_array('two_fee', array_column($totals, 'code'), true)) {
-            return '';
+            return null;
         }
 
-        return 'the order was placed with a payment terms fee but no longer carries one (is the Two payment terms fee order total enabled?)';
+        return Message::of('refusal_fee_missing');
     }
 
     /** The cart's gross without the fee, in the session currency at the shop's own currency value (the factor the order is sent at). */
@@ -554,8 +559,8 @@ class Two extends \Opencart\System\Engine\Model
                 'merchant_urls' => $urls,
                 'buyer_fields' => $buyerFields,
                 'terms' => $terms ?? $this->termsBlock(),
-                'fee_refusal' => $terms === null ? '' : $this->feeRefusal($orderId, $totals),
-                'currency_refusal' => $terms === null ? '' : FeeQuote::currencyChange($record, (string) $order['currency_code']) ?? '',
+                'fee_refusal' => $terms === null ? null : $this->feeRefusal($orderId, $totals),
+                'currency_refusal' => $terms === null ? null : FeeQuote::currencyChange($record, (string) $order['currency_code']),
             ],
             'lines' => $lines,
             'totals' => $totals,

@@ -2,6 +2,8 @@
 
 // Storefront copy. %s is the brand's product name (Brand::default()).
 $_['heading_title'] = 'Two';
+// The payment method title when the merchant has set none for the language.
+$_['text_title_default'] = 'Business invoice';
 
 // Tile. %s is the brand's product name.
 $_['entry_company_name'] = 'Company name';
@@ -15,7 +17,7 @@ $_['button_confirm'] = 'Confirm order';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.
 $_['entry_invoice_email'] = 'Invoice email address';
-$_['entry_purchase_order_number'] = 'PO Number';
+$_['entry_purchase_order_number'] = 'PO number';
 $_['entry_project'] = 'Project';
 $_['entry_department'] = 'Department';
 $_['text_optional'] = 'optional';
@@ -49,6 +51,7 @@ $_['error_order_in_progress'] = 'Your order is still being placed. Please wait a
 $_['js_totals_failed'] = 'Your payment term is saved, but the order total could not be updated. Please reload the page before you confirm.';
 $_['js_number_missing'] = 'Enter your organisation number to continue.';
 $_['error_too_many'] = 'Too many requests. Please wait and try again.';
+$_['error_forbidden'] = 'Your checkout session has changed. Please reload the page and try again.';
 
 // Placement refused (section 6.3): the intent, and what changed since the method list.
 $_['error_intent_connection'] = 'Connection error with payment provider. Please try again.';
@@ -73,17 +76,17 @@ $_['error_payment_method'] = 'Please choose a payment method.';
 $_['error_two_generic'] = 'Invoice purchase with %s is not available for this order.';
 $_['error_two_same_company'] = 'Buyer and merchant may not be the same company';
 $_['error_two_company_required'] = 'To pay with %s, enter your company name, organisation number and company country.';
-$_['error_two_field_phone_number'] = 'Please enter a valid Phone number to pay on invoice';
-$_['error_two_field_organization_number'] = 'Please enter a valid Organization number to pay on invoice';
-$_['error_two_field_company_name'] = 'Please enter a valid Company name to pay on invoice';
-$_['error_two_field_first_name'] = 'Please enter a valid First name to pay on invoice';
-$_['error_two_field_last_name'] = 'Please enter a valid Last name to pay on invoice';
-$_['error_two_field_email'] = 'Please enter a valid Email to pay on invoice';
-$_['error_two_field_address'] = 'Please enter a valid Address to pay on invoice';
-$_['error_two_field_city'] = 'Please enter a valid City to pay on invoice';
-$_['error_two_field_country'] = 'Please enter a valid Country to pay on invoice';
-$_['error_two_field_postal_code'] = 'Please enter a valid Postal code to pay on invoice';
-$_['error_two_field_invoice_email'] = 'Please enter a valid Invoice email address to pay on invoice';
+$_['error_two_field_phone_number'] = 'Please enter a valid phone number to pay on invoice';
+$_['error_two_field_organization_number'] = 'Please enter a valid organisation number to pay on invoice';
+$_['error_two_field_company_name'] = 'Please enter a valid company name to pay on invoice';
+$_['error_two_field_first_name'] = 'Please enter a valid first name to pay on invoice';
+$_['error_two_field_last_name'] = 'Please enter a valid last name to pay on invoice';
+$_['error_two_field_email'] = 'Please enter a valid email to pay on invoice';
+$_['error_two_field_address'] = 'Please enter a valid address to pay on invoice';
+$_['error_two_field_city'] = 'Please enter a valid city to pay on invoice';
+$_['error_two_field_country'] = 'Please enter a valid country to pay on invoice';
+$_['error_two_field_postal_code'] = 'Please enter a valid postal code to pay on invoice';
+$_['error_two_field_invoice_email'] = 'Please enter a valid invoice email address to pay on invoice';
 
 // Payment terms and the payment terms fee (Build Guide sections 4 and 5)
 $_['text_terms_title'] = 'Choose your payment terms';

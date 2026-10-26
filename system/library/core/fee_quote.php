@@ -266,22 +266,18 @@ final class FeeQuote
     }
 
     /**
-     * Why an order whose currency an edit changed (placedInOtherCurrency)
-     * is not sent to Two, for the merchant's note, or null. With $then the
-     * note says to switch the currency back and then do that; without it
-     * (the confirm, whose Two order is cancelled) it gives no advice.
+     * Why the confirm refuses an order whose currency an edit changed
+     * (placedInOtherCurrency), for the merchant's note, or null. It gives no
+     * advice: the confirm's Two order is cancelled. The edit sync and the
+     * fulfil check say to switch the currency back, in their own notes.
      *
      * @param array<string, string> $record the order's two_order row
      */
-    public static function currencyChange(array $record, string $currency, string $then = ''): ?string
+    public static function currencyChange(array $record, string $currency): ?Message
     {
         $placed = self::placedInOtherCurrency($record, $currency);
-        if ($placed === null) {
-            return null;
-        }
 
-        return 'the order was placed with Two in ' . $placed . ' and its currency is now ' . $currency . '. Two keeps an order in the currency it was placed in'
-            . ($then === '' ? '.' : ': set the order\'s currency back to ' . $placed . ' and ' . $then . '.');
+        return $placed === null ? null : Message::of('refusal_currency_changed', $placed, $currency);
     }
 
     /**

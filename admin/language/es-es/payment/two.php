@@ -1,0 +1,237 @@
+<?php
+
+// Strings with %s take the brand's product name.
+
+// Heading
+$_['heading_title'] = 'Two';
+// The payment method title at checkout when none is set for a language: the same as the storefront file's.
+$_['text_title_default'] = 'Factura para empresas';
+
+// Text
+$_['text_extension'] = 'Extensiones';
+$_['text_success'] = 'Ajustes guardados.';
+$_['text_success_partial'] = 'Los demás ajustes se han guardado.';
+$_['text_edit'] = 'Editar los ajustes de Two';
+$_['text_version'] = 'Versión';
+$_['text_coming_later'] = 'Estos ajustes llegarán en una versión posterior.';
+$_['text_environment_production'] = 'Producción';
+$_['text_environment_sandbox'] = 'Entorno de pruebas';
+$_['text_environment_staging'] = 'Staging';
+$_['text_key_saved'] = 'Hay una clave guardada. Deja este campo vacío para conservarla.';
+$_['text_key_verified'] = 'Clave API verificada correctamente';
+$_['text_key_verifying'] = 'La clave API se está verificando. Vuelve a cargar la página en un momento.';
+$_['text_key_checking'] = 'Comprobando la clave API...';
+$_['text_key_kept'] = 'Se han conservado la clave y el entorno guardados anteriormente.';
+$_['text_merchant_id'] = 'ID del comerciante';
+$_['text_merchant_short_name'] = 'Nombre corto del comerciante';
+$_['text_record_fetched_at'] = 'Perfil del comercio obtenido';
+$_['text_status_mapping_intro'] = 'Asigna los estados de pago de %s a los estados de pedido de OpenCart para integrarlos en tu flujo de trabajo.';
+$_['text_default_mappings'] = 'Asignaciones predeterminadas:';
+$_['text_default_fulfil'] = '%s: pedido cumplido → Enviado';
+$_['text_default_cancel'] = '%s: pedido cancelado → Cancelado';
+$_['text_default_refund'] = '%s: pedido reembolsado → Reembolsado';
+$_['text_currently_active'] = 'Actualmente activos:';
+$_['text_none_selected'] = 'Ninguno seleccionado';
+
+// Tab
+$_['tab_general'] = 'General';
+$_['tab_checkout_fields'] = 'Campos del proceso de pago';
+$_['tab_payment_terms'] = 'Plazos de pago';
+$_['tab_order_management'] = 'Gestión de pedidos';
+$_['tab_diagnostics'] = 'Diagnóstico';
+
+// Legend
+$_['legend_status_mapping'] = 'Asignación de estados';
+
+// Entry
+$_['entry_status'] = 'Estado';
+$_['entry_sort_order'] = 'Orden de clasificación';
+$_['entry_environment'] = 'Entorno';
+$_['entry_api_key'] = 'Clave API';
+$_['entry_title'] = 'Título';
+$_['entry_fulfil'] = '%s: pedido cumplido, estados que activan el proceso';
+$_['entry_cancel'] = '%s: Pedido cancelado';
+$_['entry_refund'] = '%s: Pedido reembolsado';
+
+// Help
+$_['help_environment'] = 'Selecciona el entorno de la API de %s que quieres usar. Producción para transacciones reales, Entorno de pruebas para hacer pruebas.';
+$_['help_api_key'] = 'Introduce tu clave API proporcionada por %s.';
+$_['help_title'] = 'Introduce el título que aparecerá en la página de pago como nombre del método de pago.';
+$_['help_fulfil'] = 'Selecciona uno o más estados del pedido que deban activar el cumplimiento en %1$s. Cuando se establezca cualquiera de estos estados, el pedido se marcará como cumplido en %1$s. Los plazos de pago del comprador se activarán y comenzará el ciclo de pagos. Puedes seleccionar varios estados (mantén pulsado Ctrl/Cmd para seleccionar varios). Predeterminado: Enviado';
+$_['help_cancel'] = 'El pedido ha sido cancelado en %s. Esto impide su cumplimiento y detiene el proceso de pago. Predeterminado: Cancelado';
+$_['help_refund'] = 'Al pasar un pedido a este estado, se reembolsa por completo en %s y se emite una nota de crédito al comprador. Predeterminado: Reembolsado.';
+
+// Error
+$_['error_permission'] = 'No tienes permiso para modificar los ajustes de pago de Two.';
+$_['error_partial'] = 'Algunos ajustes no se han guardado. Revisa los campos resaltados.';
+$_['error_title_missing'] = 'Introduce un título.';
+$_['error_status_missing'] = 'Selecciona un estado de pedido.';
+$_['error_status_unknown'] = 'Selecciona un estado de pedido que exista en esta tienda.';
+$_['error_status_void'] = 'OpenCart usa este estado para los pedidos que se están editando, así que no se puede asignar. Selecciona otro estado de pedido.';
+$_['error_key_missing'] = 'Introduce una clave API.';
+$_['error_kept_malformed'] = 'Esta no es una clave API válida: solo puede contener caracteres imprimibles, sin espacios ni saltos de línea. Se ha conservado la clave guardada anteriormente.';
+$_['error_kept_environment'] = 'Selecciona un entorno válido.';
+$_['error_environment_unhealthy'] = 'El entorno guardado no se puede usar en esta tienda, así que se usa el entorno de pruebas. Selecciona un entorno y guarda.';
+$_['error_key_invalid'] = '%1$s ha rechazado esta clave API. Puede que no sea válida o haya caducado: comprueba la clave en tu portal de %1$s.';
+$_['error_key_service'] = '%s no ha podido verificar la clave API en este momento (HTTP %d). Suele ser temporal: vuelve a intentarlo en unos minutos.';
+$_['error_key_unreachable'] = 'Esta tienda no ha podido conectar con la API de %s (red, DNS o firewall). La clave API en sí no se ha evaluado.';
+$_['error_key_not_configured'] = 'Introduce tu clave API de %1$s para activar %1$s.';
+$_['error_key_unexpected'] = '%s ha devuelto una respuesta inesperada al verificar la clave API (HTTP %d).';
+$_['error_key_unverified'] = 'No se ha podido verificar la clave API.';
+
+// Order page: the Two tab and the invoice download
+$_['text_two_order'] = 'Pedido de Two';
+$_['text_two_state'] = 'Estado en Two';
+$_['text_no_two_order'] = 'No hay ningún pedido de Two vinculado a este pedido.';
+$_['button_invoice'] = 'Descargar factura';
+$_['help_invoice'] = 'La factura que Two emitió cuando se cumplió el pedido.';
+$_['error_invoice_permission'] = 'No tienes permiso para ver esta factura.';
+$_['error_invoice_not_ready'] = 'La factura aún no está lista porque el pedido todavía se está procesando. Por favor, inténtalo de nuevo más tarde.';
+$_['error_invoice_state'] = 'No hay ninguna factura disponible porque el pedido está en estado: %s.';
+$_['error_invoice_no_reference'] = 'No hay ningún pedido de Two vinculado a este pedido.';
+$_['error_invoice'] = 'No se ha podido obtener la factura. Inténtalo de nuevo más tarde.';
+
+// Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
+$_['entry_company_search_in_address'] = 'Activar la búsqueda de empresa en la introducción de la dirección';
+$_['help_company_search_in_address'] = 'Cuando está activado, el comprador puede buscar su empresa dentro de la sección de introducción de la dirección del proceso de pago. De lo contrario, la búsqueda de empresa se mostrará dentro del método de pago.';
+$_['entry_enable_invoice_email'] = 'Mostrar el campo de correo electrónico para la factura';
+$_['help_enable_invoice_email'] = 'Si eliges Sí, los clientes verán un campo de correo electrónico de facturación en la sección de pago de %s del proceso de pago. Se sitúa junto al método de pago y no junto a la dirección, de modo que se invita al comprador a considerar una dirección de facturación específica incluso cuando sus direcciones de facturación y envío coinciden.';
+$_['entry_enable_po_number'] = 'Mostrar el campo de número de pedido de compra';
+$_['help_enable_po_number'] = 'Si eliges Sí, los clientes verán un campo de número de pedido de compra en la sección de pago de %s del proceso de pago.';
+$_['entry_enable_project'] = 'Mostrar el campo de proyecto';
+$_['help_enable_project'] = 'Si eliges Sí, los clientes verán un campo de proyecto en la sección de pago de %s del proceso de pago.';
+$_['entry_enable_department'] = 'Mostrar el campo de departamento';
+$_['help_enable_department'] = 'Si eliges Sí, los clientes verán un campo de departamento en la sección de pago de %s del proceso de pago.';
+$_['entry_min_order_amount'] = 'Valor mínimo del pedido, %s';
+$_['help_min_order_amount'] = 'Ocultar el método de pago por debajo de este valor de pedido (moneda predeterminada de la tienda, sobre la base impositiva seleccionada más abajo). Déjalo vacío para no establecer ningún mínimo.';
+$_['entry_min_order_basis'] = 'Base imponible del valor mínimo del pedido';
+$_['help_min_order_basis'] = 'Si el carrito se compara con el mínimo con impuestos incluidos o excluidos.';
+$_['text_basis_default'] = 'Como el mínimo de la plataforma (con impuestos si no hay ninguno)';
+$_['text_basis_option_gross'] = 'Impuestos incluidos (bruto)';
+$_['text_basis_option_net'] = 'Sin impuestos (neto)';
+$_['error_switch_invalid'] = 'Elige Sí o No.';
+$_['error_minimum_invalid'] = 'Introduce un importe mayor que cero con dos decimales como máximo, o deja el campo vacío.';
+$_['error_basis_invalid'] = 'Elige una base impositiva de la lista.';
+
+// Health row (Build Guide section 18). %1$s is the provider's full name, %2$s the shop's default currency.
+$_['entry_health'] = 'Método de pago en la caja';
+$_['text_health_hidden'] = 'No se muestra en la caja';
+$_['text_health_shown'] = 'Se muestra en la caja';
+$_['text_withheld_disabled'] = 'la extensión no está activada. Activa Estado.';
+$_['text_withheld_no_api_key'] = 'no hay ninguna clave API guardada. Compruebe Clave API.';
+$_['text_withheld_key_rejected'] = 'la clave API fue rechazada. Compruebe Clave API y Entorno.';
+$_['text_withheld_buyer_countries_empty'] = 'actualmente no hay ningún país de comprador activado para tu cuenta. Ponte en contacto con %1$s para activarlos.';
+$_['text_withheld_buyer_countries_malformed'] = 'los países del comprador de tu cuenta no se han podido leer. Ponte en contacto con %1$s.';
+$_['text_withheld_merchant_unidentified'] = 'tu cuenta de comerciante aún no se ha identificado. Guarda General para verificar la clave API.';
+$_['text_withheld_currency'] = 'ninguna de las monedas activadas en la tienda permite emitir facturas.';
+$_['text_health_below'] = 'oculto para cestas por debajo de %s';
+$_['text_health_floor'] = '%1$s %2$s %3$s';
+$_['text_basis_gross'] = 'con impuestos';
+$_['text_basis_net'] = 'sin impuestos';
+$_['text_or'] = 'o';
+$_['text_health_countries'] = 'se ofrece solo a compradores en %s';
+$_['text_health_currencies'] = 'oculto para carritos en %s';
+// Order page: refunds and the credit note
+$_['button_credit_note'] = 'Descargar nota de crédito';
+$_['help_credit_note'] = 'La última nota de crédito que Two emitió para este pedido.';
+$_['error_credit_note'] = 'No se ha podido obtener la nota de crédito. Puede que aún se esté procesando. Inténtalo de nuevo más tarde.';
+$_['text_refund'] = 'Reembolso';
+$_['text_refunded'] = 'Reembolsado en Two';
+$_['text_remaining'] = 'Pendiente de reembolsar';
+$_['text_refund_help'] = 'Elige cuántas unidades de cada línea reembolsar, introduce una línea de importe, o ambas cosas. El estado de reembolso total reembolsa lo que quede.';
+$_['text_refund_unavailable'] = 'Los reembolsos estarán disponibles cuando Two haya facturado el pedido.';
+$_['text_refund_unread'] = 'No se ha podido consultar a Two sobre este pedido. Vuelve a cargar la página para intentarlo de nuevo.';
+$_['text_refunds'] = 'Reembolsos enviados desde esta tienda';
+$_['column_line'] = 'Línea';
+$_['column_quantity'] = 'Pedido';
+$_['column_net'] = 'Neto';
+$_['column_tax'] = 'Impuestos';
+$_['column_rate'] = 'Tipo impositivo';
+$_['column_refund_quantity'] = 'Reembolsar';
+$_['column_date'] = 'Fecha';
+$_['column_amount'] = 'Importe';
+$_['column_state'] = 'Resultado';
+$_['entry_refund_net'] = 'Línea de importe, neto';
+$_['entry_refund_tax'] = 'Línea de importe, impuestos';
+$_['entry_refund_rate'] = 'Línea de importe, tipo impositivo';
+$_['entry_refund_reason'] = 'Motivo (en la nota de crédito)';
+$_['button_refund'] = 'Enviar reembolso a Two';
+$_['error_refund_permission'] = 'No tienes permiso para reembolsar este pedido.';
+$_['error_refund_quantity'] = 'No reembolsado: una cantidad no es un número entero.';
+$_['text_refund_state_pending'] = 'Sin respuesta';
+$_['text_refund_state_done'] = 'Reembolsado';
+$_['text_refund_state_refused'] = 'Rechazado';
+$_['text_refund_state_unknown'] = 'Desconocido';
+$_['text_refund_state_not_applied'] = 'No aplicado';
+$_['button_retry'] = 'Reintentar';
+$_['text_refund_blocked'] = 'Un reembolso de abajo tiene un resultado desconocido. Reinténtalo antes de enviar otro reembolso: se vuelve a enviar con la misma clave, así que Two lo reembolsa como máximo una vez.';
+$_['column_left'] = 'Pendiente de reembolsar';
+$_['text_panel_loading'] = 'Consultando a Two sobre este pedido...';
+$_['error_panel'] = 'No se ha podido cargar la pestaña Two. Vuelve a abrir la pestaña para reintentarlo o vuelve a cargar la página.';
+$_['error_ajax'] = 'La tienda no respondió como se esperaba. Revisa el historial del pedido y la pestaña Two antes de volver a intentarlo.';
+
+// Diagnostics: trusted proxies for the checkout's rate limits.
+$_['entry_trusted_proxies'] = 'Proxies de confianza';
+$_['help_trusted_proxies'] = 'Direcciones de sus propios proxies inversos, balanceadores de carga o salida de CDN, como IPs o rangos CIDR, separados por comas o saltos de línea. Estas direcciones IP quedarán exentas de la limitación de solicitudes.';
+$_['error_proxy_invalid'] = 'Proxies de confianza: "%s" no es una dirección IP ni un rango CIDR válido.';
+$_['entry_disable_rate_limit'] = 'Desactivar la limitación de solicitudes en el checkout';
+$_['help_disable_rate_limit'] = 'Elimina el límite por llamante en los endpoints AJAX del checkout. El límite está activado por defecto. Si esta tienda está detrás de una CDN, balanceador de carga o proxy inverso y Proxies de confianza está vacío, cada comprador llega como esa misma dirección y comparten un único límite - los compradores son entonces rechazados a mitad del checkout con un mensaje de demasiadas solicitudes. La solución es rellenar Proxies de confianza, lo que permite al límite distinguir entre compradores; active esto solo como solución provisional mientras obtiene esa lista, y desactívelo después.';
+
+// Payment terms tab (Build Guide sections 4 and 5)
+$_['text_terms_none'] = 'El perfil del comercio aún no ofrece ningún plazo de pago, así que Two no se ofrece en el checkout. Guarda una clave API válida o revisa tus plazos en el portal de comercios de Two.';
+$_['text_days'] = '%d días';
+$_['text_term_type_standard'] = 'Estándar';
+$_['text_term_type_eom'] = 'Fin de mes';
+$_['text_default_term_auto'] = 'Automático';
+$_['text_differential_total'] = 'Comisión total para el plazo seleccionado';
+$_['text_differential_difference'] = 'Diferencia de comisión respecto al plazo de pago predeterminado';
+$_['text_surcharge_none'] = 'No se aplica ningún recargo';
+$_['text_surcharge_percentage'] = 'Porcentaje';
+$_['text_surcharge_fixed'] = 'Comisión fija';
+$_['text_surcharge_fixed_and_percentage'] = 'Comisión fija y porcentaje';
+$_['text_rounding_none'] = 'Ninguno';
+$_['text_rounding_up'] = 'Arriba';
+$_['text_rounding_down'] = 'Caído';
+$_['text_rounding_standard'] = 'Estándar';
+$_['text_no_rounding'] = 'Sin redondeo';
+$_['legend_surcharge'] = 'Recargo';
+$_['entry_payment_term_type'] = 'Tipo de plazo de pago';
+$_['entry_payment_terms'] = 'Plazos de pago disponibles';
+$_['entry_default_payment_term'] = 'Plazo de pago predeterminado';
+$_['entry_surcharge_type'] = 'Método de recargo';
+$_['entry_surcharge_differential'] = 'Base de cálculo del recargo';
+$_['entry_surcharge_line_description'] = 'Descripción de la línea de recargo';
+$_['entry_surcharge_rounding_basis'] = 'Redondeo del recargo';
+$_['entry_surcharge_rounding_step'] = 'Paso de redondeo';
+$_['entry_surcharge_tax_class'] = 'Tratamiento fiscal del recargo';
+$_['entry_surcharge_grid'] = 'Recargo por plazo';
+$_['column_term'] = 'Plazo';
+$_['column_percentage'] = 'Porcentaje';
+$_['column_fixed'] = 'Comisión fija';
+$_['column_cap'] = 'Límite';
+$_['help_payment_term_type'] = 'Los plazos estándar cuentan desde que se cumple el pedido. Los plazos de fin de mes cuentan desde el final del mes en que se cumple el pedido, y solo ofrecen 30, 45 y 60 días.';
+$_['help_payment_terms'] = 'Los plazos que ofrece tu cuenta de %1$s. Los compradores eligen entre los marcados aquí; una instalación nueva marca 30, 60 y 90 días. Si no se ofrece ninguno de los plazos marcados, %1$s no se muestra en el checkout.';
+$_['help_default_payment_term'] = 'El plazo con el que empieza el comprador. Automático usa el predeterminado de tu cuenta cuando se ofrece; si no, 30 días; si no, el más corto.';
+$_['help_surcharge_type'] = 'Añade una comisión por el plazo de pago que elija el comprador. %s calcula la comisión; la tienda solo envía esta configuración. El total de pedido Comisión por plazos de pago de Two debe estar activado (Extensiones > Totales de pedido).';
+$_['help_surcharge_differential'] = 'Comisión total cobra el recargo configurado para el plazo elegido. Diferencia de comisión cobra solo la diferencia respecto al plazo de pago predeterminado.';
+$_['help_surcharge_line_description'] = 'Etiqueta de la línea de comisión que ve el comprador. Usa %s para la duración del plazo en días. Déjalo vacío para usar el texto predeterminado.';
+$_['help_surcharge_rounding_basis'] = 'Ajusta la comisión a un incremento exacto. Selecciona Ninguno para importes estándar de dos decimales.';
+$_['help_surcharge_rounding_step'] = 'Incremento al que se redondea la comisión. Solo se aplica cuando se selecciona una dirección de redondeo.';
+$_['help_surcharge_tax_class'] = 'La clase de impuesto con la que se cobra la comisión, como en cualquier producto: se aplican las reglas fiscales de la tienda según la dirección del comprador. Para dejar la comisión sin impuestos, crea una clase de impuesto con un tipo del 0 por ciento y selecciónala. Obligatorio mientras haya un recargo activo.';
+$_['help_surcharge_grid'] = 'El porcentaje es la parte de la comisión de %2$s que se repercute al comprador, de 0 a 100. El límite se aplica a toda la comisión: el porcentaje y la comisión fija juntos, no solo el porcentaje. Déjalo vacío si no quieres límite. Las comisiones fijas y los límites están en %1$s y se convierten con los tipos de cambio de %2$s para otras monedas.';
+$_['error_term_type_unknown'] = 'Elige un tipo de plazo de pago de la lista.';
+$_['error_terms_none'] = 'Debes seleccionar al menos un plazo de pago.';
+$_['error_terms_unknown'] = 'Selecciona solo plazos que ofrezca tu cuenta.';
+$_['error_default_term_unknown'] = 'Elige un plazo de pago predeterminado entre los plazos seleccionados, o Automático.';
+$_['error_surcharge_type_unknown'] = 'Elige un método de recargo de la lista.';
+$_['error_surcharge_tax_class_missing'] = 'Selecciona un tratamiento fiscal del recargo: los recargos están activados, así que debes elegir una clase de impuesto antes de guardar.';
+$_['error_surcharge_tax_class_unknown'] = 'El tratamiento fiscal del recargo debe ser una de las clases de impuesto de la tienda. Para dejar la comisión sin impuestos, crea una clase con un tipo del 0 por ciento.';
+$_['error_surcharge_step_unknown'] = 'El paso de redondeo debe ser uno de los valores ofrecidos.';
+$_['error_surcharge_basis_unknown'] = 'Elige un redondeo del recargo de la lista.';
+$_['error_surcharge_cell_invalid'] = '%1$s para el plazo de %2$d días debe ser un número no negativo.';
+$_['error_surcharge_cap_zero'] = 'El límite del recargo para el plazo de %2$d días no puede ser 0. Si no quieres cobrar nada en este plazo, establece el porcentaje y la cuota fija en 0 y deja el límite vacío.';
+$_['text_health_fee_quote'] = 'el cálculo de la comisión por plazos de pago falla desde %s (%s), así que %s no se ofrece en los carritos para los que falla';
+$_['text_health_fx'] = 'Tipos de cambio de %s obtenidos %s';
+$_['text_withheld_no_terms'] = 'no se ofrece ningún plazo de pago: tu cuenta no ofrece ninguno de los plazos marcados en la pestaña Plazos de pago para este tipo de plazo.';
+$_['text_withheld_fee_total_off'] = 'hay un recargo configurado, pero el total de pedido Comisión por plazos de pago de Two no está activado. Actívalo en Extensiones > Totales de pedido, o establece el método de recargo en No se aplica ningún recargo.';
+$_['error_surcharge_percent_range'] = '%1$s para el plazo de %2$d días debe estar entre 0 y 100: es la parte de la comisión que se repercute al comprador.';

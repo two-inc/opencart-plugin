@@ -61,8 +61,8 @@ final class OrderBuilder
      *     merchant_urls: array<string, string>,
      *     buyer_fields?: array<string, string>,
      *     terms?: array<string, mixed>|null,
-     *     fee_refusal?: string,
-     *     currency_refusal?: string
+     *     fee_refusal?: Message|null,
+     *     currency_refusal?: Message|null
      * } $order
      * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string}> $lines
      * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool}> $totals
@@ -74,14 +74,14 @@ final class OrderBuilder
     {
         $fx = (float) $order['currency_value'];
         if ($fx <= 0) {
-            throw OrderRefused::because('currency_value', 'The order has no usable currency value.');
+            throw OrderRefused::because('currency_value', Message::of('refusal_currency_value'));
         }
         // A rebuilt order whose currency an edit changed from the one it was placed in (the adapter says why).
-        if (($order['currency_refusal'] ?? '') !== '') {
+        if (($order['currency_refusal'] ?? null) !== null) {
             throw OrderRefused::because('currency_changed', $order['currency_refusal']);
         }
         if ($lines === []) {
-            throw OrderRefused::because('empty_order', 'The order has no product lines.');
+            throw OrderRefused::because('empty_order', Message::of('refusal_empty_order'));
         }
 
         $items = [];
@@ -103,11 +103,11 @@ final class OrderBuilder
             } elseif (in_array($code, self::POST_TAX_CODES, true)) {
                 $postTax[] = $total;
             } else {
-                throw OrderRefused::because('unsupported_total', 'The order total "' . $code . '" is not one the plugin can send.');
+                throw OrderRefused::because('unsupported_total', Message::of('refusal_unsupported_total', $code));
             }
         }
         // A rebuilt order placed with a payment terms fee whose fee line is gone (the adapter says why).
-        if (($order['fee_refusal'] ?? '') !== '') {
+        if (($order['fee_refusal'] ?? null) !== null) {
             throw OrderRefused::because('fee_missing', $order['fee_refusal']);
         }
         if ($discounts !== []) {
@@ -180,7 +180,7 @@ final class OrderBuilder
      *
      * @param array<string, mixed>                                                            $payload
      * @param array{currency_value: float|string, total: float|string, tax_total: float|string} $order
-     * @return list<string> one sentence per failed check, empty when the payload matches
+     * @return list<Message> one sentence per failed check, empty when the payload matches
      */
     public static function shopMatchFailures(array $payload, array $order): array
     {
@@ -188,13 +188,13 @@ final class OrderBuilder
         $lines = is_array($payload['line_items'] ?? null) ? count($payload['line_items']) : 0;
         $tolerance = max(1, $lines);
         $checks = [
-            'gross' => [Postprocessing::cents($payload['gross_amount'] ?? null), self::cents($order['total'], $fx), 'The lines add up to %s but the shop charged %s.'],
-            'tax' => [Postprocessing::cents($payload['tax_amount'] ?? null), self::cents($order['tax_total'], $fx), 'The lines carry %s tax but the shop charged %s.'],
+            'gross' => [Postprocessing::cents($payload['gross_amount'] ?? null), self::cents($order['total'], $fx), 'refusal_shop_match_gross'],
+            'tax' => [Postprocessing::cents($payload['tax_amount'] ?? null), self::cents($order['tax_total'], $fx), 'refusal_shop_match_tax'],
         ];
         $failures = [];
-        foreach ($checks as [$sent, $shop, $sentence]) {
+        foreach ($checks as [$sent, $shop, $key]) {
             if (abs($sent - $shop) > $tolerance) {
-                $failures[] = sprintf($sentence, Postprocessing::money($sent), Postprocessing::money($shop));
+                $failures[] = Message::of($key, Postprocessing::money($sent), Postprocessing::money($shop));
             }
         }
 
@@ -221,13 +221,13 @@ final class OrderBuilder
         $net = self::cents($line['total'], $fx);
         $tax = self::cents((float) $line['tax'] * $quantity, $fx);
         if ($quantity <= 0 || $net < 0 || $tax < 0) {
-            throw OrderRefused::because('negative_line', 'The line "' . $line['name'] . '" has a negative or empty quantity or amount.');
+            throw OrderRefused::because('negative_line', Message::of('refusal_negative_line', $line['name']));
         }
         self::refuseFixedTax($line['fixed_tax'] ?? false, $line['name']);
         $rate = $line['rate'];
         if ($rate === null) {
             if ($tax !== 0) {
-                throw OrderRefused::because('line_rate_unknown', 'The shop charged tax on "' . $line['name'] . '" but its tax class gives no rate at the order address.');
+                throw OrderRefused::because('line_rate_unknown', Message::of('refusal_line_rate_unknown', $line['name']));
             }
             $rate = 0.0;
         }
@@ -247,7 +247,7 @@ final class OrderBuilder
         $rate = $total['rate'] ?? null;
         if ($rate === null) {
             if ($tax !== 0) {
-                throw OrderRefused::because('line_rate_unknown', 'The shop charged tax on "' . $total['title'] . '" but its tax class gives no rate at the order address.');
+                throw OrderRefused::because('line_rate_unknown', Message::of('refusal_line_rate_unknown', $total['title']));
             }
             $rate = 0.0;
         }
@@ -280,16 +280,16 @@ final class OrderBuilder
             }
         }
         if ($tax > 0) {
-            throw OrderRefused::because('discount_tax_positive', 'The stored tax total is ' . Postprocessing::money($tax) . ' more than the lines carry, which a discount cannot explain: a line\'s tax does not match what the shop charged.');
+            throw OrderRefused::because('discount_tax_positive', Message::of('refusal_discount_tax_positive', Postprocessing::money($tax)));
         }
         if ($tax === 0) {
             $rate = 0.0;
         } elseif (count($rates) === 1) {
             $rate = (float) reset($rates);
         } elseif ($rates === []) {
-            throw OrderRefused::because('discount_tax_unexplained', 'The stored tax total is ' . Postprocessing::money(-$tax) . ' less than the lines carry, but no line carries tax for the discount to reduce.');
+            throw OrderRefused::because('discount_tax_unexplained', Message::of('refusal_discount_tax_unexplained', Postprocessing::money(-$tax)));
         } else {
-            throw OrderRefused::because('discount_tax_ambiguous', 'The discount reduced tax on lines at more than one rate (' . implode(', ', array_keys($rates)) . '), and the shop does not store how much at each.');
+            throw OrderRefused::because('discount_tax_ambiguous', Message::of('refusal_discount_tax_ambiguous', implode(', ', array_keys($rates))));
         }
 
         return self::line(implode(', ', $titles), 'DIGITAL', 1, $net, $net, $tax, $rate, 'item');
@@ -325,7 +325,7 @@ final class OrderBuilder
     private static function refuseFixedTax(bool $fixed, string $name): void
     {
         if ($fixed) {
-            throw OrderRefused::because('fixed_amount_tax', 'fixed-amount tax rate on "' . $name . '": a Two line carries one percentage rate.');
+            throw OrderRefused::because('fixed_amount_tax', Message::of('refusal_fixed_amount_tax', $name));
         }
     }
 
@@ -339,7 +339,7 @@ final class OrderBuilder
     {
         $placed = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $dateAdded, new \DateTimeZone('UTC'));
         if ($placed === false) {
-            throw OrderRefused::because('order_date', 'The order has no readable date added.');
+            throw OrderRefused::because('order_date', Message::of('refusal_order_date'));
         }
 
         return $placed->modify('+' . self::DELIVERY_DAYS . ' days')->format('Y-m-d');

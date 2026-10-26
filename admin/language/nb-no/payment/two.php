@@ -1,0 +1,237 @@
+<?php
+
+// Strings with %s take the brand's product name.
+
+// Heading
+$_['heading_title'] = 'Two';
+// The payment method title at checkout when none is set for a language: the same as the storefront file's.
+$_['text_title_default'] = 'Bedriftsfaktura';
+
+// Text
+$_['text_extension'] = 'Utvidelser';
+$_['text_success'] = 'Innstillingene er lagret.';
+$_['text_success_partial'] = 'De andre innstillingene ble lagret.';
+$_['text_edit'] = 'Rediger innstillinger for Two';
+$_['text_version'] = 'Versjon';
+$_['text_coming_later'] = 'Disse innstillingene kommer i en senere versjon.';
+$_['text_environment_production'] = 'Produksjon';
+$_['text_environment_sandbox'] = 'Sandbox';
+$_['text_environment_staging'] = 'Staging';
+$_['text_key_saved'] = 'En nøkkel er lagret. La feltet stå tomt for å beholde den.';
+$_['text_key_verified'] = 'API-nøkkelen ble verifisert';
+$_['text_key_verifying'] = 'API-nøkkelen verifiseres. Last inn siden på nytt om et øyeblikk.';
+$_['text_key_checking'] = 'Sjekker API-nøkkel...';
+$_['text_key_kept'] = 'Den tidligere lagrede nøkkelen og miljøet ble beholdt.';
+$_['text_merchant_id'] = 'Selger-ID';
+$_['text_merchant_short_name'] = 'Kortnavn for selger';
+$_['text_record_fetched_at'] = 'Merchantprofil hentet';
+$_['text_status_mapping_intro'] = 'Koble %s-betalingsstatuser til ordrestatuser i OpenCart for å integrere dem i arbeidsflyten.';
+$_['text_default_mappings'] = 'Standardkoblinger:';
+$_['text_default_fulfil'] = '%s: ordre oppfylt → Sendt';
+$_['text_default_cancel'] = '%s: ordre kansellert → Kansellert';
+$_['text_default_refund'] = '%s: ordre refundert → Refundert';
+$_['text_currently_active'] = 'Aktive nå:';
+$_['text_none_selected'] = 'Ingen valgt';
+
+// Tab
+$_['tab_general'] = 'Generelt';
+$_['tab_checkout_fields'] = 'Kassafelt';
+$_['tab_payment_terms'] = 'Betalingsvilkår';
+$_['tab_order_management'] = 'Ordrehåndtering';
+$_['tab_diagnostics'] = 'Diagnostikk';
+
+// Legend
+$_['legend_status_mapping'] = 'Statuskobling';
+
+// Entry
+$_['entry_status'] = 'Status';
+$_['entry_sort_order'] = 'Sorteringsrekkefølge';
+$_['entry_environment'] = 'Miljø';
+$_['entry_api_key'] = 'API-nøkkel';
+$_['entry_title'] = 'Tittel';
+$_['entry_fulfil'] = '%s: ordre oppfylt, utløsende statuser';
+$_['entry_cancel'] = '%s: Ordre kansellert';
+$_['entry_refund'] = '%s: Ordre refundert';
+
+// Help
+$_['help_environment'] = 'Velg hvilket %s API-miljø som skal brukes. Produksjon for ekte transaksjoner, Sandbox for testing.';
+$_['help_api_key'] = 'Skriv inn API-nøkkelen du har fått fra %s.';
+$_['help_title'] = 'Skriv inn en tittel som vises i utsjekken som tittel for betalingsmåten.';
+$_['help_fulfil'] = 'Velg én eller flere ordrestatuser som skal utløse oppfyllelse hos %1$s. Når en av disse statusene settes, blir ordren markert som oppfylt hos %1$s. Kjøperens betalingsvilkår blir aktive og utbetalingssyklusen starter. Du kan velge flere statuser (hold Ctrl/Cmd for å velge flere). Standard: Sendt';
+$_['help_cancel'] = 'Ordren er kansellert hos %s. Dette hindrer oppfyllelse og stopper betalingsprosessen. Standard: Kansellert';
+$_['help_refund'] = 'Når en ordre flyttes til denne statusen, refunderes den i sin helhet hos %s, og kjøperen får en kreditnota. Standard: Refundert.';
+
+// Error
+$_['error_permission'] = 'Du har ikke tillatelse til å endre betalingsinnstillingene for Two.';
+$_['error_partial'] = 'Noen innstillinger ble ikke lagret. Se de markerte feltene.';
+$_['error_title_missing'] = 'Skriv inn en tittel.';
+$_['error_status_missing'] = 'Velg en ordrestatus.';
+$_['error_status_unknown'] = 'Velg en ordrestatus som finnes i denne butikken.';
+$_['error_status_void'] = 'OpenCart bruker denne statusen for ordrer som redigeres, så den kan ikke kobles. Velg en annen ordrestatus.';
+$_['error_key_missing'] = 'Skriv inn en API-nøkkel.';
+$_['error_kept_malformed'] = 'Dette er ikke en gyldig API-nøkkel: den kan bare inneholde utskrivbare tegn, uten mellomrom eller linjeskift. Den tidligere lagrede nøkkelen ble beholdt.';
+$_['error_kept_environment'] = 'Velg et gyldig miljø.';
+$_['error_environment_unhealthy'] = 'Det lagrede miljøet kan ikke brukes i denne butikken, så sandbox brukes. Velg et miljø og lagre.';
+$_['error_key_invalid'] = 'Denne API-nøkkelen ble avvist av %1$s. Den kan være ugyldig eller utløpt - kontroller nøkkelen i %1$s-portalen din.';
+$_['error_key_service'] = '%s kunne ikke verifisere API-nøkkelen nå (HTTP %d). Dette er vanligvis midlertidig - prøv igjen om kort tid.';
+$_['error_key_unreachable'] = 'Denne butikken fikk ikke kontakt med %s API i det hele tatt (nettverk, DNS eller brannmur). Selve API-nøkkelen er ikke vurdert.';
+$_['error_key_not_configured'] = 'Skriv inn %1$s API-nøkkelen din for å aktivere %1$s.';
+$_['error_key_unexpected'] = '%s ga et uventet svar under verifisering av API-nøkkelen (HTTP %d).';
+$_['error_key_unverified'] = 'API-nøkkelen kunne ikke verifiseres.';
+
+// Order page: the Two tab and the invoice download
+$_['text_two_order'] = 'Two-ordre';
+$_['text_two_state'] = 'Status hos Two';
+$_['text_no_two_order'] = 'Ingen Two-ordre er knyttet til denne ordren.';
+$_['button_invoice'] = 'Last ned faktura';
+$_['help_invoice'] = 'Fakturaen Two utstedte da ordren ble oppfylt.';
+$_['error_invoice_permission'] = 'Du har ikke tillatelse til å se denne fakturaen.';
+$_['error_invoice_not_ready'] = 'Fakturaen er ikke klar ennå fordi ordren fortsatt er under oppfyllelse. Prøv igjen senere.';
+$_['error_invoice_state'] = 'Ingen faktura er tilgjengelig fordi ordren har tilstanden: %s.';
+$_['error_invoice_no_reference'] = 'Ingen Two-ordre er knyttet til denne ordren.';
+$_['error_invoice'] = 'Fakturaen kunne ikke hentes. Prøv igjen senere.';
+
+// Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
+$_['entry_company_search_in_address'] = 'Aktiver bedriftssøk i adresseregistrering';
+$_['help_company_search_in_address'] = 'Når aktivert kan kjøperen søke etter bedriften sin i adresseregistreringsdelen av kassen. Hvis ikke, vil bedriftssøket vises i betalingsmetoden.';
+$_['entry_enable_invoice_email'] = 'Vis feltet E-postadresse for faktura';
+$_['help_enable_invoice_email'] = 'Hvis du velger Ja, ser kundene et felt for faktura-e-post i %s-delen av utsjekken. Det ligger sammen med betalingsmåten framfor adressen, slik at kjøperen blir oppfordret til å vurdere en egen fakturaadresse selv når fakturaadressen og leveringsadressen er like.';
+$_['entry_enable_po_number'] = 'Vis feltet PO-nummer';
+$_['help_enable_po_number'] = 'Hvis du velger Ja, ser kundene et felt for PO-nummer i %s-delen av utsjekken.';
+$_['entry_enable_project'] = 'Vis feltet Prosjekt';
+$_['help_enable_project'] = 'Hvis du velger Ja, ser kundene et prosjektfelt i %s-delen av utsjekken.';
+$_['entry_enable_department'] = 'Vis feltet Avdeling';
+$_['help_enable_department'] = 'Hvis du velger Ja, ser kundene et avdelingsfelt i %s-delen av utsjekken.';
+$_['entry_min_order_amount'] = 'Minste ordreverdi, %s';
+$_['help_min_order_amount'] = 'Skjul betalingsmåten under denne ordreverdien (butikkens standardvaluta, på avgiftsgrunnlaget som er valgt nedenfor). La feltet stå tomt for ingen minsteverdi.';
+$_['entry_min_order_basis'] = 'Avgiftsgrunnlag for minste ordreverdi';
+$_['help_min_order_basis'] = 'Om handlekurven sammenlignes med minsteverdien inkludert eller eksklusiv avgift.';
+$_['text_basis_default'] = 'Som plattformens minimum (inkludert skatt når det ikke finnes noe)';
+$_['text_basis_option_gross'] = 'Inkludert avgift (brutto)';
+$_['text_basis_option_net'] = 'Eksklusiv avgift (netto)';
+$_['error_switch_invalid'] = 'Velg Ja eller Nei.';
+$_['error_minimum_invalid'] = 'Skriv inn et beløp over null med høyst to desimaler, eller la feltet stå tomt.';
+$_['error_basis_invalid'] = 'Velg et skattegrunnlag fra listen.';
+
+// Health row (Build Guide section 18). %1$s is the provider's full name, %2$s the shop's default currency.
+$_['entry_health'] = 'Betalingsmåte i kassen';
+$_['text_health_hidden'] = 'Vises ikke i kassen';
+$_['text_health_shown'] = 'Vises i kassen';
+$_['text_withheld_disabled'] = 'utvidelsen er ikke aktivert. Slå på Status.';
+$_['text_withheld_no_api_key'] = 'ingen API-nøkkel er lagret. Kontroller API-nøkkel.';
+$_['text_withheld_key_rejected'] = 'API-nøkkelen ble avvist. Kontroller API-nøkkel og Miljø.';
+$_['text_withheld_buyer_countries_empty'] = 'ingen kjøperland er aktivert for kontoen din for øyeblikket. Kontakt %1$s for å få dem aktivert.';
+$_['text_withheld_buyer_countries_malformed'] = 'kjøperlandene på kontoen din kunne ikke leses. Kontakt %1$s.';
+$_['text_withheld_merchant_unidentified'] = 'merchant-kontoen din er ennå ikke identifisert. Lagre Generelt for å verifisere API-nøkkelen.';
+$_['text_withheld_currency'] = 'ingen av butikkens aktiverte valutaer kan brukes til fakturaer.';
+$_['text_health_below'] = 'skjult for handlekorger under %s';
+$_['text_health_floor'] = '%1$s %2$s %3$s';
+$_['text_basis_gross'] = 'inklusiv mva.';
+$_['text_basis_net'] = 'eksklusiv mva.';
+$_['text_or'] = 'eller';
+$_['text_health_countries'] = 'tilbys bare kjøpere i %s';
+$_['text_health_currencies'] = 'skjult for handlekorger i %s';
+// Order page: refunds and the credit note
+$_['button_credit_note'] = 'Last ned kreditnota';
+$_['help_credit_note'] = 'Den siste kreditnotaen Two utstedte for denne ordren.';
+$_['error_credit_note'] = 'Kreditnotaen kunne ikke hentes. Den kan fortsatt være under behandling. Prøv igjen senere.';
+$_['text_refund'] = 'Refusjon';
+$_['text_refunded'] = 'Refundert hos Two';
+$_['text_remaining'] = 'Gjenstår å refundere';
+$_['text_refund_help'] = 'Velg hvor mange av hver linje som skal refunderes, legg inn en beløpslinje, eller begge deler. Statusen for full refusjon refunderer det som gjenstår.';
+$_['text_refund_unavailable'] = 'Refusjon blir tilgjengelig når Two har fakturert ordren.';
+$_['text_refund_unread'] = 'Two kunne ikke spørres om denne ordren. Last inn siden på nytt for å prøve igjen.';
+$_['text_refunds'] = 'Refusjoner sendt fra denne butikken';
+$_['column_line'] = 'Linje';
+$_['column_quantity'] = 'Bestilt';
+$_['column_net'] = 'Netto';
+$_['column_tax'] = 'Skatt';
+$_['column_rate'] = 'Skattesats';
+$_['column_refund_quantity'] = 'Refunder';
+$_['column_date'] = 'Dato';
+$_['column_amount'] = 'Beløp';
+$_['column_state'] = 'Utfall';
+$_['entry_refund_net'] = 'Beløpslinje, netto';
+$_['entry_refund_tax'] = 'Beløpslinje, skatt';
+$_['entry_refund_rate'] = 'Beløpslinje, skattesats';
+$_['entry_refund_reason'] = 'Årsak (på kreditnotaen)';
+$_['button_refund'] = 'Send refusjon til Two';
+$_['error_refund_permission'] = 'Du har ikke tillatelse til å refundere denne ordren.';
+$_['error_refund_quantity'] = 'Ikke refundert: et antall er ikke et heltall.';
+$_['text_refund_state_pending'] = 'Ikke besvart';
+$_['text_refund_state_done'] = 'Refundert';
+$_['text_refund_state_refused'] = 'Avvist';
+$_['text_refund_state_unknown'] = 'Ukjent';
+$_['text_refund_state_not_applied'] = 'Ikke utført';
+$_['button_retry'] = 'Prøv igjen';
+$_['text_refund_blocked'] = 'En refusjon nedenfor har ukjent utfall. Prøv den på nytt før du sender en ny refusjon: den sendes igjen med samme nøkkel, så Two refunderer den høyst én gang.';
+$_['column_left'] = 'Gjenstår å refundere';
+$_['text_panel_loading'] = 'Spør Two om denne ordren...';
+$_['error_panel'] = 'Two-fanen kunne ikke lastes inn. Åpne fanen på nytt for å prøve igjen, eller last inn siden på nytt.';
+$_['error_ajax'] = 'Butikken svarte ikke som forventet. Sjekk ordrehistorikken og Two-fanen før du prøver igjen.';
+
+// Diagnostics: trusted proxies for the checkout's rate limits.
+$_['entry_trusted_proxies'] = 'Klarerte proxyer';
+$_['help_trusted_proxies'] = 'Adresser til dine egne reverse-proxyer, lastbalanserere eller CDN-utgang, som IP-er eller CIDR-områder, atskilt med komma eller nye linjer. Disse IP-adressene unntas fra rate limiting.';
+$_['error_proxy_invalid'] = 'Klarerte proxyer: «%s» er ikke en gyldig IP-adresse eller et gyldig CIDR-område.';
+$_['entry_disable_rate_limit'] = 'Deaktiver rate limiting for kassen';
+$_['help_disable_rate_limit'] = 'Fjerner grensen per innringer på kassens AJAX-endepunkter. Grensen er slått på som standard. Hvis denne butikken ligger bak en CDN, lastbalanserer eller reverse proxy og Klarerte proxyer ovenfor er tom, ankommer hver kjøper som samme adresse og deler én grense - kjøpere blir da avvist midt i kassen med en for-mange-forespørsler-melding. Løsningen er å fylle inn Klarerte proxyer, som lar grensen skille kjøpere fra hverandre; slå dette på bare som en midlertidig løsning mens du samler listen, og av igjen etterpå.';
+
+// Payment terms tab (Build Guide sections 4 and 5)
+$_['text_terms_none'] = 'Merchantprofilen tilbyr ingen betalingsvilkår ennå, så Two tilbys ikke i utsjekken. Lagre en gyldig API-nøkkel, eller sjekk vilkårene dine i Two-selgerportalen.';
+$_['text_days'] = '%d dager';
+$_['text_term_type_standard'] = 'Standard';
+$_['text_term_type_eom'] = 'Slutten av måneden';
+$_['text_default_term_auto'] = 'Automatisk';
+$_['text_differential_total'] = 'Total avgift for valgt vilkår';
+$_['text_differential_difference'] = 'Avgiftsforskjell mot standard betalingsvilkår';
+$_['text_surcharge_none'] = 'Ingen tillegg';
+$_['text_surcharge_percentage'] = 'Prosent';
+$_['text_surcharge_fixed'] = 'Fast beløp';
+$_['text_surcharge_fixed_and_percentage'] = 'Fast beløp og prosent';
+$_['text_rounding_none'] = 'Ingen';
+$_['text_rounding_up'] = 'Opp';
+$_['text_rounding_down'] = 'Ned';
+$_['text_rounding_standard'] = 'Standard';
+$_['text_no_rounding'] = 'Ingen avrunding';
+$_['legend_surcharge'] = 'Tillegg';
+$_['entry_payment_term_type'] = 'Type betalingsvilkår';
+$_['entry_payment_terms'] = 'Tilgjengelige betalingsvilkår';
+$_['entry_default_payment_term'] = 'Standard betalingsvilkår';
+$_['entry_surcharge_type'] = 'Metode for tillegg';
+$_['entry_surcharge_differential'] = 'Grunnlag for tilleggsberegning';
+$_['entry_surcharge_line_description'] = 'Beskrivelse av tilleggsavgift';
+$_['entry_surcharge_rounding_basis'] = 'Avrunding av tillegg';
+$_['entry_surcharge_rounding_step'] = 'Avrundingssteg';
+$_['entry_surcharge_tax_class'] = 'Avgiftsbehandling for tillegg';
+$_['entry_surcharge_grid'] = 'Tillegg per vilkår';
+$_['column_term'] = 'Vilkår';
+$_['column_percentage'] = 'Prosent';
+$_['column_fixed'] = 'Fast beløp';
+$_['column_cap'] = 'Maksbeløp';
+$_['help_payment_term_type'] = 'Standardvilkår løper fra oppfyllelse. Vilkår fra slutten av måneden løper fra slutten av måneden ordren oppfylles i, og tilbyr bare 30, 45 og 60 dager.';
+$_['help_payment_terms'] = 'Vilkårene %1$s-kontoen din tilbyr. Kjøpere velger blant dem som er krysset av her; en ny installasjon krysser av for 30, 60 og 90 dager. Tilbys ingen av de avkryssede vilkårene, vises ikke %1$s i utsjekken.';
+$_['help_default_payment_term'] = 'Vilkåret kjøperen starter med. Automatisk bruker kontoens standard når den tilbys, ellers 30 dager, ellers det korteste.';
+$_['help_surcharge_type'] = 'Legg til et gebyr for betalingsvilkår for vilkåret kjøperen velger. %s beregner gebyret; butikken sender bare dette oppsettet. Ordretotalen Two-gebyr for betalingsvilkår må være aktivert (Utvidelser > Ordretotaler).';
+$_['help_surcharge_differential'] = 'Total avgift belaster det konfigurerte tillegget for det valgte vilkåret. Avgiftsforskjell belaster bare differansen mot standard betalingsvilkår.';
+$_['help_surcharge_line_description'] = 'Teksten kjøperen ser på gebyrlinjen. Bruk %s for vilkårets lengde i dager. La feltet stå tomt for standardteksten.';
+$_['help_surcharge_rounding_basis'] = 'Rund gebyret av til et jevnt intervall. Velg Ingen for vanlige beløp med to desimaler.';
+$_['help_surcharge_rounding_step'] = 'Intervallet gebyret rundes av til. Gjelder bare når en avrundingsretning er valgt.';
+$_['help_surcharge_tax_class'] = 'Avgiftsklassen gebyret belastes med, som for ethvert produkt: butikkens egne skatteregler gjelder på kjøperens adresse. Hvis gebyret skal være uten skatt, oppretter du en avgiftsklasse med en sats på 0 prosent og velger den. Påkrevd når et tillegg er på.';
+$_['help_surcharge_grid'] = 'Prosent er andelen av %2$s-gebyret som videreføres til kjøperen, fra 0 til 100. Maksbeløpet gjelder hele gebyret: prosenten og det faste beløpet til sammen, ikke bare prosenten. La feltet stå tomt for ingen grense. Faste beløp og maksbeløp er i %1$s og omregnes med kursene til %2$s for andre valutaer.';
+$_['error_term_type_unknown'] = 'Velg en type betalingsvilkår fra listen.';
+$_['error_terms_none'] = 'Du må velge minst ett betalingsvilkår.';
+$_['error_terms_unknown'] = 'Velg bare vilkår kontoen din tilbyr.';
+$_['error_default_term_unknown'] = 'Velg et standard betalingsvilkår blant de valgte vilkårene, eller Automatisk.';
+$_['error_surcharge_type_unknown'] = 'Velg en metode for tillegg fra listen.';
+$_['error_surcharge_tax_class_missing'] = 'Velg avgiftsbehandling for tillegg: tillegg er aktivert, så du må velge en avgiftsklasse før du lagrer.';
+$_['error_surcharge_tax_class_unknown'] = 'Avgiftsbehandlingen for tillegg må være en av butikkens avgiftsklasser. Hvis gebyret skal være uten skatt, oppretter du en klasse med en sats på 0 prosent.';
+$_['error_surcharge_step_unknown'] = 'Avrundingssteget må være en av de tilbudte verdiene.';
+$_['error_surcharge_basis_unknown'] = 'Velg avrunding av tillegg fra listen.';
+$_['error_surcharge_cell_invalid'] = '%1$s for vilkåret på %2$d dager må være et tall som ikke er negativt.';
+$_['error_surcharge_cap_zero'] = 'Maksbeløpet for tillegget på vilkåret med %2$d dager kan ikke være 0. Hvis du ikke vil ta noe for dette vilkåret, setter du prosentsatsen og det faste gebyret til 0 i stedet og lar maksbeløpet stå tomt.';
+$_['text_health_fee_quote'] = 'gebyrberegningen for betalingsvilkår har feilet siden %s (%s), så %s tilbys ikke for handlekurvene den feiler for';
+$_['text_health_fx'] = 'Valutakursene fra %s ble hentet %s';
+$_['text_withheld_no_terms'] = 'ingen betalingsvilkår tilbys: kontoen din tilbyr ingen av vilkårene som er krysset av på fanen Betalingsvilkår for denne vilkårstypen.';
+$_['text_withheld_fee_total_off'] = 'et tillegg er satt, men ordretotalen Two-gebyr for betalingsvilkår er ikke aktivert. Aktiver den under Utvidelser > Ordretotaler, eller sett metoden for tillegg til Ingen tillegg.';
+$_['error_surcharge_percent_range'] = '%1$s for vilkåret på %2$d dager må være mellom 0 og 100: det er andelen av gebyret som videreføres til kjøperen.';

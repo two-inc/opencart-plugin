@@ -93,13 +93,21 @@ final class SettingsProvider
         return $this->store->get('environment');
     }
 
-    /** The payment method title at checkout in one language, trimmed, or DEFAULT_TITLE when it has none. */
-    public function title(int $languageId): string
+    /**
+     * The payment method title at checkout in one language, trimmed, or the
+     * default when it has none: the language's own (from its language file),
+     * else DEFAULT_TITLE.
+     */
+    public function title(int $languageId, string $default = ''): string
     {
         $titles = json_decode((string) $this->store->get('title'), true);
         $title = is_array($titles) && is_scalar($titles[(string) $languageId] ?? null) ? trim((string) $titles[(string) $languageId]) : '';
 
-        return $title === '' ? self::DEFAULT_TITLE : $title;
+        if ($title !== '') {
+            return $title;
+        }
+
+        return trim($default) === '' ? self::DEFAULT_TITLE : trim($default);
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Opencart\Admin\Controller\Extension\Two\Payment;
 
 use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
 use Opencart\System\Library\Extension\Two\Core\Brand;
+use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
@@ -18,6 +19,7 @@ use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\DbRefundRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;
+use Opencart\System\Library\Extension\Two\Opencart\NoteText;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
@@ -108,7 +110,11 @@ class Two extends \Opencart\System\Engine\Controller
         $data['languages'] = $this->model_localisation_language->getLanguages();
         $data['titles'] = [];
         foreach ($data['languages'] as $language) {
-            $data['titles'][$language['language_id']] = $settings->title((int) $language['language_id']);
+            // Each language's default title from its own language file, over en-gb's as OpenCart does for a
+            // language this extension does not ship, prefixed so this page's keys stay.
+            $this->load->language(self::ROUTE, 'two_title', 'en-gb');
+            $this->load->language(self::ROUTE, 'two_title', (string) $language['code']);
+            $data['titles'][$language['language_id']] = $settings->title((int) $language['language_id'], $this->language->get('two_title_text_title_default'));
         }
 
         // Checkout fields: the placement switch, the optional fields and the minimum order.
@@ -429,6 +435,7 @@ class Two extends \Opencart\System\Engine\Controller
         $unresolved = false;
         foreach ($refunds as &$refund) {
             $refund['state_text'] = $this->language->get('text_refund_state_' . $refund['state']);
+            $refund['reason'] = NoteText::stored((string) $refund['reason'], $this->load, $this->language, NoteText::adminCode($this->config));
             $refund['retry'] = in_array($refund['state'], [RefundRecords::UNKNOWN, RefundRecords::PENDING], true);
             $unresolved = $unresolved || $refund['retry'];
         }
@@ -487,7 +494,7 @@ class Two extends \Opencart\System\Engine\Controller
             }
         }
         if (in_array(-1, $lines, true)) {
-            $this->json(['error' => 'Not refunded: a quantity is not a whole number.']);
+            $this->json(['error' => $this->language->get('error_refund_quantity')]);
 
             return;
         }
@@ -497,8 +504,10 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->partial($orderId, $request);
-        $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
-        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
+        $this->historyNote($order, $result['message']);
+        // The answer in the admin user's language; the history note in the shop's.
+        $text = NoteText::render($result['message'], $this->load, $this->language, NoteText::adminCode($this->config));
+        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $text] : ['error' => $text]);
     }
 
     /**
@@ -522,8 +531,10 @@ class Two extends \Opencart\System\Engine\Controller
         }
         $refundId = (int) ($this->request->post['two_refund_id'] ?? 0);
         $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->retry($orderId, $refundId);
-        $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
-        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
+        $this->historyNote($order, $result['message']);
+        // The answer in the admin user's language; the history note in the shop's.
+        $text = NoteText::render($result['message'], $this->load, $this->language, NoteText::adminCode($this->config));
+        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $text] : ['error' => $text]);
     }
 
     /**
@@ -592,13 +603,19 @@ class Two extends \Opencart\System\Engine\Controller
 
     /**
      * A line in the order history at the order's current status, not
-     * notified. Written directly: the admin has no order history model, and
-     * the status does not change, so no order event is due.
+     * notified, in the language of the order's store. Written directly: the
+     * admin has no order history model, and the status does not change, so
+     * no order event is due.
+     *
+     * @param array<string, mixed> $order
      */
-    private function historyNote(int $orderId, int $statusId, string $reason): void
+    private function historyNote(array $order, Message $message): void
     {
-        $this->db->query('INSERT INTO `' . DB_PREFIX . "order_history` SET `order_id` = '" . $orderId . "', `order_status_id` = '" . $statusId . "', `notify` = '0', `comment` = '"
-            . $this->db->escape('Two: ' . $reason) . "', `date_added` = NOW()");
+        $this->load->model('setting/setting');
+        $code = $this->model_setting_setting->getValue('config_language_catalog', (int) $order['store_id']) ?: NoteText::shopCode($this->config);
+        $text = NoteText::render($message, $this->load, $this->language, $code);
+        $this->db->query('INSERT INTO `' . DB_PREFIX . "order_history` SET `order_id` = '" . (int) $order['order_id'] . "', `order_status_id` = '" . (int) $order['order_status_id'] . "', `notify` = '0', `comment` = '"
+            . $this->db->escape('Two: ' . $text) . "', `date_added` = NOW()");
     }
 
     private function pdf(string $body, string $filename): void

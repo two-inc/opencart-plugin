@@ -7,6 +7,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
 /** What came back from Two, as received. */
 final class HttpResponse
 {
+    /** The transport error when nothing at all came back, which the merchant's note words itself. */
+    public const NO_RESPONSE = 'no response';
+
     /**
      * @param int                   $status         0 when nothing came back (DNS, TLS, routing, timeout)
      * @param array<string, string> $headers        lower-cased names
@@ -23,7 +26,7 @@ final class HttpResponse
     /** A transport failure that never reached Two, as opposed to any HTTP answer. */
     public static function unreachable(string $error): self
     {
-        return new self(0, '', [], $error === '' ? 'no response' : $error);
+        return new self(0, '', [], $error === '' ? self::NO_RESPONSE : $error);
     }
 
     public function reachedTwo(): bool

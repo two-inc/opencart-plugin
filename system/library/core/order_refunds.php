@@ -214,20 +214,20 @@ final class OrderRefunds
     /**
      * Refunds what is left of the order, from the refund status map.
      *
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     public function remainder(int $orderId): array
     {
         return $this->locked($orderId, fn (): array => $this->remainderLocked($orderId));
     }
 
-    /** @return array{outcome: string, reason: string} */
+    /** @return array{outcome: string, reason: string, message: Message} */
     private function remainderLocked(int $orderId): array
     {
         $record = $this->records->get($orderId);
         $twoOrderId = $record['two_order_id'] ?? '';
         if ($record === null || !OrderFlow::validTwoOrderId($twoOrderId)) {
-            return $this->refused($orderId, 'Not refunded: no Two order is linked to this order.');
+            return $this->refused($orderId, Message::of('note_refund_no_order'));
         }
         $blocked = $this->blocked($orderId);
         if ($blocked !== null) {
@@ -236,20 +236,18 @@ final class OrderRefunds
         $storedState = $record['two_order_state'] ?? '';
         $two = $this->read($orderId, $twoOrderId);
         if ($two === null) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: Two could not be asked for the order. Save the status again to retry.');
+            return $this->refused($orderId, Message::of('note_refund_status_unread', $twoOrderId));
         }
         $state = strtoupper((string) $two['state']);
         if (!in_array($state, self::REFUNDABLE_STATES, true)) {
-            return $this->refused($orderId, 'Two holds order ' . $twoOrderId . ' as ' . $state . ', so it was not refunded. Two refunds a fulfilled order; an order not fulfilled yet is cancelled.');
+            return $this->refused($orderId, Message::of('note_refund_state', $twoOrderId, $state));
         }
         $remaining = self::remainingCents($two);
         if ($remaining === null) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: its total could not be read from Two.');
+            return $this->refused($orderId, Message::of('note_refund_total_unread', $twoOrderId));
         }
         if ($remaining === 0) {
-            $reason = 'Two order ' . $twoOrderId . ' is already refunded in full.';
-
-            return self::outcome($storedState === 'REFUNDED' ? OrderLifecycle::SKIPPED : OrderLifecycle::ALREADY, $reason);
+            return self::outcome($storedState === 'REFUNDED' ? OrderLifecycle::SKIPPED : OrderLifecycle::ALREADY, Message::of('note_refund_already', $twoOrderId));
         }
 
         $prior = [];
@@ -263,7 +261,7 @@ final class OrderRefunds
         } else {
             $payload = $this->restPayload($orderId, $two, $remaining);
             if ($payload === null) {
-                return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: the rest (' . Postprocessing::money($remaining) . ') could not be split across the order\'s tax rates as Two holds them. Refund it in the Two merchant portal.');
+                return $this->refused($orderId, Message::of('note_refund_split', $twoOrderId, Postprocessing::money($remaining)));
             }
             $amount = Postprocessing::cents($payload['amount']);
         }
@@ -277,7 +275,7 @@ final class OrderRefunds
      *
      * @param array{lines?: array<string, int>, net?: string, tax?: string, rate?: string, reason?: string} $request
      *        quantities by Two line id; the amount line's net, tax and rate as typed
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     public function partial(int $orderId, array $request): array
     {
@@ -286,14 +284,14 @@ final class OrderRefunds
 
     /**
      * @param array{lines?: array<string, int>, net?: string, tax?: string, rate?: string, reason?: string} $request
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     private function partialLocked(int $orderId, array $request): array
     {
         $record = $this->records->get($orderId);
         $twoOrderId = $record['two_order_id'] ?? '';
         if ($record === null || !OrderFlow::validTwoOrderId($twoOrderId)) {
-            return $this->refused($orderId, 'Not refunded: no Two order is linked to this order.');
+            return $this->refused($orderId, Message::of('note_refund_no_order'));
         }
         $blocked = $this->blocked($orderId);
         if ($blocked !== null) {
@@ -301,17 +299,17 @@ final class OrderRefunds
         }
         $two = $this->read($orderId, $twoOrderId);
         if ($two === null) {
-            return $this->refused($orderId, 'Not refunded: Two could not be asked for order ' . $twoOrderId . '. Try again.');
+            return $this->refused($orderId, Message::of('note_refund_unread', $twoOrderId));
         }
         $state = strtoupper((string) $two['state']);
         if (!in_array($state, self::REFUNDABLE_STATES, true)) {
-            return $this->refused($orderId, 'Not refunded: Two holds order ' . $twoOrderId . ' as ' . $state . '. Two refunds a fulfilled order only.');
+            return $this->refused($orderId, Message::of('note_refund_not_fulfilled', $twoOrderId, $state));
         }
 
         try {
             $lines = $this->requestLines($two, $request, $orderId);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, 'Not refunded: ' . $refused->detail);
+            return $this->refused($orderId, Message::of('note_refund_form_not_built', $refused->note));
         }
         $totals = Postprocessing::recomputeTotals(['line_items' => $lines]);
         $payload = ['amount' => $totals['gross_amount'], 'currency' => (string) ($two['currency'] ?? ''), 'line_items' => $lines, 'tax_subtotals' => $totals['tax_subtotals']];
@@ -366,12 +364,12 @@ final class OrderRefunds
             }
             $line = $byId[(string) $id] ?? null;
             if ($line === null) {
-                throw OrderRefused::because('refund_line_unknown', 'a picked line is not on the Two order.');
+                throw OrderRefused::because('refund_line_unknown', Message::of('refusal_refund_line_unknown'));
             }
             $done = $earlier[$line['id']] ?? ['quantity' => 0, 'net' => 0, 'tax' => 0];
             $left = $line['quantity'] - $done['quantity'];
             if ($quantity > $left) {
-                throw OrderRefused::because('refund_line_quantity', 'more of "' . $line['name'] . '" than is left to refund (' . max(0, $left) . ' of ' . $line['quantity'] . ').');
+                throw OrderRefused::because('refund_line_quantity', Message::of('refusal_refund_line_quantity', $line['name'], max(0, $left), $line['quantity']));
             }
             // The share of the line's own net and tax; the last of the line takes what earlier refunds left, so the pieces add up to what Two holds.
             $lineNet = Postprocessing::cents($line['net_amount']);
@@ -386,22 +384,22 @@ final class OrderRefunds
         if ($netTyped !== '' || $taxTyped !== '') {
             foreach (['net' => $netTyped, 'tax' => $taxTyped === '' ? '0' : $taxTyped] as $field => $typed) {
                 if (preg_match('~^\d{1,9}(\.\d{1,2})?\z~', $typed) !== 1) {
-                    throw OrderRefused::because('refund_amount_format', 'the amount line\'s ' . $field . ' is not an amount (digits, and up to two decimals after a dot).');
+                    throw OrderRefused::because('refund_amount_format', Message::of($field === 'net' ? 'refusal_refund_amount_net' : 'refusal_refund_amount_tax'));
                 }
             }
             $rate = OrderBuilder::rate((float) ($request['rate'] ?? 0));
             if (!in_array($rate, self::rates($two), true)) {
-                throw OrderRefused::because('refund_amount_rate', 'the amount line\'s tax rate is not one of the order\'s.');
+                throw OrderRefused::because('refund_amount_rate', Message::of('refusal_refund_amount_rate'));
             }
             $net = Postprocessing::cents($netTyped);
             if ($net <= 0) {
-                throw OrderRefused::because('refund_amount_zero', 'the amount line has no net amount.');
+                throw OrderRefused::because('refund_amount_zero', Message::of('refusal_refund_amount_zero'));
             }
             $name = 'Refund on order ' . $orderId;
             $lines[] = self::checkedLine($name, 1, $net, Postprocessing::cents($taxTyped === '' ? '0' : $taxTyped), $rate, 'item');
         }
         if ($lines === []) {
-            throw OrderRefused::because('refund_empty', 'nothing to refund. Pick a quantity on a line, or enter an amount.');
+            throw OrderRefused::because('refund_empty', Message::of('refusal_refund_empty'));
         }
 
         return $lines;
@@ -415,7 +413,7 @@ final class OrderRefunds
     private static function checkedLine(string $name, int $quantity, int $net, int $tax, string $rate, string $unit): array
     {
         if (self::untaxed($net, $tax, $rate)) {
-            throw OrderRefused::because('refund_line_untaxed', '"' . $name . '" has a net amount but no tax at ' . $rate . '. Enter the tax the shop charged.');
+            throw OrderRefused::because('refund_line_untaxed', Message::of('refusal_refund_line_untaxed', $name, $rate));
         }
 
         return OrderBuilder::line($name, 'PHYSICAL', $quantity, intdiv($net, max(1, $quantity)), $net, $tax, (float) $rate, $unit);
@@ -491,14 +489,14 @@ final class OrderRefunds
      * Two's refunded total. If Two answers with a refund it already held
      * before this retry, that is the earlier attempt, applied after all.
      *
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     public function retry(int $orderId, int $refundId): array
     {
         return $this->locked($orderId, fn (): array => $this->retryLocked($orderId, $refundId));
     }
 
-    /** @return array{outcome: string, reason: string} */
+    /** @return array{outcome: string, reason: string, message: Message} */
     private function retryLocked(int $orderId, int $refundId): array
     {
         $row = null;
@@ -508,7 +506,7 @@ final class OrderRefunds
             }
         }
         if ($row === null || !in_array($row['state'], [RefundRecords::UNKNOWN, RefundRecords::PENDING], true)) {
-            return $this->refused($orderId, 'Not retried: that refund is not waiting for a retry.');
+            return $this->refused($orderId, Message::of('note_retry_not_waiting'));
         }
         $twoOrderId = $row['two_order_id'];
         $payload = json_decode($row['payload'], true);
@@ -519,11 +517,11 @@ final class OrderRefunds
             $this->refunds->update($refundId, ['idempotency_key' => $key]);
         }
         if (!OrderFlow::validTwoOrderId($twoOrderId) || !is_array($payload) || $key === '') {
-            return $this->refused($orderId, 'Not retried: the stored refund cannot be read. Check the order in the Two merchant portal.');
+            return $this->refused($orderId, Message::of('note_retry_unreadable'));
         }
         $two = $this->read($orderId, $twoOrderId);
         if ($two === null) {
-            return $this->refused($orderId, 'Not retried: Two could not be asked for order ' . $twoOrderId . '. Try again.', self::UNKNOWN);
+            return $this->refused($orderId, Message::of('note_retry_unread', $twoOrderId), self::UNKNOWN);
         }
 
         $first = ($row['refunded_before'] ?? '') === '' ? null : Postprocessing::cents($row['refunded_before']);
@@ -534,7 +532,7 @@ final class OrderRefunds
             // and that is what to look for.
             $amount = min($amount, self::remainingCents($two) ?? $amount);
             if ($amount <= 0) {
-                $result = $this->done($orderId, $key, 'Nothing was left to refund on Two order ' . $twoOrderId . ': Two holds it as refunded in full, by the earlier attempt or by a refund made meanwhile in the Two merchant portal. Nothing was sent.');
+                $result = $this->done($orderId, $key, Message::of('note_refund_nothing_left', $twoOrderId));
 
                 return $this->settled($refundId, RefundRecords::DONE, $result);
             }
@@ -551,7 +549,7 @@ final class OrderRefunds
      * @param array<string, mixed> $two     Two's order as read just before
      * @param array<string, mixed> $payload
      * @param string|null          $key     null for a partial refund, keyed on its new row
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     private function send(int $orderId, string $twoOrderId, array $two, array $payload, int $amount, ?string $key, string $trigger, string $kind): array
     {
@@ -559,7 +557,7 @@ final class OrderRefunds
         try {
             $body = $this->postprocessing->apply(Postprocessing::REFUND, $trigger, $path, $payload, ['order_id' => $orderId]);
         } catch (OrderRefused $refused) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: ' . $refused->detail);
+            return $this->refused($orderId, Message::of('note_refund_not_built', $twoOrderId, $refused->note));
         }
         // The amount Two is asked for: the hooked body's when it names one, else the plugin's own (a full
         // refund's empty body may come back with a field added, and still asks Two for the whole rest).
@@ -568,7 +566,7 @@ final class OrderRefunds
         }
         $remaining = self::remainingCents($two) ?? 0;
         if ($amount <= 0 || $amount > $remaining) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: ' . Postprocessing::money($amount) . ' is more than remains to refund (' . Postprocessing::money($remaining) . ').');
+            return $this->refused($orderId, Message::of('note_refund_too_much', $twoOrderId, Postprocessing::money($amount), Postprocessing::money($remaining)));
         }
 
         $currency = (string) ($two['currency'] ?? '');
@@ -578,7 +576,7 @@ final class OrderRefunds
         $rowId = $this->refunds->create($orderId, $fields);
         if ($key === null) {
             if ($rowId <= 0) {
-                return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: the refund could not be stored, so it was not sent. Run the extension install again.');
+                return $this->refused($orderId, Message::of('note_refund_not_stored', $twoOrderId));
             }
             $key = IdempotencyKey::refund($twoOrderId, $rowId);
             $this->refunds->update($rowId, ['idempotency_key' => $key]);
@@ -593,7 +591,7 @@ final class OrderRefunds
      * @param array<string, mixed> $two   Two's order as read just before
      * @param array<string, mixed> $body
      * @param int|null             $first on a retry, Two's refunded total in cents before the first attempt, when it was kept
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
     private function post(int $orderId, string $twoOrderId, array $two, int $rowId, array $body, int $amount, string $key, string $currency, bool $retry, ?int $first = null): array
     {
@@ -602,31 +600,29 @@ final class OrderRefunds
         $response = $this->client->request('POST', '/v1/order/' . $twoOrderId . '/refund', $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header($key));
         $money = Postprocessing::money($amount) . ' ' . $currency;
         if ($response->reachedTwo() && $response->status >= 400 && $response->status < 500) {
-            $result = $this->refused($orderId, 'Two refused the refund of ' . $money . ' on order ' . $twoOrderId . ': ' . $this->errors->reason($response));
+            $result = $this->refused($orderId, Message::of('note_refund_refused', $money, $twoOrderId, $this->errors->noteReason($response)));
 
             return $this->settled($rowId, RefundRecords::REFUSED, $result);
         }
         $after = $this->read($orderId, $twoOrderId);
         $answered = $response->reachedTwo() && $response->status < 300;
-        $done = 'Two refunded ' . $money . ' on order ' . $twoOrderId . '. The credit note is on the order page under Two.';
         if ($after !== null && self::refundedCents($after) - $before >= $amount) {
-            return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, $done));
+            return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, Message::of('note_refunded', $money, $twoOrderId)));
         }
         $answeredId = (string) ($response->json()['id'] ?? '');
         if ($retry && $answered && $answeredId !== '' && in_array($answeredId, $beforeIds, true)) {
-            return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, $done . ' Two had applied the earlier attempt.'));
+            return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, Message::of('note_refunded_earlier', $money, $twoOrderId)));
         }
         // Only with an answer from Two to this retry: a rise alone could be a refund made in the merchant portal.
         if ($retry && $answered && $first !== null && $after !== null && self::refundedCents($after) - $first >= $amount) {
-            return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, $done . ' Two\'s refunded total has risen by the amount since the first attempt, so that attempt was applied.'));
+            return $this->settled($rowId, RefundRecords::DONE, $this->done($orderId, $key, Message::of('note_refunded_risen', $money, $twoOrderId)));
         }
         if ($answered && $after !== null) {
-            $result = $this->refused($orderId, 'Two answered the refund of ' . $money . ' on order ' . $twoOrderId . ' with an earlier refund made under the same key (' . $key . '), so this refund was not applied. Two\'s refunded total did not rise by the amount sent.', self::NOT_APPLIED);
+            $result = $this->refused($orderId, Message::of('note_refund_not_applied', $money, $twoOrderId, $key), self::NOT_APPLIED);
 
             return $this->settled($rowId, RefundRecords::NOT_APPLIED, $result);
         }
-        $result = $this->refused($orderId, 'The outcome of the refund of ' . $money . ' on order ' . $twoOrderId . ' is unknown (' . ($answered ? 'the order could not be read back' : $this->errors->reason($response))
-            . '). Retry it on the Two tab of the order page; no other refund is sent until then.', self::UNKNOWN);
+        $result = $this->refused($orderId, $answered ? Message::of('note_refund_unknown_unread', $money, $twoOrderId) : Message::of('note_refund_unknown', $money, $twoOrderId, $this->errors->noteReason($response)), self::UNKNOWN);
 
         return $this->settled($rowId, RefundRecords::UNKNOWN, $result);
     }
@@ -635,13 +631,13 @@ final class OrderRefunds
      * Runs one refund operation with the order's refund lock held, so a
      * status-map refund and a form refund can never both pass the checks.
      *
-     * @param \Closure(): array{outcome: string, reason: string} $work
-     * @return array{outcome: string, reason: string}
+     * @param \Closure(): array{outcome: string, reason: string, message: Message} $work
+     * @return array{outcome: string, reason: string, message: Message}
      */
     private function locked(int $orderId, \Closure $work): array
     {
         if (!$this->refunds->lock($orderId)) {
-            return $this->refused($orderId, 'Not refunded: another refund on this order is being sent. Try again in a minute.');
+            return $this->refused($orderId, Message::of('note_refund_locked'));
         }
         try {
             return $work();
@@ -650,23 +646,22 @@ final class OrderRefunds
         }
     }
 
-    /** @return array{outcome: string, reason: string}|null the refusal while a refund awaits a retry */
+    /** @return array{outcome: string, reason: string, message: Message}|null the refusal while a refund awaits a retry */
     private function blocked(int $orderId): ?array
     {
         $row = $this->unresolved($orderId);
 
-        return $row === null ? null : $this->refused($orderId, 'Not refunded: the refund of ' . $row['amount'] . ' ' . $row['currency'] . ' sent on ' . $row['date_added']
-            . ' has an unknown outcome. Retry it on the Two tab of the order page first, so Two never refunds twice.');
+        return $row === null ? null : $this->refused($orderId, Message::of('note_refund_blocked', $row['amount'] . ' ' . $row['currency'], $row['date_added']));
     }
 
     /**
-     * @param array{outcome: string, reason: string} $result
-     * @return array{outcome: string, reason: string}
+     * @param array{outcome: string, reason: string, message: Message} $result
+     * @return array{outcome: string, reason: string, message: Message}
      */
     private function settled(int $rowId, string $state, array $result): array
     {
         if ($rowId > 0) {
-            $this->refunds->update($rowId, ['state' => $state, 'reason' => $result['reason']]);
+            $this->refunds->update($rowId, ['state' => $state, 'reason' => $result['message']->encode()]);
         }
 
         return $result;
@@ -681,26 +676,26 @@ final class OrderRefunds
     /**
      * A refund Two applied, logged with its key whatever the debug setting, as every order write is.
      *
-     * @return array{outcome: string, reason: string}
+     * @return array{outcome: string, reason: string, message: Message}
      */
-    private function done(int $orderId, string $key, string $reason): array
+    private function done(int $orderId, string $key, Message $message): array
     {
-        $this->logger->info('Order ' . $orderId . ': ' . $reason . ' Idempotency key ' . $key . '.');
+        $this->logger->info('Order ' . $orderId . ': ' . $message->english() . ' Idempotency key ' . $key . '.');
 
-        return self::outcome(OrderLifecycle::DONE, $reason);
+        return self::outcome(OrderLifecycle::DONE, $message);
     }
 
-    /** @return array{outcome: string, reason: string} */
-    private function refused(int $orderId, string $reason, string $outcome = OrderLifecycle::REFUSED): array
+    /** @return array{outcome: string, reason: string, message: Message} */
+    private function refused(int $orderId, Message $message, string $outcome = OrderLifecycle::REFUSED): array
     {
-        $this->logger->error('Order ' . $orderId . ': ' . $reason);
+        $this->logger->error('Order ' . $orderId . ': ' . $message->english());
 
-        return self::outcome($outcome, $reason);
+        return self::outcome($outcome, $message);
     }
 
-    /** @return array{outcome: string, reason: string} */
-    private static function outcome(string $outcome, string $reason): array
+    /** @return array{outcome: string, reason: string, message: Message} */
+    private static function outcome(string $outcome, Message $message): array
     {
-        return ['outcome' => $outcome, 'reason' => $reason];
+        return OrderLifecycle::outcome($outcome, $message);
     }
 }
