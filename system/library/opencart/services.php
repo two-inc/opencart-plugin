@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Opencart\System\Library\Extension\Two\Opencart;
 
 use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
+use Opencart\System\Library\Extension\Two\Core\Availability;
 use Opencart\System\Library\Extension\Two\Core\Client;
+use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
@@ -42,6 +44,15 @@ final class Services
     public const EVENT_ACTION = 'extension/two/event/two.history';
     public const EVENT_DESCRIPTION = 'Fulfils or cancels the Two order when an order moves into a mapped status.';
 
+    /**
+     * The checkout capture's row in OpenCart's event table: puts the
+     * checkout script and its settings on the checkout page.
+     */
+    public const CHECKOUT_EVENT_CODE = 'two_checkout_capture';
+    public const CHECKOUT_EVENT_TRIGGER = 'catalog/view/checkout/checkout/after';
+    public const CHECKOUT_EVENT_ACTION = 'extension/two/event/two_checkout';
+    public const CHECKOUT_EVENT_DESCRIPTION = 'Adds the Two company search and order intent script to the checkout page.';
+
     public readonly SettingsProvider $settings;
     public readonly Environment $environment;
     public readonly Client $client;
@@ -49,6 +60,8 @@ final class Services
     public readonly RecordProvider $records;
     public readonly SettingsSave $save;
     public readonly DbOrderRecords $orders;
+    public readonly Availability $availability;
+    public readonly CompanyLookup $companies;
     private readonly LogLogger $logger;
 
     public function __construct(private readonly \Opencart\System\Library\DB $db, \Opencart\System\Library\Log $log, int $storeId = 0)
@@ -61,6 +74,8 @@ final class Services
         $this->records = new RecordProvider($this->client, $this->settings, $this->verdict, $logger);
         $this->save = new SettingsSave($this->settings, $this->environment, $this->verdict, $this->records);
         $this->orders = new DbOrderRecords($db);
+        $this->availability = new Availability($this->settings, $this->records, $this->verdict);
+        $this->companies = new CompanyLookup($this->client, $this->environment, $this->settings);
     }
 
     /**

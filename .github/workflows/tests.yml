@@ -51,6 +51,25 @@ jobs:
       - name: PHPStan
         run: make phpstan
 
+  jest:
+    name: Jest (Node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Run Jest
+        run: npm run test:js
+
   smoke:
     name: Install smoke (OpenCart 4.1.0.4)
     runs-on: ubuntu-latest

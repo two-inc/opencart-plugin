@@ -55,6 +55,7 @@ final class AvailabilitySpec
             [['min_order_amount' => 50, 'min_order_currency' => 'GBP', 'min_order_basis' => 'net'], ['min_order_amount' => '110'], [$ok], [], Availability::BELOW_MINIMUM, 'an unset merchant basis follows the platform floor\'s basis'],
             [[], ['min_order_amount' => '110'], [$ok], ['currency' => 'SEK', 'gross' => 1.0], null, 'a merchant floor that cannot be judged does not withhold'],
             [[], ['min_order_amount' => '0'], [$ok], [], null, 'a zero merchant floor is none'],
+            [$floor, [], [$ok], ['currency' => 'EUR', 'value_currency' => 'GBP'], Availability::BELOW_MINIMUM, 'amounts kept in the shop currency are judged in it, whatever the cart shows'],
             [['min_order_amount' => 500, 'min_order_currency' => 'GBP', 'min_order_basis' => 'tax'], [], [$ok], [], null, 'a platform floor with an unknown basis is none'],
         ];
         $convert = static fn (float $amount, string $from, string $to): ?float => $from === 'EUR' && $to === 'GBP' ? round($amount * 0.85, 2) : null;

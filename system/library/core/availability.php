@@ -40,7 +40,10 @@ final class Availability
      * Null when Two may be offered for this cart, otherwise the withhold
      * reason (one of the constants) and its detail for the log.
      *
-     * @param array{enabled: bool, currency: string, shop_currency: string, gross: float, net: float, buyer_country: string|null} $checkout
+     * The cart's gross and net are in value_currency when given (a shop that
+     * keeps its amounts in its default currency), else in the cart's currency.
+     *
+     * @param array{enabled: bool, currency: string, shop_currency: string, gross: float, net: float, buyer_country: string|null, value_currency?: string} $checkout
      * @param \Closure(float, string, string): ?float $convert puts an amount from one currency into another, null when it cannot
      * @return array{reason: string, detail: string}|null
      */
@@ -63,7 +66,7 @@ final class Availability
         if (!$this->settings->companySearchInAddressArea() && $country === null) {
             return ['reason' => self::NO_COUNTRY, 'detail' => 'no country resolves from the billing or shipping address, so the tile\'s search could not run'];
         }
-        $shortfall = MinimumOrder::from($record, $this->settings, $checkout['shop_currency'])->shortfall($checkout['gross'], $checkout['net'], $currency, $convert);
+        $shortfall = MinimumOrder::from($record, $this->settings, $checkout['shop_currency'])->shortfall($checkout['gross'], $checkout['net'], $checkout['value_currency'] ?? $currency, $convert);
         if ($shortfall !== null) {
             return ['reason' => self::BELOW_MINIMUM, 'detail' => $shortfall];
         }
