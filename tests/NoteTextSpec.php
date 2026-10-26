@@ -43,7 +43,7 @@ final class NoteTextSpec
             $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $dir, FilesystemIterator::SKIP_DOTS));
             foreach ($files as $file) {
                 if ($file->getExtension() === 'php' && !str_contains($file->getPathname(), '/language/')) {
-                    TinyAssert::true(!str_contains((string) file_get_contents($file->getPathname()), "language->get('code')"), $file->getFilename() . ': the language folder comes from NoteText::adminCode or shopCode, not default.php\'s HTML lang code');
+                    TinyAssert::true(preg_match('/language->get\(\s*([\'"])code\1\s*\)/', (string) file_get_contents($file->getPathname())) === 0, $file->getFilename() . ': the language folder comes from NoteText::adminCode or shopCode, not default.php\'s HTML lang code');
                 }
             }
         }
