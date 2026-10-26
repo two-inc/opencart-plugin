@@ -47,6 +47,16 @@ The docker shop mounts the repo read-only, because OpenCart's Installer > Uninst
 
 The staging shops deploy this repo to `extension/two` on every new commit and then run `php <checkout>/dev/configure.php`. So `install.json` must stay at the repo root, and `configure.php` must stay idempotent and safe to run on every commit. The shops also serve the whole repo, so every CLI entry point refuses web requests (`PHP_SAPI` guard) and the root `.htaccess` refuses everything except the runtime paths. The package ships only `install.json`, `admin/`, `catalog/` and `system/`.
 
+## Languages
+
+Every string the admin or the buyer sees comes from the language files: `admin/language/<code>/payment/two.php`, `admin/language/<code>/total/two_fee.php` and `catalog/language/<code>/payment/two.php`, for en-gb (the reference) and nb-no, sv-se, nl-nl and es-es. Twig takes its copy from the controller, and the checkout script from the `i18n` block of its JSON island (the `js_*` keys); neither holds English of its own. Copy is in sentence case, with no em-dashes.
+
+- Wording follows the reference plugin's catalogues wherever the English source matches, so buyers read the same text in every plugin; strings the reference does not have were translated for this plugin and want a native speaker's check.
+- `tests/LanguageCatalogueSpec.php` is the completeness gate: every en-gb file exists in every locale with exactly en-gb's keys, every value filled in, and the same placeholders (`%s`, `%d`, `%1$s`, `{name}`; numbered ones in any order, the rest in en-gb's order). Add a key to en-gb and every locale in the same change. A new locale goes in the spec's list.
+- The payment method title defaults per language (`text_title_default`, in both the admin and the catalog file) when the merchant has set none.
+- OpenCart has no fallback to en-gb for an extension's language file, so a shop language outside the five shows the keys themselves.
+- Not translated yet: the order history notes and the refund form's outcomes the core writes (`OrderFlow`, `OrderLifecycle`, `OrderEdit`, `OrderRefunds`), which embed Two's own error text and also go to the log. They are English, as in the reference plugin's log.
+
 ## Admin settings
 
 The settings page has PrestaShop's five tabs: status, environment, API key and sort order (General), the per-language title and the checkout fields (Checkout fields), the payment terms and the surcharge (Payment terms), the fulfilment, cancel and refund status maps (Order management) and Diagnostics. Settings still to come say so on their tab.
