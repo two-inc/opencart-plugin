@@ -54,7 +54,7 @@ Every string the admin or the buyer sees comes from the language files: `admin/l
 - Wording follows the reference plugin's catalogues wherever the English source matches, so buyers read the same text in every plugin; strings the reference does not have were translated for this plugin and want a native speaker's check.
 - `tests/LanguageCatalogueSpec.php` is the completeness gate: every en-gb file exists in every locale with exactly en-gb's keys, every value filled in, and the same placeholders (`%s`, `%d`, `%1$s`, `{name}`; numbered ones in any order, the rest in en-gb's order). Add a key to en-gb and every locale in the same change. A new locale goes in the spec's list.
 - The payment method title defaults per language (`text_title_default`, in both the admin and the catalog file) when the merchant has set none.
-- OpenCart has no fallback to en-gb for an extension's language file, so a shop language outside the five shows the keys themselves.
+- OpenCart loads en-gb first and the shop language's file over it, so a shop language outside the five reads en-gb. For the same reason `$this->load->language()` returns en-gb's copy: read a prefixed load back with `$this->language->get()`, as the method title and the fee line do.
 - Not translated yet: the order history notes and the refund form's outcomes the core writes (`OrderFlow`, `OrderLifecycle`, `OrderEdit`, `OrderRefunds`), which embed Two's own error text and also go to the log. They are English, as in the reference plugin's log.
 
 ## Admin settings

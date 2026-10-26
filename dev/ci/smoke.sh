@@ -79,7 +79,7 @@ store api_key ''
 admin extension/two/payment/two.save -X POST --data-urlencode 'payment_two_title[1]=Pay & go <now>' > /dev/null
 [ "$(setting title)" = '{"1":"Pay & go <now>"}' ] || fail "the title was not stored as typed (got '$(setting title)')"
 ok "title stored as typed"
-contains "a bad environment is named on its field" "$(admin extension/two/payment/two.save -X POST -d payment_two_environment=bogus)" '"environment":"Please select a valid environment."'
+contains "a bad environment is named on its field" "$(admin extension/two/payment/two.save -X POST -d payment_two_environment=bogus)" '"environment":"Select a valid environment."'
 
 # Extensions > Payments: uninstall, then install (runs install(), which loads the core in the admin).
 contains "payments uninstall" "$(admin 'extension/payment.uninstall&extension=two&code=two')" '"success"'
