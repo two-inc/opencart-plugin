@@ -166,6 +166,8 @@ $_['text_refund_state_not_applied'] = 'Niet toegepast';
 $_['button_retry'] = 'Opnieuw proberen';
 $_['text_refund_blocked'] = 'Een terugbetaling hieronder heeft een onbekend resultaat. Probeer die opnieuw voordat je een andere terugbetaling verstuurt: die wordt opnieuw verzonden met dezelfde sleutel, zodat Two hem hooguit één keer terugbetaalt.';
 $_['column_left'] = 'Nog terug te betalen';
+$_['text_panel_loading'] = 'Two wordt gevraagd naar deze bestelling...';
+$_['error_panel'] = 'Het tabblad Two kon niet worden geladen. Open het tabblad opnieuw om het nog eens te proberen, of laad de pagina opnieuw.';
 $_['error_ajax'] = 'De winkel antwoordde niet zoals verwacht. Controleer de bestelgeschiedenis en het tabblad Two voordat je het opnieuw probeert.';
 
 // Diagnostics: trusted proxies for the checkout's rate limits.

@@ -166,6 +166,8 @@ $_['text_refund_state_not_applied'] = 'No aplicado';
 $_['button_retry'] = 'Reintentar';
 $_['text_refund_blocked'] = 'Un reembolso de abajo tiene un resultado desconocido. Reinténtalo antes de enviar otro reembolso: se vuelve a enviar con la misma clave, así que Two lo reembolsa como máximo una vez.';
 $_['column_left'] = 'Pendiente de reembolsar';
+$_['text_panel_loading'] = 'Consultando a Two sobre este pedido...';
+$_['error_panel'] = 'No se ha podido cargar la pestaña Two. Vuelve a abrir la pestaña para reintentarlo o vuelve a cargar la página.';
 $_['error_ajax'] = 'La tienda no respondió como se esperaba. Revisa el historial del pedido y la pestaña Two antes de volver a intentarlo.';
 
 // Diagnostics: trusted proxies for the checkout's rate limits.

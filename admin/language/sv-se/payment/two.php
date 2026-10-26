@@ -166,6 +166,8 @@ $_['text_refund_state_not_applied'] = 'Inte genomförd';
 $_['button_retry'] = 'Försök igen';
 $_['text_refund_blocked'] = 'En återbetalning nedan har ett okänt utfall. Försök med den igen innan du skickar en ny återbetalning: den skickas igen med samma nyckel, så Two återbetalar den högst en gång.';
 $_['column_left'] = 'Kvar att återbetala';
+$_['text_panel_loading'] = 'Frågar Two om den här ordern...';
+$_['error_panel'] = 'Fliken Two kunde inte läsas in. Öppna fliken igen för att försöka igen, eller ladda om sidan.';
 $_['error_ajax'] = 'Butiken svarade inte som väntat. Kontrollera orderhistoriken och fliken Two innan du försöker igen.';
 
 // Diagnostics: trusted proxies for the checkout's rate limits.

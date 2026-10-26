@@ -166,6 +166,8 @@ $_['text_refund_state_not_applied'] = 'Ikke utført';
 $_['button_retry'] = 'Prøv igjen';
 $_['text_refund_blocked'] = 'En refusjon nedenfor har ukjent utfall. Prøv den på nytt før du sender en ny refusjon: den sendes igjen med samme nøkkel, så Two refunderer den høyst én gang.';
 $_['column_left'] = 'Gjenstår å refundere';
+$_['text_panel_loading'] = 'Spør Two om denne ordren...';
+$_['error_panel'] = 'Two-fanen kunne ikke lastes inn. Åpne fanen på nytt for å prøve igjen, eller last inn siden på nytt.';
 $_['error_ajax'] = 'Butikken svarte ikke som forventet. Sjekk ordrehistorikken og Two-fanen før du prøver igjen.';
 
 // Diagnostics: trusted proxies for the checkout's rate limits.
