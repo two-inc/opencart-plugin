@@ -207,10 +207,16 @@ final class OrderLifecycle
             return self::outcome($already ? self::ALREADY : self::DONE, Message::of($already ? 'note_cancel_already' : 'note_cancelled', $twoOrderId));
         }
 
+        $key = match (true) {
+            $state === null => 'note_cancel_refused_unread',
+            in_array($state, self::FULFILLED_STATES, true) => 'note_cancel_refused_fulfilled',
+            default => 'note_cancel_refused',
+        };
+
         return $this->refused($orderId, Message::of(
-            (in_array($state, self::FULFILLED_STATES, true) ? 'note_cancel_refused_fulfilled' : 'note_cancel_refused') . ($failure === null ? '' : '_why'),
+            $key . ($failure === null ? '' : '_why'),
             $twoOrderId,
-            $state ?? 'unknown',
+            ...($state === null ? [] : [$state]),
             ...($failure === null ? [] : [$failure]),
         ));
     }

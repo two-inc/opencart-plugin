@@ -64,22 +64,32 @@ final class ErrorMapper
      */
     public function reason(HttpResponse $response): string
     {
-        $reason = $this->noteReason($response);
-
-        return $reason instanceof Message ? $reason->english() : $reason;
+        return $response->reachedTwo() ? self::twoText($response) : self::unreached($response)->english();
     }
 
     /**
-     * The reason for a merchant's note: the status, Two's error code and
-     * Two's own message as Two sent them, cut to REASON_LIMIT characters; or,
-     * when Two was not reached, the plugin's own words as a Message, so the
-     * note reads in one language.
+     * The reason for a merchant's note, a sentence ending in a full stop like
+     * every Message reason, as the notes follow it with the next sentence:
+     * Two's text as Two sent it (see reason), or, when Two was not reached,
+     * the plugin's own words as a Message, so the note reads in one language.
      */
     public function noteReason(HttpResponse $response): Message|string
     {
         if (!$response->reachedTwo()) {
-            return $response->transportError === HttpResponse::NO_RESPONSE ? Message::of('reason_no_response') : Message::of('reason_unreachable', $response->transportError);
+            return self::unreached($response);
         }
+        $text = self::twoText($response);
+
+        return preg_match('~[.!?]\z~u', $text) === 1 ? $text : $text . '.';
+    }
+
+    private static function unreached(HttpResponse $response): Message
+    {
+        return $response->transportError === HttpResponse::NO_RESPONSE ? Message::of('reason_no_response') : Message::of('reason_unreachable', $response->transportError);
+    }
+
+    private static function twoText(HttpResponse $response): string
+    {
         $body = $response->json() ?? [];
         $parts = ['HTTP ' . $response->status];
         if (is_scalar($body['error_code'] ?? null)) {
