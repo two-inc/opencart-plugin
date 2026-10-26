@@ -150,10 +150,6 @@ class Two extends \Opencart\System\Engine\Controller
             if ($stale !== null) {
                 $this->log->write('Two: order ' . $orderId . ' not placed: ' . $stale['detail']);
                 $json['error'] = htmlspecialchars(sprintf($this->language->get('error_placement_' . $stale['reason']), Brand::default()->productName, strtoupper((string) $facts['currency'])), ENT_QUOTES, 'UTF-8');
-            } elseif (($term = $this->model_extension_two_payment_two->placementTermRefusal($orderId)) !== null) {
-                // Section 4: only a term the merchant record offers, at the fee quoted for it.
-                $this->log->write('Two: order ' . $orderId . ' not placed: ' . $term['detail']);
-                $json['error'] = htmlspecialchars(sprintf($this->language->get('error_placement_' . $term['reason']), Brand::default()->productName), ENT_QUOTES, 'UTF-8');
             }
         }
 
@@ -168,14 +164,22 @@ class Two extends \Opencart\System\Engine\Controller
     }
 
     /**
-     * One placement, under the order's lock: the intent again, then the
-     * create. The buyer's notice comes back escaped.
+     * One placement, under the order's lock: the term, the intent again,
+     * then the create. The buyer's notice comes back escaped.
      *
      * @param array<string, string> $fields the optional buyer fields
      * @return array{ok: bool, redirect?: string, error?: string}
      */
     private function place(int $orderId, Services $services, array $fields): array
     {
+        $this->load->model(self::ROUTE);
+        $term = $this->model_extension_two_payment_two->placementTermRefusal($orderId);
+        if ($term !== null) {
+            // Section 4: only a term the merchant record offers, at the fee quoted for it.
+            $this->log->write('Two: order ' . $orderId . ' not placed: ' . $term['detail']);
+
+            return ['ok' => false, 'error' => htmlspecialchars(sprintf($this->language->get('error_placement_' . $term['reason']), Brand::default()->productName), ENT_QUOTES, 'UTF-8')];
+        }
         $company = $this->buyerCompany($services->settings->companySearchInAddressArea());
         $token = OrderFlow::newToken();
         $urls = [
@@ -186,7 +190,6 @@ class Two extends \Opencart\System\Engine\Controller
             'merchant_invoice_url' => '',
             'merchant_shipping_document_url' => '',
         ];
-        $this->load->model(self::ROUTE);
         $input = $this->model_extension_two_payment_two->orderInput($orderId, $company, $urls, $fields);
         $flow = $services->orderFlow($this->event);
         // Section 6.3: the intent is asked again at placement.
