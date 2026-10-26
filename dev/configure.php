@@ -16,7 +16,8 @@ declare(strict_types=1);
  * straight against the database, because neither step has a CLI entry point:
  * the extension_install and extension rows, the admin permissions for the
  * extension's route, the payment_two settings (status forced on), the
- * record refresh cron, the order lifecycle event and the two_order table.
+ * record refresh cron, the order lifecycle event, the payment terms fee
+ * order total (installed and enabled) and the two_order table.
  *
  * Environment:
  *   OPENCART_DIR     shop root holding config.php (default /var/www/html)
