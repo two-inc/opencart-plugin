@@ -149,6 +149,9 @@ final class CheckoutCaptureSpec
             [[self::json(200, ['national_identifier' => ['type' => 'GB_CRN', 'id' => '07844329'], 'addresses' => [['type' => 'BUSINESS_ADDRESS', 'street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'region' => null, 'country' => 'GB']]])], 'bEB0d2', ['organization_number' => '07844329', 'addresses' => [['street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'country' => 'GB']]], 1, 'the number and addresses a search result left out'],
             [[self::json(404, [])], 'bEB0d2', null, 1, 'a failed lookup'],
             [[], '../v1/merchant', null, 0, 'a lookup id that is not one: nothing asked'],
+            [[], '..', null, 0, 'two dots, which a path would normalise away: nothing asked'],
+            [[], '-abc', null, 0, 'a lookup id must start with a letter or digit'],
+            [[], 'a.b', null, 0, 'a dot is not in Two\'s lookup id alphabet'],
         ];
         foreach ($details as [$responses, $id, $expected, $calls, $description]) {
             [$lookup, $transport] = self::lookup($responses);
@@ -202,18 +205,33 @@ final class CheckoutCaptureSpec
     private static function testRateLimits(): void
     {
         $now = 1_800_000_000;
-        $hits = [
-            ['intent', null, ['window_start' => $now, 'hit_count' => 1, 'allowed' => true], 'a first request opens a window'],
-            ['intent', ['window_start' => $now - 30, 'hit_count' => 29], ['window_start' => $now - 30, 'hit_count' => 30, 'allowed' => true], 'the 30th intent in a minute is allowed'],
-            ['intent', ['window_start' => $now - 30, 'hit_count' => 30], ['window_start' => $now - 30, 'hit_count' => 31, 'allowed' => false], 'the 31st is refused'],
-            ['intent', ['window_start' => $now - 60, 'hit_count' => 500], ['window_start' => $now, 'hit_count' => 1, 'allowed' => true], 'a new minute starts a new window'],
-            ['soleTraderTokens', ['window_start' => $now - 5, 'hit_count' => 60], ['window_start' => $now - 5, 'hit_count' => 61, 'allowed' => false], 'token mints: 60 a minute'],
-            ['search', ['window_start' => $now - 5, 'hit_count' => 299], ['window_start' => $now - 5, 'hit_count' => 300, 'allowed' => true], 'searches: 300 a minute'],
-            ['countries', ['window_start' => $now, 'hit_count' => 10_000], ['window_start' => $now, 'hit_count' => 10_001, 'allowed' => true], 'an action with no limit'],
+        $proxies = ['10.0.0.0/8', '2001:db8:ffff::/48'];
+        $callers = [
+            ['192.0.2.7', '', [], '192.0.2.7', 'the socket address, with no proxies set'],
+            ['192.0.2.7', '198.51.100.9', [], '192.0.2.7', 'a forwarded header from a caller that is not a trusted proxy is ignored'],
+            ['10.1.2.3', '198.51.100.9', $proxies, '198.51.100.9', 'through a trusted proxy: the forwarded client'],
+            ['10.1.2.3', '198.51.100.66, 198.51.100.9, 10.4.4.4', $proxies, '198.51.100.9', 'the nearest hop that is not a trusted proxy, read from the right'],
+            ['10.1.2.3', '10.9.9.9', $proxies, '10.1.2.3', 'every hop trusted: the proxy itself'],
+            ['10.1.2.3', '', $proxies, '10.1.2.3', 'a trusted proxy with no forwarded header'],
+            ['2001:db8:1:2:3:4:5:6', '', [], '2001:db8:1:2::/64', 'an IPv6 caller counts as its /64'],
+            ['', '198.51.100.9', $proxies, 'unknown', 'no socket address at all'],
         ];
-        foreach ($hits as [$action, $row, $expected, $description]) {
-            TinyAssert::same($expected, RateLimiter::hit($action, $row, $now), 'rate limit per caller: ' . $description);
+        foreach ($callers as [$peer, $forwarded, $trusted, $expected, $description]) {
+            TinyAssert::same($expected, RateLimiter::callerIdentity($peer, $forwarded, $trusted), 'rate limit caller: ' . $description);
         }
+        $entries = [
+            ['10.0.0.1', true], ['10.0.0.0/8', true], ['2001:db8::/32', true], ['::1', true],
+            ['10.0.0.0/33', false], ['10.0.0.0/0', false], ['10.0.0.0/x', false], ['example.com', false], ['10.0.0', false],
+        ];
+        foreach ($entries as [$entry, $valid]) {
+            TinyAssert::same($valid, RateLimiter::isValidProxyEntry($entry), 'trusted proxies entry ' . $entry);
+        }
+        TinyAssert::same(['10.0.0.1', '10.0.0.0/8', '::1'], RateLimiter::parseProxies(" 10.0.0.1,10.0.0.0/8\n\n ::1 "), 'trusted proxies: split on commas and new lines');
+        TinyAssert::same(
+            [[30, 60], [60, 60], [60, 60], [300, 60]],
+            [RateLimiter::CALLER_LIMITS['intent'], RateLimiter::CALLER_LIMITS['soleTraderTokens'], RateLimiter::CALLER_LIMITS['countries'], RateLimiter::CALLER_LIMITS['search']],
+            'rate limit per caller: intents 30, token mints and countries 60, searches 300 a minute'
+        );
         $sessions = [
             [[], ['stamps' => [$now], 'allowed' => true], 'the first intent of a session'],
             [[$now - 10, $now - 20, $now - 30, $now - 40], ['stamps' => [$now - 10, $now - 20, $now - 30, $now - 40, $now], 'allowed' => true], 'the fifth in a minute'],
@@ -223,8 +241,7 @@ final class CheckoutCaptureSpec
         foreach ($sessions as [$stamps, $expected, $description]) {
             TinyAssert::same($expected, RateLimiter::sessionIntent($stamps, $now), 'rate limit per session: ' . $description);
         }
-        TinyAssert::same(RateLimiter::key('intent', '2001:db8:1:2:3:4:5:6'), RateLimiter::key('intent', '2001:db8:1:2:ffff::1'), 'rate limit: an IPv6 caller counts as its /64');
-        TinyAssert::true(RateLimiter::key('intent', '192.0.2.1') !== RateLimiter::key('intent', '192.0.2.2') && RateLimiter::key('intent', '192.0.2.1') !== RateLimiter::key('search', '192.0.2.1'), 'rate limit: one count per IPv4 caller and action');
+        TinyAssert::true(RateLimiter::key('intent', '192.0.2.1') !== RateLimiter::key('intent', '192.0.2.2') && RateLimiter::key('intent', '192.0.2.1') !== RateLimiter::key('search', '192.0.2.1'), 'rate limit: one count per caller and action');
     }
 
     private static function testDisplayLabel(): void
@@ -283,6 +300,9 @@ final class CheckoutCaptureSpec
             [['min_order_amount' => '1.234'], [], ['min_order_amount' => SettingsSave::MINIMUM_INVALID], 'three decimals are refused'],
             [['min_order_amount' => '-5'], [], ['min_order_amount' => SettingsSave::MINIMUM_INVALID], 'a negative amount is refused'],
             [['min_order_basis' => 'both'], [], ['min_order_basis' => SettingsSave::BASIS_INVALID], 'an unknown basis is refused'],
+            [['trusted_proxies' => " 10.0.0.0/8,\n192.0.2.1 "], ['trusted_proxies' => "10.0.0.0/8,\n192.0.2.1"], [], 'trusted proxies written'],
+            [['trusted_proxies' => ''], ['trusted_proxies' => ''], [], 'trusted proxies cleared'],
+            [['trusted_proxies' => '10.0.0.0/8, proxy.example'], [], ['trusted_proxies' => SettingsSave::PROXY_INVALID], 'an entry that is not an IP or a range is refused'],
         ];
         foreach ($cases as [$submitted, $written, $errors, $description]) {
             $store = new MemoryStore();
