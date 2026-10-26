@@ -44,7 +44,7 @@ TWO_API_STUB_PORT   ?= 8099
 # Empty runs against the stub. A sandbox API key runs against Two's sandbox.
 E2E_SANDBOX_API_KEY ?=
 E2E_COMPOSE         := docker compose -f tests/e2e/compose.yml $(if $(E2E_SANDBOX_API_KEY),,--profile stub)
-export E2E_PROJECT E2E_PORT E2E_OPENCART E2E_OPENCART_SHA256 E2E_PHP TWO_API_STUB_PORT
+export E2E_PROJECT E2E_PORT E2E_OPENCART E2E_OPENCART_SHA256 E2E_PHP TWO_API_STUB_PORT E2E_SANDBOX_API_KEY
 
 .PHONY: help install configure smoke run stop clean logs test test-js lint phpstan archive patch minor major e2e e2e-up e2e-test e2e-down
 
