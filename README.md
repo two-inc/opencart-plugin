@@ -2,7 +2,7 @@
 
 The Two payment extension for OpenCart 4.1: pay by invoice for business buyers.
 
-**Status: being rewritten.** This branch holds the new OpenCart 4.1 foundation. It installs, appears under Extensions > Payments and offers Two at checkout with company search, payment terms and the payment terms fee; more languages are still to come. The 1.x releases for OpenCart 3 call API hosts that no longer exist, so they cannot reach Two.
+**Status: being rewritten.** This branch holds the new OpenCart 4.1 foundation. It installs, appears under Extensions > Payments and offers Two at checkout with company search, payment terms and the payment terms fee, in English, Norwegian (Bokmål), Swedish, Dutch and Spanish. The 1.x releases for OpenCart 3 call API hosts that no longer exist, so they cannot reach Two.
 
 ## Requirements
 
@@ -26,6 +26,10 @@ make archive           # dist/two.ocmod.zip
 ```
 
 `make help` lists every target. See [AGENTS.md](AGENTS.md) for the layout and conventions.
+
+## Languages
+
+The extension ships OpenCart language files for en-gb, nb-no, sv-se, nl-nl and es-es, in the admin and at checkout. A shop language is matched by its OpenCart language code, so install the matching OpenCart language pack. The payment method title is set per language on the Checkout fields tab; a language with none set shows that language's default.
 
 ## Payment terms and the fee
 
