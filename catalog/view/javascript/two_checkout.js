@@ -33,11 +33,17 @@
     }
 
 
-    /** How long a relay call may take before it is abandoned, by call (the shop's own calls to Two time out at 30 s; confirm makes two). */
-    const TIMEOUTS = { intent: 40000, confirm: 75000 };
+    /** How long a relay call may take before it is abandoned, by call (the shop's own calls to Two time out at 30 s). */
+    const TIMEOUTS = { intent: 40000 };
     const DEFAULT_TIMEOUT = 20000;
-    /** How long a call waits for the queue ahead of it before it runs anyway, by call. */
-    const QUEUE_CAPS = { search: 2000, company_details: 2000 };
+    /** Calls the browser never abandons: placing the order runs as long as the shop needs, as a form post would. */
+    const NO_TIMEOUT = ['confirm'];
+    /**
+     * Calls that need not wait for an order intent ahead of them: the intent
+     * writes only its own rate-limit stamps to the session, and these write
+     * nothing a later intent could undo (confirm asks its own intent).
+     */
+    const SKIP_INTENTS = ['search', 'company_details', 'confirm'];
     /** How long Confirm waits for pending saves before it gives the buyer a message instead. */
     const SETTLE_CAP = 15000;
 
@@ -45,34 +51,43 @@
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    /** The shop's relay: every call carries the session's token, and none runs forever. */
+    /** The shop's relay: every call carries the session's token. */
     class Api {
         constructor(config, fetchImpl) {
             this.config = config;
             this.fetch = fetchImpl || ((url, init) => root.fetch(url, init));
+            // Every call so far, and every call so far except order intents.
             this.queue = Promise.resolve();
+            this.writes = Promise.resolve();
         }
 
         /**
-         * Runs a call after the ones before it have finished. Every call is
+         * Runs a call after the ones before it have finished. Calls are
          * queued: OpenCart writes the whole session back at the end of every
          * request, even one that only reads it, so two at once could undo
-         * one's change. A search waits at most its cap (it writes nothing of
-         * its own, so overlapping a slow intent loses nothing), and the calls
-         * after it still wait for everything before them.
+         * one's change. A search, a lookup and confirm skip any order intent
+         * ahead of them (SKIP_INTENTS), but still wait for every other call,
+         * and every later call waits for them.
          */
         serial(name, call) {
-            const before = this.queue;
-            const start = QUEUE_CAPS[name] ? Promise.race([before, wait(QUEUE_CAPS[name])]) : before;
-            const run = start.then(call, call);
-            this.queue = Promise.all([before, run.catch(() => null)]).then(() => null, () => null);
+            const before = SKIP_INTENTS.indexOf(name) !== -1 ? this.writes : this.queue;
+            const run = before.then(call, call);
+            const done = run.then(() => null, () => null);
+            this.queue = Promise.all([this.queue, done]).then(() => null);
+            if (name !== 'intent') {
+                this.writes = Promise.all([this.writes, done]).then(() => null);
+            }
             return run;
         }
 
-        /** One request, abandoned after its timeout or when the caller's signal aborts. */
+        /** One request, abandoned after its timeout (none for confirm) or when the caller's signal aborts. */
         timed(name, url, init, signal) {
+            if (signal && signal.aborted) {
+                // Superseded while it waited in the queue: never sent.
+                return Promise.reject(new Error('aborted'));
+            }
             const controller = typeof AbortController === 'function' ? new AbortController() : null;
-            const timer = setTimeout(() => controller && controller.abort(), TIMEOUTS[name] || DEFAULT_TIMEOUT);
+            const timer = NO_TIMEOUT.indexOf(name) === -1 ? setTimeout(() => controller && controller.abort(), TIMEOUTS[name] || DEFAULT_TIMEOUT) : null;
             if (signal && controller) {
                 signal.addEventListener('abort', () => controller.abort());
             }
@@ -86,9 +101,9 @@
             return this.config.urls[name] + '&' + query.toString();
         }
 
-        /** Resolves once every call queued so far has finished. */
+        /** Resolves once every call queued so far, order intents aside, has finished. */
         settled() {
-            return this.queue;
+            return this.writes;
         }
 
         get(name, params, signal) {
@@ -179,6 +194,7 @@
                 this.orgInput.value = saved.organization_number;
             }
             this.render();
+            this.lastCountry = this.country();
             this.refreshSoleTrader();
         }
 
@@ -449,10 +465,10 @@
             this.input.value = company.company_name;
             this.orgInput.value = company.organization_number;
             this.setStatus(labelFor(company.company_name, company.organization_number));
+            // Kept as pending, so settled() waits for the save (not the intent it then asks).
+            this.pending = this.save(company);
             // Only if it is still the company: a later clear or choice supersedes it.
-            // Kept as pending, so settled() also waits for the intent this choice asks.
-            this.pending = this.save(company).then(() => (this.selected === company ? this.onChange(company, this.role) : null));
-            return this.pending;
+            return this.pending.then(() => (this.selected === company ? this.onChange(company, this.role) : null));
         }
 
         clearSelection() {
@@ -517,6 +533,34 @@
                 return Promise.resolve();
             }
             return this.select({ company_name: name, organization_number: number, country_code: country, source: 'manual' });
+        }
+
+        /**
+         * The role's country select changed. As the reference plugin does: a
+         * company found by search belongs to its country's register, so a
+         * real change empties the field and the saved company, while a manual
+         * entry is kept (and saved again with the new country). Choosing the
+         * same country again changes nothing.
+         */
+        countryChanged() {
+            const country = this.country();
+            if (country === this.lastCountry) {
+                return;
+            }
+            this.lastCountry = country;
+            this.cancel();
+            this.close();
+            if (this.manual) {
+                this.scheduleManual();
+            } else {
+                if (this.selected || this.input.value) {
+                    this.input.value = '';
+                }
+                if (this.selected) {
+                    this.clearSelection();
+                }
+            }
+            this.refreshSoleTrader();
         }
 
         /** Shows the sole-trader entry when the registry offers it in the role's country. */
@@ -660,10 +704,7 @@
                 const select = this.doc.getElementById('input-' + role + '-country');
                 const instance = this.mount(role, input, () => (select ? this.config.countries[select.value] || '' : ''), null);
                 if (select) {
-                    select.addEventListener('change', () => {
-                        instance.clearSelection();
-                        instance.refreshSoleTrader();
-                    });
+                    select.addEventListener('change', () => instance.countryChanged());
                 }
             });
         }
@@ -714,9 +755,9 @@
         }
 
         /**
-         * Resolves once every pending save, and the intent each choice asks
-         * after its save, has reached the shop, so placing the order reads the
-         * company the buyer last gave.
+         * Resolves once every pending save has reached the shop, so placing
+         * the order reads the company the buyer last gave. Order intents are
+         * not waited for: confirm asks its own.
          */
         settled() {
             const pending = Object.keys(this.instances).map((role) => this.instances[role].flush());
@@ -796,10 +837,7 @@
                 const select = form.querySelector('[data-two-country]');
                 const instance = this.mount('tile', form.querySelector('[data-two-company]'), () => (select ? select.value : ''), form.querySelector('[data-two-organization]'));
                 if (select) {
-                    select.addEventListener('change', () => {
-                        instance.clearSelection();
-                        instance.refreshSoleTrader();
-                    });
+                    select.addEventListener('change', () => instance.countryChanged());
                 }
                 if (!instance.selected) {
                     return Promise.resolve();

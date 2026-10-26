@@ -103,7 +103,7 @@ describe('company search', () => {
         expect(checkout.instances.payment.status.textContent).toBe('unavailable');
     });
 
-    test('a slower, earlier answer never repaints over a later one', async () => {
+    test('a search superseded while it waits in the queue is never sent, and only the latest answer is shown', async () => {
         addressForms();
         const pending = {};
         const fetchImpl = jest.fn((url) => {
@@ -118,15 +118,13 @@ describe('company search', () => {
         const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
         checkout.mountAddressRoles();
         const search = checkout.instances.payment;
-        await flush();
         const first = search.search('acm');
         const second = search.search('acme');
         await flush();
-        pending.acm({ items: [{ name: 'Acm Old', organization_number: '2' }] });
-        await first;
         await flush();
+        expect(Object.keys(pending)).toEqual(['acme']);
         pending.acme({ items: [{ name: 'Acme Ltd', organization_number: '1' }] });
-        await second;
+        await Promise.all([first, second]);
         expect(Array.from(search.list.children).map((option) => option.textContent)).toEqual(['Acme Ltd1']);
     });
 
@@ -414,7 +412,6 @@ describe('review round 3', () => {
     test.each([
         ['save_company', 20000, 'a relay call'],
         ['intent', 40000, 'the intent'],
-        ['confirm', 75000, 'confirm'],
     ])('%s is abandoned after %d ms, and the queue moves on', async (name, ms) => {
         jest.useFakeTimers();
         const aborted = [];
@@ -432,8 +429,7 @@ describe('review round 3', () => {
         await api.settled();
     });
 
-    test('a search waits at most 2 s behind a slow intent; the save after it waits for both', async () => {
-        jest.useFakeTimers();
+    test('a search skips a slow intent but waits for a slow sole-trader call; the save after them waits for all', async () => {
         const order = [];
         const release = {};
         const fetchImpl = jest.fn((url) => new Promise((resolve) => {
@@ -442,36 +438,102 @@ describe('review round 3', () => {
             release[route] = () => { order.push('end ' + route); resolve({ json: () => Promise.resolve({ items: [] }) }); };
         }));
         const api = new Api(config(), fetchImpl);
+        api.get('sole_trader', { country: 'GB' });
         api.post('intent', {});
         api.get('search', { q: 'acme', country: 'GB' });
         api.post('save_company', { company_name: 'Acme' });
-        await jest.advanceTimersByTimeAsync(1999);
-        expect(order).toEqual(['start i']);
-        await jest.advanceTimersByTimeAsync(1);
-        expect(order).toEqual(['start i', 'start s']);
+        await flush();
+        expect(order).toEqual(['start st']);
+        release.st();
+        await flush();
+        await flush();
+        expect(order).toEqual(['start st', 'end st', 'start i', 'start s']);
         release.s();
-        await jest.advanceTimersByTimeAsync(0);
-        expect(order).toEqual(['start i', 'start s', 'end s']);
+        await flush();
+        expect(order.includes('start save')).toBe(false);
         release.i();
-        await jest.advanceTimersByTimeAsync(0);
-        expect(order).toEqual(['start i', 'start s', 'end s', 'end i', 'start save']);
+        await flush();
+        await flush();
+        expect(order.slice(-2)).toEqual(['end i', 'start save']);
         release.save();
         await api.settled();
     });
 
-    test('settled() also waits for the intent a choice asks after its save', async () => {
+    test('confirm is never abandoned by the browser: it runs as long as the shop needs', async () => {
+        jest.useFakeTimers();
+        let aborted = false;
+        const fetchImpl = jest.fn((url, init) => new Promise(() => {
+            init.signal.addEventListener('abort', () => { aborted = true; });
+        }));
+        const cfg = config();
+        cfg.urls.confirm = 'index.php?route=confirm';
+        new Api(cfg, fetchImpl).post('confirm', {});
+        await jest.advanceTimersByTimeAsync(300000);
+        expect([fetchImpl.mock.calls.length, aborted]).toEqual([1, false]);
+    });
+
+    test('settled() waits for the save, not the intent the choice then asks: confirm asks its own', async () => {
         const [form] = tileForm();
         addressForms();
         document.body.appendChild(form);
         const order = [];
-        const { fetchImpl } = shop({ st: { available: false }, save: () => { order.push('save'); return { ok: true }; }, i: () => { order.push('intent'); return { outcome: 'approved', notice: 'ok' }; } });
+        let releaseIntent;
+        const fetchImpl = jest.fn((url, init) => {
+            const route = new URLSearchParams(url.split('?')[1]).get('route');
+            if (route === 'i') {
+                order.push('intent asked');
+                return new Promise((resolve) => { releaseIntent = () => resolve({ json: () => Promise.resolve({ outcome: 'approved' }) }); });
+            }
+            if (route === 'save') {
+                order.push('save');
+            }
+            return Promise.resolve({ json: () => Promise.resolve({ ok: true, available: false }) });
+        });
         const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
         checkout.mountAddressRoles();
         checkout.tile = form;
         checkout.instances.payment.select({ company_name: 'Acme', organization_number: '1', country_code: 'GB', source: 'search' });
+        await flush();
         await checkout.settled();
         order.push('settled');
-        expect(order).toEqual(['save', 'intent', 'settled']);
+        expect(order).toEqual(['save', 'intent asked', 'settled']);
+        releaseIntent();
+    });
+
+    test.each([
+        ['GB', 'GB', false, 'Acme Ltd', 'the same country chosen again: the company stays'],
+        ['GB', 'NO', true, '', 'another country: the searched company and the field are cleared'],
+    ])('country %s then %s', async (first, then, cleared, value, description) => {
+        document.body.innerHTML = '<input id="input-payment-company"><select id="input-payment-country"><option value="222">UK</option><option value="160">Norway</option></select>';
+        const select = document.getElementById('input-payment-country');
+        select.value = first === 'GB' ? '222' : '160';
+        const { calls, fetchImpl } = shop({ st: { available: false }, save: { ok: true } });
+        const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
+        checkout.mountAddressRoles();
+        await checkout.instances.payment.select({ company_name: 'Acme Ltd', organization_number: '1', country_code: 'GB', source: 'search' });
+        select.value = then === 'GB' ? '222' : '160';
+        select.dispatchEvent(new Event('change'));
+        await checkout.settled();
+        expect([checkout.instances.payment.selected === null, document.getElementById('input-payment-company').value, calls.filter(([route]) => route === 'save').length]).toEqual([cleared, value, cleared ? 2 : 1]);
+    });
+
+    test('a manual entry survives a country change and is saved again with the new country', async () => {
+        document.body.innerHTML = '<input id="input-payment-company"><select id="input-payment-country"><option value="222">UK</option><option value="160">Norway</option></select>';
+        const { calls, fetchImpl } = shop({ st: { available: false }, save: { ok: true } });
+        const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
+        checkout.mountAddressRoles();
+        const search = checkout.instances.payment;
+        search.manualButton.click();
+        search.input.value = 'Small Shop';
+        search.orgInput.value = '998877';
+        search.orgInput.dispatchEvent(new Event('input'));
+        await checkout.settled();
+        const select = document.getElementById('input-payment-country');
+        select.value = '160';
+        select.dispatchEvent(new Event('change'));
+        await checkout.settled();
+        expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ company_name: 'Small Shop', organization_number: '998877', country: 'NO', source: 'manual' });
+        expect(search.input.value).toBe('Small Shop');
     });
 });
 
