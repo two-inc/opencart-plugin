@@ -73,9 +73,9 @@ class Two extends \Opencart\System\Engine\Model
             return [];
         }
         // OpenCart 4.1 renders method names unescaped, and the title is stored as typed.
-        // Prefixed: the method list runs inside other pages' rendering, whose own language keys must not be overwritten.
-        $copy = $this->load->language('extension/two/payment/two', 'two_title');
-        $title = htmlspecialchars($services->settings->title((int) $this->config->get('config_language_id'), (string) ($copy['two_title_text_title_default'] ?? '')), ENT_QUOTES, 'UTF-8');
+        // Prefixed and read back through the registry, as for the fee line below.
+        $this->load->language('extension/two/payment/two', 'two_title');
+        $title = htmlspecialchars($services->settings->title((int) $this->config->get('config_language_id'), $this->language->get('two_title_text_title_default')), ENT_QUOTES, 'UTF-8');
 
         return [
             'code' => 'two',
@@ -180,11 +180,13 @@ class Two extends \Opencart\System\Engine\Model
             return null;
         }
         // Prefixed: the totals run inside other pages' rendering, whose own language keys must not be overwritten.
-        $copy = $this->load->language('extension/two/payment/two', 'two_fee');
+        // Read back through the registry: the loader returns the default language's copy, and OpenCart's
+        // language event then loads the shop language's over it.
+        $this->load->language('extension/two/payment/two', 'two_fee');
         $services = $this->services();
 
         return [
-            'title' => $services->surcharge()->label($fee['days'], $services->paymentTerms()->isEndOfMonth(), (string) $copy['two_fee_text_fee_line'], (string) $copy['two_fee_text_fee_line_eom']),
+            'title' => $services->surcharge()->label($fee['days'], $services->paymentTerms()->isEndOfMonth(), $this->language->get('two_fee_text_fee_line'), $this->language->get('two_fee_text_fee_line_eom')),
             'value' => $value,
             'tax_class_id' => $services->surcharge()->taxClassId,
         ];
