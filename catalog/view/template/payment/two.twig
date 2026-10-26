@@ -18,10 +18,8 @@
       <label for="input-two-organization-number" class="form-label">{{ entry_organization_number|e }}</label>
       <input type="text" name="two_organization_number" id="input-two-organization-number" value="{{ company.organization_number|default('')|e }}" class="form-control" required>
     </div>
-  {% elseif company %}
-    <p data-two-company-summary>{{ text_company_from_address|format(company.company_name ~ ' (' ~ company.organization_number ~ ')')|e }}</p>
   {% else %}
-    <p class="text-danger" data-two-company-summary>{{ text_company_missing|e }}</p>
+    <p data-two-company-summary>{{ text_company_from_address|format(company_label)|e }}</p>
   {% endif %}
   {% for field in fields %}
     <div class="mb-3">

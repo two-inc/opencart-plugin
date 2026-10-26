@@ -8,8 +8,9 @@ $_['entry_company_name'] = 'Company name';
 $_['entry_organization_number'] = 'Organisation number';
 $_['entry_country'] = 'Company country';
 $_['text_company_intro'] = 'Search for the company you are buying for.';
+// %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Buying for %s.';
-$_['text_company_missing'] = 'To pay with %s, go back to your billing address and search for your company name. Select your company from the results to verify your business.';
+$_['text_company_missing'] = 'To pay with %s, search for your company name and select your company from the results to verify your business.';
 $_['button_confirm'] = 'Confirm order';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.
@@ -42,6 +43,15 @@ $_['js_change_company'] = 'Search for a different company';
 $_['js_organization_number'] = 'Organisation number';
 $_['js_checking'] = 'Checking %1$s payment eligibility...';
 $_['js_selected'] = 'Selected';
+$_['js_number_missing'] = 'Enter your organisation number to continue.';
+$_['error_too_many'] = 'Too many requests. Please wait and try again.';
+
+// Placement refused (section 6.3): the intent, and what changed since the method list.
+$_['error_intent_connection'] = 'Connection error with payment provider. Please try again.';
+$_['error_intent_unavailable'] = 'Payment provider temporarily unavailable. Please try again later.';
+$_['error_intent_unprocessable'] = 'Unable to process your order with %s payment.';
+$_['error_placement_currency'] = '%1$s is not available for orders in %2$s. Please choose another currency or payment method.';
+$_['error_placement_buyer_country'] = 'This payment method is not available.';
 $_['error_sole_trader'] = 'The sole trader sign-up could not be started. Please try again.';
 
 // Callbacks.

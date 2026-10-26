@@ -32,11 +32,29 @@
         }
     }
 
+    /**
+     * The calls that never write the shop's session, so may run side by side.
+     * Every other call is queued: OpenCart writes the whole session at the end
+     * of each request, so two at once could lose one's change.
+     */
+    const PARALLEL = ['search', 'company_details'];
+
     /** The shop's relay: every call carries the session's token. */
     class Api {
         constructor(config, fetchImpl) {
             this.config = config;
             this.fetch = fetchImpl || ((url, init) => root.fetch(url, init));
+            this.queue = Promise.resolve();
+        }
+
+        /** Runs a session-writing call after the ones before it have finished. */
+        serial(name, call) {
+            if (PARALLEL.indexOf(name) !== -1) {
+                return call();
+            }
+            const run = this.queue.then(call, call);
+            this.queue = run.catch(() => null);
+            return run;
         }
 
         url(name, params) {
@@ -45,18 +63,18 @@
         }
 
         get(name, params, signal) {
-            return this.fetch(this.url(name, params), { credentials: 'same-origin', signal: signal })
-                .then((response) => response.json());
+            return this.serial(name, () => this.fetch(this.url(name, params), { credentials: 'same-origin', signal: signal })
+                .then((response) => response.json()));
         }
 
         post(name, params) {
             const body = new URLSearchParams(Object.assign({ two_token: this.config.token }, params || {}));
-            return this.fetch(this.config.urls[name], {
+            return this.serial(name, () => this.fetch(this.config.urls[name], {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: body.toString()
-            }).then((response) => response.json());
+            }).then((response) => response.json()));
         }
     }
 
@@ -91,6 +109,12 @@
             }
         });
         return fragment;
+    }
+
+    /** The company as the buyer reads it: Two's own TWO: identifiers (a sole trader's) are never shown. */
+    function labelFor(name, number) {
+        const internal = /^\s*two:/i.test(String(number || ''));
+        return number && !internal ? name + ' (' + number + ')' : name;
     }
 
     /** One company control for one role. */
@@ -185,13 +209,13 @@
                 input: () => this.onInput(),
                 keydown: (event) => this.onKeydown(event),
                 manual: () => this.toggleManual(),
-                orgChange: () => this.saveManual(),
+                orgChange: () => this.scheduleManual(),
                 soleTrader: () => this.startSoleTrader()
             };
             this.input.addEventListener('input', this.handlers.input);
             this.input.addEventListener('keydown', this.handlers.keydown);
             this.manualButton.addEventListener('click', this.handlers.manual);
-            this.orgInput.addEventListener('change', this.handlers.orgChange);
+            this.orgInput.addEventListener('input', this.handlers.orgChange);
             this.soleTraderButton.addEventListener('click', this.handlers.soleTrader);
         }
 
@@ -199,6 +223,7 @@
             this.cancel();
             this.input.removeEventListener('input', this.handlers.input);
             this.input.removeEventListener('keydown', this.handlers.keydown);
+            clearTimeout(this.manualTimer);
             if (this.messageHandler) {
                 this.win.removeEventListener('message', this.messageHandler);
             }
@@ -224,12 +249,13 @@
         }
 
         onInput() {
+            if (this.manual) {
+                // One save (and one intent) once the buyer pauses, never one per keystroke.
+                this.scheduleManual();
+                return;
+            }
             if (this.selected) {
                 this.clearSelection();
-            }
-            if (this.manual) {
-                this.saveManual();
-                return;
             }
             this.cancel();
             this.timer = setTimeout(() => this.search(this.input.value), DEBOUNCE_MS);
@@ -303,7 +329,7 @@
                 const name = doc.createElement('span');
                 name.appendChild(highlight(doc, item.highlight || item.name));
                 option.appendChild(name);
-                if (item.organization_number) {
+                if (item.organization_number && !/^\s*two:/i.test(item.organization_number)) {
                     const number = doc.createElement('small');
                     number.className = 'text-muted ms-2';
                     number.textContent = item.organization_number;
@@ -351,11 +377,41 @@
             }
         }
 
+        /**
+         * Adopts a result. Some registers leave the organisation number out of
+         * the search results: then the company's own entry is looked up, and a
+         * company is never saved without a number.
+         */
         choose(index) {
             const item = this.results[index];
-            if (item) {
-                this.select({ company_name: item.name, organization_number: item.organization_number, country_code: this.country(), source: 'search' });
+            if (!item) {
+                return Promise.resolve();
             }
+            const country = this.country();
+            const adopt = (number) => (number
+                ? this.select({ company_name: item.name, organization_number: number, country_code: country, source: 'search' })
+                : this.needNumber(item.name));
+            if (item.organization_number || !item.lookup_id) {
+                return adopt(item.organization_number);
+            }
+            this.cancel();
+            this.close();
+            this.input.value = item.name;
+            this.setStatus(this.i18n.searching);
+            const seq = this.seq;
+            return this.api.get('company_details', { lookup_id: item.lookup_id })
+                .then((json) => (seq === this.seq ? adopt(json && json.organization_number) : null))
+                .catch(() => (seq === this.seq ? this.needNumber(item.name) : null));
+        }
+
+        /** No number came with the company: the buyer enters it. */
+        needNumber(name) {
+            this.input.value = name;
+            if (!this.manual) {
+                this.toggleManual();
+            }
+            this.setStatus(this.i18n.number_missing);
+            return Promise.resolve();
         }
 
         /** Adopts a company: into the form's own field, then the session, then the listeners. */
@@ -365,7 +421,7 @@
             this.selected = company;
             this.input.value = company.company_name;
             this.orgInput.value = company.organization_number;
-            this.setStatus(company.organization_number ? company.company_name + ' (' + company.organization_number + ')' : '');
+            this.setStatus(labelFor(company.company_name, company.organization_number));
             return this.save(company).then(() => this.onChange(company, this.role));
         }
 
@@ -399,11 +455,17 @@
             }
         }
 
+        scheduleManual() {
+            clearTimeout(this.manualTimer);
+            this.manualTimer = setTimeout(() => this.saveManual(), DEBOUNCE_MS);
+        }
+
         saveManual() {
             const name = this.input.value.trim();
             const number = this.orgInput.value.trim();
             const country = this.country();
-            if (!this.manual || !name || !number || !country) {
+            const same = this.selected && this.selected.company_name === name && this.selected.organization_number === number && this.selected.country_code === country;
+            if (!this.manual || !name || !number || !country || same) {
                 return Promise.resolve();
             }
             return this.select({ company_name: name, organization_number: number, country_code: country, source: 'manual' });
@@ -491,8 +553,10 @@
                         this.setStatus(this.i18n.sole_trader_error);
                         return null;
                     }
+                    const person = [buyer.first_name, buyer.last_name].filter(Boolean).join(' ');
+                    const fallback = /^\s*two:/i.test(buyer.organization_number) ? '' : buyer.organization_number;
                     return this.select({
-                        company_name: buyer.company_name || buyer.organization_number,
+                        company_name: buyer.company_name || person || fallback || (this.i18n.sole_trader_entry || ''),
                         organization_number: buyer.organization_number,
                         country_code: tokens.country,
                         source: 'sole_trader'
@@ -654,7 +718,7 @@
         }
     }
 
-    const api = { Api: Api, CompanySearch: CompanySearch, Checkout: Checkout, highlight: highlight, readConfig: readConfig };
+    const api = { Api: Api, CompanySearch: CompanySearch, Checkout: Checkout, highlight: highlight, labelFor: labelFor, readConfig: readConfig };
 
     if (typeof module === 'object' && module.exports) {
         module.exports = api;

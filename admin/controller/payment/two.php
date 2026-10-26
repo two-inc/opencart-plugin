@@ -10,6 +10,7 @@ use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
+use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
@@ -267,6 +268,8 @@ class Two extends \Opencart\System\Engine\Controller
 
             return is_object($result) ? $result->rows : [];
         }, DB_PREFIX);
+        // The checkout relays' per-caller rate-limit counts.
+        $this->db->query(DbRateLimits::createTableSql(DB_PREFIX));
     }
 
     public function uninstall(): void
@@ -426,9 +429,6 @@ class Two extends \Opencart\System\Engine\Controller
             return ['ok' => false, 'text' => $this->language->get('text_health_hidden') . ' - ' . sprintf($this->language->get('text_withheld_' . $health['reason']), $brand->providerFullName, $shopCurrency)];
         }
         $clauses = [];
-        if (!$health['record_known']) {
-            $clauses[] = $this->language->get('text_health_record_unknown');
-        }
         $floors = array_map(fn (array $floor): string => sprintf($this->language->get('text_health_floor'), number_format($floor['amount'], 2, '.', ''), $floor['currency'], $this->language->get('text_basis_' . $floor['basis'])), $health['floors']);
         if ($floors !== []) {
             $clauses[] = sprintf($this->language->get('text_health_below'), implode(' ' . $this->language->get('text_or') . ' ', $floors));

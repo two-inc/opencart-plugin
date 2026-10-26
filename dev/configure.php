@@ -30,6 +30,7 @@ declare(strict_types=1);
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
+use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 // The staging shops deploy the whole repo under the web root, so refuse to
@@ -194,5 +195,8 @@ $renamed = DbOrderRecords::install(static fn (string $sql): array => query($db, 
 if ($renamed !== null) {
     say('renamed the old ' . $p . DbOrderRecords::TABLE . ' table to ' . $renamed);
 }
+
+// 8. The checkout relays' rate-limit counts, as install() creates them.
+query($db, DbRateLimits::createTableSql($p));
 
 say('extension ' . TWO_CODE . ' ' . $manifest['version'] . ' installed and enabled');
