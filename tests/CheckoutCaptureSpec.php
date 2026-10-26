@@ -13,6 +13,7 @@ use Opencart\System\Library\Extension\Two\Core\HttpResponse;
 use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\OrderLock;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\RateLimiter;
 use Opencart\System\Library\Extension\Two\Core\RecordProvider;
@@ -32,6 +33,7 @@ final class CheckoutCaptureSpec
     {
         self::testIntent();
         self::testAfterIntent();
+        self::testOnePlacementAtATime();
         self::testOptionalFields();
         self::testSearch();
         self::testSoleTrader();
@@ -73,6 +75,51 @@ final class CheckoutCaptureSpec
         $keys = array_map(static fn (array $call): ?string => IdempotencyKey::in($call['headers']), $transport->calls);
         TinyAssert::true(str_starts_with((string) $keys[0], 'intent_0123456789abcdef_'), 'order intent: keyed on the buyer\'s session');
         TinyAssert::same([true, false], [$keys[0] === $keys[1], $keys[1] === $keys[2]], 'order intent: the same question repeats its key, another company asks a new one');
+    }
+
+    /**
+     * Two confirms for one order at once (a second press, a retry while the
+     * first is still talking to Two) create one Two order: the second is
+     * refused while the first holds the order's lock.
+     */
+    private static function testOnePlacementAtATime(): void
+    {
+        $created = self::json(201, ['id' => '5f1c2a7e-0000-4000-8000-000000000001', 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);
+        [$flow, $transport] = self::flow([$created]);
+        $lock = new class implements OrderLock {
+            /** @var array<int, bool> */
+            public array $held = [];
+
+            public function acquire(int $orderId): bool
+            {
+                if (isset($this->held[$orderId])) {
+                    return false;
+                }
+                $this->held[$orderId] = true;
+
+                return true;
+            }
+
+            public function release(int $orderId): void
+            {
+                unset($this->held[$orderId]);
+            }
+        };
+        $second = null;
+        $place = static fn (): array => $flow->create(self::order(), self::lines(), [], str_repeat('a', 48));
+        $first = OrderFlow::exclusively($lock, 42, static function () use ($lock, $place, &$second): array {
+            // The second confirm arrives while the first is still placing the order.
+            $second = OrderFlow::exclusively($lock, 42, $place);
+
+            return $place();
+        });
+        $creates = array_filter($transport->calls, static fn (array $call): bool => $call['method'] === 'POST' && str_ends_with((string) parse_url($call['url'], PHP_URL_PATH), '/v1/order'));
+        TinyAssert::same([true, false, [OrderFlow::IN_PROGRESS], 1], [$first['ok'], $second['ok'] ?? null, $second['buyer'] ?? null, count($creates)], 'one placement at a time: two concurrent confirms create one Two order');
+        TinyAssert::same([], $lock->held, 'one placement at a time: the lock is released after the placement');
+        TinyAssert::throws(static fn () => OrderFlow::exclusively($lock, 42, static function (): array {
+            throw new \RuntimeException('boom');
+        }), \RuntimeException::class, 'one placement at a time: a placement that throws');
+        TinyAssert::same([], $lock->held, 'one placement at a time: the lock is released even when the placement throws');
     }
 
     /** Placement (section 6.3): only an approved intent lets the order be created. */

@@ -38,6 +38,9 @@ final class OrderFlow
     /** The intent could not be asked (no answer, an error, an answer without a decision). */
     public const UNDECIDED = 'undecided';
 
+    /** The buyer's sentence when another placement of the same order is still running. */
+    public const IN_PROGRESS = 'error_order_in_progress';
+
     /** The buyer's sentences when placement is refused on the intent (language keys). */
     public const INTENT_DECLINED = 'text_intent_declined';
     public const INTENT_CONNECTION = 'error_intent_connection';
@@ -343,6 +346,29 @@ final class OrderFlow
         $shortName = $context['merchant_short_name'] ?? null;
 
         return is_string($shortName) && $shortName !== '' ? $payload + ['merchant_short_name' => $shortName] : $payload;
+    }
+
+    /**
+     * Runs one placement of an order while holding its lock. A second
+     * placement of the same order never runs alongside the first: it is
+     * refused at once with IN_PROGRESS, and the buyer is told the order is
+     * still being placed. Once the first has finished, a new placement runs
+     * as a re-create (the earlier Two order is cancelled first).
+     *
+     * @template T of array<string, mixed>
+     * @param \Closure(): T $place
+     * @return T|array{ok: false, buyer: list<string>, reason: string}
+     */
+    public static function exclusively(OrderLock $lock, int $orderId, \Closure $place): array
+    {
+        if (!$lock->acquire($orderId)) {
+            return ['ok' => false, 'buyer' => [self::IN_PROGRESS], 'reason' => 'Another placement of this order is still running.'];
+        }
+        try {
+            return $place();
+        } finally {
+            $lock->release($orderId);
+        }
     }
 
     /**

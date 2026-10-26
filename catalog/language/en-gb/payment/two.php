@@ -44,7 +44,8 @@ $_['js_organization_number'] = 'Organisation number';
 $_['js_checking'] = 'Checking %1$s payment eligibility...';
 $_['js_selected'] = 'Selected';
 $_['js_settle_timeout'] = 'We are still saving your company details. Please try again in a moment.';
-$_['js_confirm_failed'] = 'Your order could not be sent. Please check your connection and try again.';
+$_['js_confirm_failed'] = 'We could not hear back about your order. It may still be processing: please wait a moment and check your order history before trying again.';
+$_['error_order_in_progress'] = 'Your order is still being placed. Please wait a moment and check your order history before trying again.';
 $_['js_number_missing'] = 'Enter your organisation number to continue.';
 $_['error_too_many'] = 'Too many requests. Please wait and try again.';
 

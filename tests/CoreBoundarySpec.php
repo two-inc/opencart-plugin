@@ -23,7 +23,7 @@ final class CoreBoundarySpec
         'Client', 'Environment', 'RecordProvider', 'SettingsProvider', 'Availability', 'ApiKeyVerdict', 'BuyerCountries', 'MinimumOrder', 'CompanyLookup', 'BuyerFields', 'RateLimiter',
         'OrderBuilder', 'Postprocessing', 'ErrorMapper', 'CustomHeaders', 'Brand', 'OrderFlow', 'OrderLifecycle', 'OrderRefunds', 'OrderEdit', 'IdempotencyKey',
         'SettingsStore', 'SettingsOverlay', 'SettingsSave', 'Transport', 'Logger', 'HttpResponse', 'NotImplemented',
-        'OrderRecords', 'RefundRecords', 'OrderRefused', 'PostprocessingSubscribers',
+        'OrderRecords', 'OrderLock', 'RefundRecords', 'OrderRefused', 'PostprocessingSubscribers',
     ];
 
     /** @var list<array{pattern: string, samples: list<string>, description: string}> */

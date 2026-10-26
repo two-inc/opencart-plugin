@@ -10,6 +10,7 @@ use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
 use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
 use Opencart\System\Library\Extension\Two\Core\OrderRecords;
 use Opencart\System\Library\Extension\Two\Core\RateLimiter;
+use Opencart\System\Library\Extension\Two\Opencart\DbOrderLock;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
@@ -136,44 +137,59 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         if (!$json) {
-            $company = $this->buyerCompany($services->settings->companySearchInAddressArea());
-            $token = OrderFlow::newToken();
-            $urls = [
-                'merchant_confirmation_url' => $this->callbackUrl(OrderFlow::CALLBACK_CONFIRM, $orderId, $token, false),
-                'merchant_cancel_order_url' => $this->callbackUrl(OrderFlow::CALLBACK_CANCEL, $orderId, $token, false),
-                'merchant_edit_order_url' => '',
-                'merchant_order_verification_failed_url' => '',
-                'merchant_invoice_url' => '',
-                'merchant_shipping_document_url' => '',
-            ];
-            $this->load->model(self::ROUTE);
-            $input = $this->model_extension_two_payment_two->orderInput($orderId, $company, $urls, $fields['fields']);
-            $flow = $services->orderFlow($this->event);
-            // Section 6.3: the intent is asked again at placement.
-            $intent = $input === null ? null : $flow->intent($input['order'], $input['lines'], $input['totals'], $this->sessionHash(), $input['context'] + ['merchant_short_name' => $this->merchantShortName($services)]);
-            $refusal = $intent === null ? null : OrderFlow::afterIntent($intent);
-            if ($intent !== null && $refusal !== null) {
-                // Section 6.3: only an approved intent lets the order be created.
-                if ($intent['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
-                    $this->note($orderId, $intent['reason']);
-                }
-                $json['error'] = $refusal === [OrderFlow::INTENT_DECLINED] ? $this->declinedNotice() : $this->buyerMessage($refusal);
-            } else {
-                $result = $input === null
-                    ? ['ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'reason' => 'The order could not be read.']
-                    : $flow->create($input['order'], $input['lines'], $input['totals'], $token, $input['context']);
-                if ($result['ok']) {
-                    $json['redirect'] = $result['redirect'];
-                } else {
-                    if ($result['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
-                        $this->note($orderId, $result['reason']);
-                    }
-                    $json['error'] = $this->buyerMessage($result['buyer']);
-                }
-            }
+            // One placement of an order at a time: a second press or a retry while
+            // the first is still talking to Two is refused, never run alongside it.
+            $placed = OrderFlow::exclusively(new DbOrderLock($this->db), $orderId, fn (): array => $this->place($orderId, $services, $fields['fields']));
+            $json = $placed['ok'] ? ['redirect' => $placed['redirect'] ?? ''] : ['error' => $placed['error'] ?? $this->buyerMessage($placed['buyer'] ?? [ErrorMapper::GENERIC])];
         }
 
         $this->json($json);
+    }
+
+    /**
+     * One placement, under the order's lock: the intent again, then the
+     * create. The buyer's notice comes back escaped.
+     *
+     * @param array<string, string> $fields the optional buyer fields
+     * @return array{ok: bool, redirect?: string, error?: string}
+     */
+    private function place(int $orderId, Services $services, array $fields): array
+    {
+        $company = $this->buyerCompany($services->settings->companySearchInAddressArea());
+        $token = OrderFlow::newToken();
+        $urls = [
+            'merchant_confirmation_url' => $this->callbackUrl(OrderFlow::CALLBACK_CONFIRM, $orderId, $token, false),
+            'merchant_cancel_order_url' => $this->callbackUrl(OrderFlow::CALLBACK_CANCEL, $orderId, $token, false),
+            'merchant_edit_order_url' => '',
+            'merchant_order_verification_failed_url' => '',
+            'merchant_invoice_url' => '',
+            'merchant_shipping_document_url' => '',
+        ];
+        $this->load->model(self::ROUTE);
+        $input = $this->model_extension_two_payment_two->orderInput($orderId, $company, $urls, $fields);
+        $flow = $services->orderFlow($this->event);
+        // Section 6.3: the intent is asked again at placement.
+        $intent = $input === null ? null : $flow->intent($input['order'], $input['lines'], $input['totals'], $this->sessionHash(), $input['context'] + ['merchant_short_name' => $this->merchantShortName($services)]);
+        $refusal = $intent === null ? null : OrderFlow::afterIntent($intent);
+        if ($intent !== null && $refusal !== null) {
+            // Section 6.3: only an approved intent lets the order be created.
+            if ($intent['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
+                $this->note($orderId, $intent['reason']);
+            }
+
+            return ['ok' => false, 'error' => $refusal === [OrderFlow::INTENT_DECLINED] ? $this->declinedNotice() : $this->buyerMessage($refusal)];
+        }
+        $result = $input === null
+            ? ['ok' => false, 'buyer' => [ErrorMapper::GENERIC], 'reason' => 'The order could not be read.']
+            : $flow->create($input['order'], $input['lines'], $input['totals'], $token, $input['context']);
+        if ($result['ok']) {
+            return ['ok' => true, 'redirect' => $result['redirect']];
+        }
+        if ($result['buyer'] !== [ErrorMapper::COMPANY_REQUIRED]) {
+            $this->note($orderId, $result['reason']);
+        }
+
+        return ['ok' => false, 'error' => $this->buyerMessage($result['buyer'])];
     }
 
     /**
@@ -409,7 +425,7 @@ class Two extends \Opencart\System\Engine\Controller
         // cannot go stale under a concurrent hit (the bounce page's link and its
         // refresh). A guarded UPDATE cannot do this: OpenCart's addHistory must
         // see the old status itself, since the order mail and stock keep off it.
-        $lock = 'two_order_' . substr(sha1(DB_DATABASE . DB_PREFIX), 0, 12) . '_' . $orderId;
+        $lock = DbOrderLock::name($orderId);
         $held = (int) ($this->db->query("SELECT GET_LOCK('" . $lock . "', " . self::LOCK_SECONDS . ") AS `held`")->row['held'] ?? 0) === 1;
         if (!$held) {
             // Another hit on this order is still talking to Two and may yet place it.
