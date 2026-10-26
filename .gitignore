@@ -16,3 +16,8 @@ dist/
 .DS_Store
 Thumbs.db
 node_modules/
+
+# E2E: the stub CA, Playwright output
+tests/e2e/.tls/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
