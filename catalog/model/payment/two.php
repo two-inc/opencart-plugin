@@ -163,11 +163,12 @@ class Two extends \Opencart\System\Engine\Model
         if ($fee['net'] === null || $fee['net'] <= 0 || $fee['days'] === null || $value <= 0) {
             return null;
         }
-        $this->load->language('extension/two/payment/two');
+        // Prefixed: the totals run inside other pages' rendering, whose own language keys must not be overwritten.
+        $copy = $this->load->language('extension/two/payment/two', 'two_fee');
         $services = $this->services();
 
         return [
-            'title' => $services->surcharge()->label($fee['days'], $services->paymentTerms()->isEndOfMonth(), $this->language->get('text_fee_line'), $this->language->get('text_fee_line_eom')),
+            'title' => $services->surcharge()->label($fee['days'], $services->paymentTerms()->isEndOfMonth(), (string) $copy['two_fee_text_fee_line'], (string) $copy['two_fee_text_fee_line_eom']),
             'value' => $fee['net'] / $value,
             'tax_class_id' => $services->surcharge()->taxClassId,
         ];
