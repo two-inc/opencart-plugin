@@ -3,7 +3,7 @@
 # `make smoke`). Catches what the offline suite cannot: a wrong admin
 # namespace, route, template or language path, a broken install() or
 # configure.php, an unguarded callback, and any PHP error OpenCart logs
-# while serving them. Placing a whole order against a Two API stub is P9.
+# while serving them. Whole orders are placed by the E2E suite (tests/e2e).
 set -euo pipefail
 
 base="http://localhost:${PORT:-1238}"

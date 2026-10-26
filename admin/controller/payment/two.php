@@ -181,9 +181,10 @@ class Two extends \Opencart\System\Engine\Controller
         $data['cancel_status_id'] = $settings->cancelStatusId();
         $data['refund_status_id'] = $settings->refundStatusId();
 
-        foreach (['help_company_search_in_address', 'help_environment', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro', 'text_default_fulfil', 'text_default_cancel', 'text_default_refund'] as $key) {
+        foreach (['help_company_search_in_address', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro', 'text_default_fulfil', 'text_default_cancel', 'text_default_refund'] as $key) {
             $data[$key] = sprintf($this->language->get($key), $brand);
         }
+        $data['help_environment'] = $this->language->get('help_environment');
         $data['brand_name'] = $brand;
         $data['version'] = Services::pluginVersion();
 

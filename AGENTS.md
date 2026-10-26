@@ -12,8 +12,8 @@ The repo root is the extension directory: a shop serves it as `extension/two/`.
 | `system/library/opencart/` | OpenCart 4 implementations of the core's ports (`DbSettingsStore`, which upserts; `CurlTransport`; `LogLogger`; `DbOrderRecords`, the `two_order` table; `DbRefundRecords`, the `two_refund` table; `EventSubscribers`, the order postprocessing event), `NoteText` (a core `Message` in a language) and `Services`, the one place the core graph is built |
 | `system/library/core/` | The platform-neutral core: `Client`, `Environment`, `RecordProvider`, `SettingsProvider`, `SettingsSave` (the selective admin save), `Availability`, `OrderBuilder`, `Postprocessing`, `ErrorMapper`, `CustomHeaders`, `Brand`, `ApiKeyVerdict` (the key heartbeat), `OrderFlow` (create, confirm and cancel), `IdempotencyKey` (the key every write carries), `OrderLifecycle` (whole-order fulfil and cancel off the status maps, and the invoice), `OrderRefunds` (refunds and the credit note), `OrderEdit` (order-edit sync), `OrderRefused`, `PaymentTerms` (the terms offered and the default-term chain), `Surcharge` (the fee grid and its save rules), `FxRates` (Two's FX rates), `FeeQuote` (the fee quote) and `Message` (a merchant note as a language key), plus the ports they need (`SettingsStore`, `Transport`, `Logger`, `OrderRecords`, `RefundRecords`, `PostprocessingSubscribers`) and `SettingsOverlay` (read-only typed credentials for the live key check) |
 | `admin/`, `catalog/` | Thin OpenCart 4 adapters: controllers, models, language files, templates, the payment terms fee order total (`total/two_fee`: `catalog/model/total/two_fee.php` and its admin page), and `admin/view/javascript/two_admin.js` (the live API key check). `catalog/controller/cron/two.php` is the daily merchant-record refresh, registered in OpenCart's cron table by install() and `configure.php`; `catalog/controller/event/two.php` is the order lifecycle, registered in OpenCart's event table the same way |
-| `dev/` | `configure.php` (installs and enables the extension), the docker image, CI scripts (`ci/smoke.sh`), packaging |
-| `tests/` | Offline PHP suite: `tests/*Spec.php`, run by `tests/run.php` |
+| `dev/` | `configure.php` (installs and enables the extension), the docker image, CI scripts (`ci/smoke.sh`), packaging, and the environment parity check (`environment-parity.php`, byte-identical in the four plugin repos; `environment-contract.php` and the generated `environment-contract.json`) |
+| `tests/` | Offline PHP suite: `tests/*Spec.php`, run by `tests/run.php`. `tests/e2e/`: the Playwright suite, its compose file, the Two API stub (`stub/`) and the shop setup (`bin/`) |
 
 ## The core boundary
 
@@ -34,12 +34,24 @@ Stubs throw `NotImplemented::inPhase(...)` naming the phase that implements them
 | `make install` | Fresh docker shop (MariaDB plus OpenCart 4.1.0.4 from the upstream zip, installed with `cli_install.php`), extension installed and enabled |
 | `make configure` | Re-run `dev/configure.php` in the running shop |
 | `make smoke` | Install smoke against the running shop: admin page, save, install, `configure.php`, empty error log |
+| `make e2e` | E2E: start the E2E shop and the Two API stub, run Playwright, take them down. `make e2e-up`, `e2e-test` and `e2e-down` run the steps alone |
 | `make archive` | `dist/two.ocmod.zip` from HEAD |
 | `make patch` / `minor` / `major` | bumpver, commits, no tag or push |
 
 Settings come from `.env` only (see `.env.example`). `TWO_INTERNAL_ENVIRONMENTS` passes through to the shop.
 
-CI (`.github/workflows/tests.yml`) runs lint and the suite on PHP 8.1 and 8.4, PHPStan, Jest (Node 20, jsdom) over `catalog/view/javascript/two_checkout.js`, the install smoke and the package build. All are gates. `make test-js` runs Jest locally (`tests/js/`). The admin's live key check is still covered by the save-time rules it mirrors (`SettingsSaveSpec`) and the smoke.
+CI (`.github/workflows/tests.yml`) runs lint and the suite on PHP 8.1 and 8.4, PHPStan, Jest (Node 20, jsdom) over `catalog/view/javascript/two_checkout.js`, the install smoke and the package build. All are gates. `make test-js` runs Jest locally (`tests/js/`). `.github/workflows/environment-parity.yml` runs `php dev/environment-parity.php` (below). `.github/workflows/e2e.yml` runs the E2E suite (below). The admin's live key check is still covered by the save-time rules it mirrors (`SettingsSaveSpec`) and the smoke.
+
+E2E (`tests/e2e/`, `.github/workflows/e2e.yml`):
+
+- The E2E shop is its own compose project (`tests/e2e/compose.yml`, the same image as `make install`) on 127.0.0.1:1240, so it runs beside the `make install` shop. `E2E_OPENCART`, `E2E_OPENCART_SHA256` and `E2E_PHP` pick the leg; CI runs 4.1.0.0 on PHP 8.1 (the floor, which voids an unplaced order on every checkout edit) and 4.1.0.4 on PHP 8.4, on every PR and push.
+- The Two API stub (`tests/e2e/stub/two-api-stub.mjs`, Node, no dependencies) answers as `api.sandbox.two.inc` inside the compose network, over HTTPS with a throwaway CA the shop trusts (`bin/tls.sh`), so the extension runs unchanged with no host override. It keeps orders in memory, replays a repeated Idempotency-Key, serves Two's hosted checkout on `TWO_API_STUB_PORT` (required, no default: the payment URL is built from it) and has control routes the specs use to inject a failure and read what was sent.
+- `bin/prepare.sh` installs the extension with `configure.php` (sandbox, a dummy key) and `bin/seed.php` drops the demo data's fixed-amount Eco Tax, which the extension refuses.
+- The specs place an order with company search, edit it in the admin before fulfilment, fulfil it (Shipped), refund part from the Two tab and the rest with the refund status, retry a refund Two did not answer, and cancel (Canceled), checking both the page and what the stub holds.
+- The sandbox leg (staging pushes, nightly, and manual runs) places one order against Two's real sandbox with the `TWO_SANDBOX_API_KEY` secret, and is skipped with a notice without it. It passes the buyer's verification with Two's test endpoint `POST /test/verify_order/{id}` and fails with that call's status if the endpoint refuses.
+- The upgrade smoke (`bin/upgrade-smoke.sh`, every PR) installs the newest 2.x release tag, places an order, swaps HEAD in, re-runs `configure.php` and checks every stored setting is kept and an order still places. Until the first release of the rewrite there is no tag, and it skips, saying so; the 1.x tags are the OpenCart 3 extension.
+
+Environment parity: `dev/environment-parity.php` extracts this plugin's Environment setting (values, default, dropdown, read path, labels, description and the shared case table's hash) from the code named in `dev/environment-contract.php` into `dev/environment-contract.json`, and compares it with the PrestaShop, WooCommerce and Magento plugins' snapshots, read with `gh api`. After changing the environment rules, the en-gb admin labels or the description, run `php dev/environment-parity.php --write` and commit the JSON. The script is byte-identical in all four repos: change it in all four together.
 
 The docker shop mounts the repo read-only, because OpenCart's Installer > Uninstall deletes everything under `extension/two`.
 
@@ -111,7 +123,6 @@ Later-phase items, not built yet:
 - The Diagnostics tab: SSL bypass, debug logging, refresh merchant profile, scheduled refresh URL.
 - The error log view (last 100 lines).
 - The custom request-header table, with halt-and-show on save (`CustomHeaders::validate` is built and tested) and a `send_from_browser` flag per row.
-- P9's E2E must include a 4.1.0.0 CI leg that places a whole order: the floor voids an unplaced order on every checkout edit, and the CI shop otherwise runs 4.1.0.4.
 - Filling the address form from the chosen company's register entry, and browser-sent custom headers.
 - The merchant fee-rates preview on the Payment terms tab.
 - A plugin status for confirmed orders (the shop's default order status is used).
