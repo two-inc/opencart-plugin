@@ -54,7 +54,7 @@ $_['entry_cancel'] = '%s: Pedido cancelado';
 $_['entry_refund'] = '%s: Pedido reembolsado';
 
 // Help
-$_['help_environment'] = 'Selecciona el entorno de la API de %s que quieres usar. Producción para transacciones reales, Entorno de pruebas para hacer pruebas.';
+$_['help_environment'] = 'El entorno de pruebas es para hacer pruebas y no mueve dinero real. Usa la clave de API emitida para el entorno que selecciones.';
 $_['help_api_key'] = 'Introduce tu clave API proporcionada por %s.';
 $_['help_title'] = 'Introduce el título que aparecerá en la página de pago como nombre del método de pago.';
 $_['help_fulfil'] = 'Selecciona uno o más estados del pedido que deban activar el cumplimiento en %1$s. Cuando se establezca cualquiera de estos estados, el pedido se marcará como cumplido en %1$s. Los plazos de pago del comprador se activarán y comenzará el ciclo de pagos. Puedes seleccionar varios estados (mantén pulsado Ctrl/Cmd para seleccionar varios). Predeterminado: Enviado';

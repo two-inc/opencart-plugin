@@ -70,7 +70,18 @@ final class Environment
      */
     public function options(?string $stored): array
     {
-        if ($this->internalEnvironmentsEnabled || self::recognise($stored) === self::STAGING) {
+        return self::offered($stored, $this->internalEnvironmentsEnabled);
+    }
+
+    /**
+     * The options() rule as a pure function of the stored value and the flag,
+     * so dev/environment-parity.php can run it without building a shop.
+     *
+     * @return list<string>
+     */
+    public static function offered(?string $stored, bool $internalEnvironmentsEnabled): array
+    {
+        if ($internalEnvironmentsEnabled || self::recognise($stored) === self::STAGING) {
             return self::ALL;
         }
 

@@ -7,5 +7,8 @@ parameters:
     phpVersion: 80100
     paths:
         - tests
+    # The E2E harness: Playwright, and a seed run inside the shop container.
+    excludePaths:
+        - tests/e2e
     bootstrapFiles:
         - tests/bootstrap.php

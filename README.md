@@ -22,6 +22,7 @@ cp .env.example .env   # optional: API key and environment
 make install           # OpenCart 4.1.0.4 on http://localhost:1238/ with the extension enabled
 make test              # offline test suite
 make phpstan           # static analysis
+make e2e               # Playwright against a second shop and a Two API stub
 make archive           # dist/two.ocmod.zip
 ```
 

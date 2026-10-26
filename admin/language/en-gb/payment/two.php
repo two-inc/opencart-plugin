@@ -54,7 +54,7 @@ $_['entry_cancel'] = '%s: order cancelled';
 $_['entry_refund'] = '%s: order refunded';
 
 // Help
-$_['help_environment'] = 'Select the %s API environment to use. Production for live transactions, Sandbox for testing.';
+$_['help_environment'] = 'Sandbox is for testing and moves no real money. Use the API key issued for the environment you select.';
 $_['help_api_key'] = 'Enter your API key which is provided by %s.';
 $_['help_title'] = 'Enter a title which will appear on the checkout page as the payment method title.';
 $_['help_fulfil'] = 'Select one or more order statuses that should trigger %1$s fulfillment. When any of these statuses are set, the order will be marked as fulfilled with %1$s. Buyer payment terms become active and payout cycle begins. You can select multiple statuses (hold Ctrl/Cmd to select multiple). Default: Shipped';
