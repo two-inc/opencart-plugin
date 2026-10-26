@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Opencart\System\Library\Extension\Two\Core\BuyerFields;
 use Opencart\System\Library\Extension\Two\Core\Client;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
@@ -28,6 +29,7 @@ final class OrderEditSpec
 
     public static function runAll(): void
     {
+        self::testBuyerFields();
         self::testSync();
         self::testKeyChain();
         self::testSequences();
@@ -86,6 +88,45 @@ final class OrderEditSpec
                 TinyAssert::true(!isset($body['merchant_urls']) && !isset($body['buyer']), $d . ': the edit carries no callback URLs or buyer');
                 TinyAssert::same(3, $body['line_items'][0]['quantity'] ?? null, $d . ': the edited line');
                 TinyAssert::same(IdempotencyKey::edit(self::ID, IdempotencyKey::orderCreate(42, self::TOKEN_HASH), OrderFlow::payloadHash($body)), $transport->calls[1]['headers']['Idempotency-Key'] ?? null, $d . ': the first edit chains on the create key');
+            }
+        }
+    }
+
+    /**
+     * An order placed with optional buyer fields: the shared rebuild carries
+     * them from the record, so rows that do not change what Two holds send
+     * nothing, and an edit keeps them.
+     */
+    private static function testBuyerFields(): void
+    {
+        $fields = ['invoice_email' => 'ap@example.com', 'purchase_order_number' => 'PO-1', 'project' => 'Roof', 'department' => 'Ops'];
+        $withFields = static function (int $quantity) use ($fields): array {
+            $input = self::input($quantity);
+            $input['order']['buyer_fields'] = $fields;
+
+            return $input;
+        };
+        $placed = OrderFlow::payloadHash((new OrderBuilder())->build($withFields(2)['order'], $withFields(2)['lines'], []));
+        $read = 'GET /v1/order/' . self::ID;
+        $cases = [
+            [2, [self::get('CONFIRMED')], [$read], 'rows changed, the order Two holds did not: nothing sent'],
+            [3, [self::get('CONFIRMED'), self::get('CONFIRMED')], [$read, 'PUT /v1/order/' . self::ID], 'an edit: sent, the buyer fields kept'],
+        ];
+        foreach ($cases as [$quantity, $responses, $calls, $description]) {
+            [$edit, $transport, $records] = self::edit($responses, 'CONFIRMED');
+            $records->rows[42]['payload_hash'] = $placed;
+            $records->rows[42]['buyer_fields'] = BuyerFields::encode($fields);
+            $rebuild = OrderFlow::rebuildFrom(static function (array $company, array $stored) use ($withFields, $quantity): array {
+                $input = $withFields($quantity);
+                $input['order']['buyer_fields'] = $stored;
+
+                return $input;
+            });
+            $edit->sync(42, self::rows(3), $rebuild);
+            TinyAssert::same($calls, self::calls($transport), 'edit with buyer fields: ' . $description);
+            if (count($transport->calls) > 1) {
+                $body = json_decode((string) $transport->calls[1]['body'], true);
+                TinyAssert::same(['PO-1', 'Roof', 'Ops', ['ap@example.com']], [$body['buyer_purchase_order_number'] ?? null, $body['buyer_project'] ?? null, $body['buyer_department'] ?? null, $body['invoice_details']['invoice_emails'] ?? null], 'edit with buyer fields: ' . $description . ' (body)');
             }
         }
     }

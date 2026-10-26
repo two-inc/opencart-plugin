@@ -346,6 +346,25 @@ final class OrderFlow
     }
 
     /**
+     * The rebuild of a placed order from its record, for the confirm and the
+     * edit sync alike: the company and the optional buyer fields as stored
+     * with the order, so a rebuild hashes to what Two was sent. $orderInput
+     * maps the shop order with that company and those fields, without
+     * callback URLs (the payload's identity leaves them out).
+     *
+     * @param \Closure(array{company_name: string, organization_number: string, country_code: string}, array<string, string>): (array<string, mixed>|null) $orderInput
+     * @return \Closure(array<string, string>): (array<string, mixed>|null)
+     */
+    public static function rebuildFrom(\Closure $orderInput): \Closure
+    {
+        return static fn (array $record): ?array => $orderInput([
+            'company_name' => $record['company_name'] ?? '',
+            'organization_number' => $record['organization_number'] ?? '',
+            'country_code' => $record['country_code'] ?? '',
+        ], BuyerFields::decode($record['buyer_fields'] ?? ''));
+    }
+
+    /**
      * Whether placement goes on after the intent (section 6.3): only an
      * approval lets the order be created. Anything else (a decline, no
      * answer, an error, an answer without a decision, a refused build)
