@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Opencart\System\Library\Extension\Two\Opencart;
 
+use Opencart\System\Library\Extension\Two\Core\OrderEdit;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
+use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 
 /**
  * What the order history event does once an order has moved into a status:
- * fulfil or cancel its Two order as the status maps say. The controller
+ * send an edit of the order's rows to Two (OrderEdit), then fulfil, cancel
+ * or refund its Two order as the status maps say. OpenCart's order edit
+ * writes the edited rows and then adds a history line, so this sees edits. The controller
  * (`catalog/controller/event/two.php`) passes the shop in as closures, so
  * this runs offline in the specs.
  *
@@ -30,7 +34,8 @@ final class OrderStatusEvent
 
     /**
      * @param \Closure(int): (array<string, mixed>|null)                                                                $readOrder    the shop order, as OpenCart's getOrder gives it
-     * @param \Closure(array<string, mixed>): array{lifecycle: OrderLifecycle, fulfil: list<int>, cancel: int|null}     $lifecycleFor the lifecycle and status maps of the order's store
+     * @param \Closure(array<string, mixed>): array{lifecycle: OrderLifecycle, refunds: OrderRefunds, edit: OrderEdit, rebuild: \Closure, fulfil: list<int>, cancel: int|null, refund: int|null} $lifecycleFor
+     *        the lifecycle, refunds, edit sync, the order rebuild for an edit, and the status maps of the order's store
      * @param \Closure(int): (array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>}|null) $rows the order's own rows
      * @param \Closure(int, int, string): void                                                                          $note         adds a history line at a status
      * @param \Closure(string): void                                                                                    $logError
@@ -63,13 +68,20 @@ final class OrderStatusEvent
         $action = null;
         try {
             $setup = ($this->lifecycleFor)($order);
-            $action = OrderLifecycle::action($statusId, $setup['fulfil'], $setup['cancel']);
+            $action = OrderLifecycle::action($statusId, $setup['fulfil'], $setup['cancel'], $setup['refund']);
+            $rows = ($this->rows)($orderId);
+            $edit = $setup['edit']->sync($orderId, $rows, $setup['rebuild']);
+            if ($edit !== null) {
+                ($this->note)($orderId, $statusId, $edit['reason']);
+            }
             if ($action === null) {
                 return;
             }
-            $result = $action === OrderLifecycle::FULFIL
-                ? $setup['lifecycle']->fulfil($orderId, ($this->rows)($orderId))
-                : $setup['lifecycle']->cancel($orderId);
+            $result = match ($action) {
+                OrderLifecycle::FULFIL => $setup['lifecycle']->fulfil($orderId, $rows),
+                OrderLifecycle::CANCEL => $setup['lifecycle']->cancel($orderId),
+                default => $setup['refunds']->remainder($orderId),
+            };
             if ($result['outcome'] !== OrderLifecycle::SKIPPED) {
                 ($this->note)($orderId, $statusId, $result['reason']);
             }

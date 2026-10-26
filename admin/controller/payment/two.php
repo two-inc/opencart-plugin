@@ -7,9 +7,13 @@ namespace Opencart\Admin\Controller\Extension\Two\Payment;
 use Opencart\System\Library\Extension\Two\Core\ApiKeyVerdict;
 use Opencart\System\Library\Extension\Two\Core\Brand;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
+use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
+use Opencart\System\Library\Extension\Two\Core\Postprocessing;
+use Opencart\System\Library\Extension\Two\Core\RefundRecords;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
+use Opencart\System\Library\Extension\Two\Opencart\DbRefundRecords;
 use Opencart\System\Library\Extension\Two\Opencart\DbSettingsStore;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
@@ -35,6 +39,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\Admin\Model\Setting\Cron $model_setting_cron
  * @property-read \Opencart\Admin\Model\Setting\Event $model_setting_event
  * @property-read \Opencart\Admin\Model\Sale\Order $model_sale_order
+ * @property-read \Opencart\Admin\Model\Setting\Store $model_setting_store
  * @property-read \Opencart\System\Engine\Event $event
  * @property-read \Opencart\Admin\Model\Localisation\Language $model_localisation_language
  * @property-read \Opencart\Admin\Model\Localisation\OrderStatus $model_localisation_order_status
@@ -250,6 +255,11 @@ class Two extends \Opencart\System\Engine\Controller
 
             return is_object($result) ? $result->rows : [];
         }, DB_PREFIX);
+        DbRefundRecords::install(function (string $sql): array {
+            $result = $this->db->query($sql);
+
+            return is_object($result) ? $result->rows : [];
+        }, DB_PREFIX);
     }
 
     public function uninstall(): void
@@ -267,27 +277,224 @@ class Two extends \Opencart\System\Engine\Controller
     /**
      * The Two tab on the admin order page (Sales > Orders > the order),
      * which OpenCart shows for orders paid with this extension: the Two
-     * order and, once fulfilment has been asked for, the invoice download.
+     * order, the invoice and credit note downloads, and once Two has
+     * invoiced the order, the partial refund form and the refunds sent.
      */
     public function order(): string
     {
+        return '<div id="two-order-panel">' . $this->panelHtml() . '</div>';
+    }
+
+    /**
+     * The Two tab's content again, for the reload after a refund or retry.
+     * Same guard as the downloads.
+     */
+    public function panel(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->user->hasPermission('access', 'sale/order') || !$this->user->hasPermission('access', self::ROUTE)) {
+            $this->response->setOutput('<p>' . htmlspecialchars($this->language->get('error_invoice_permission'), ENT_QUOTES, 'UTF-8') . '</p>');
+
+            return;
+        }
+        $this->response->setOutput($this->panelHtml());
+    }
+
+    private function panelHtml(): string
+    {
         $this->load->language(self::ROUTE);
         $orderId = (int) ($this->request->get['order_id'] ?? 0);
-        $record = (new Services($this->db, $this->log))->orders->get($orderId) ?? [];
-        $state = $record['two_order_state'] ?? '';
+        // The order's own store: settings, the API key among them, are kept per store.
+        $order = $this->twoOrder($orderId);
+        $services = new Services($this->db, $this->log, (int) ($order['store_id'] ?? 0));
+        $record = $services->orders->get($orderId) ?? [];
+        ['two' => $two, 'state' => $state, 'refundable' => $refundable] = $services->orderRefunds($this->event)->panel($orderId);
+        $link = fn (string $action): string => $this->url->link(self::ROUTE . '.' . $action, 'user_token=' . $this->session->data['user_token'] . '&order_id=' . $orderId, true);
 
-        return $this->load->view(self::ROUTE . '_order', [
+        $remaining = $two === null ? null : OrderRefunds::remainingCents($two);
+        $refunds = $services->refunds->forOrder($orderId);
+        $earlier = OrderRefunds::refundedPerLine($refunds);
+        $lines = [];
+        foreach ($two === null ? [] : OrderRefunds::refundableLines($two) as $line) {
+            $lines[] = $line + ['left' => max(0, $line['quantity'] - ($earlier[$line['id']]['quantity'] ?? 0))];
+        }
+        $text = [];
+        foreach (['text_two_order', 'text_two_state', 'text_no_two_order', 'button_invoice', 'help_invoice', 'button_credit_note', 'help_credit_note', 'text_refund', 'text_refunded', 'text_remaining',
+            'text_refund_help', 'text_refund_unavailable', 'text_refund_unread', 'text_refunds', 'column_line', 'column_quantity', 'column_net', 'column_tax', 'column_rate', 'column_refund_quantity',
+            'column_date', 'column_amount', 'column_state', 'entry_refund_net', 'entry_refund_tax', 'entry_refund_rate', 'entry_refund_reason', 'button_refund', 'button_retry', 'text_refund_blocked', 'column_left', 'error_ajax'] as $key) {
+            $text[$key] = $this->language->get($key);
+        }
+        $unresolved = false;
+        foreach ($refunds as &$refund) {
+            $refund['state_text'] = $this->language->get('text_refund_state_' . $refund['state']);
+            $refund['retry'] = in_array($refund['state'], [RefundRecords::UNKNOWN, RefundRecords::PENDING], true);
+            $unresolved = $unresolved || $refund['retry'];
+        }
+        unset($refund);
+
+        return $this->load->view(self::ROUTE . '_order', $text + [
             'two_order_id' => $record['two_order_id'] ?? '',
             'two_order_state' => $state,
-            'invoice' => in_array($state, OrderLifecycle::FULFILLED_STATES, true)
-                ? $this->url->link(self::ROUTE . '.invoice', 'user_token=' . $this->session->data['user_token'] . '&order_id=' . $orderId, true)
-                : '',
-            'text_two_order' => $this->language->get('text_two_order'),
-            'text_two_state' => $this->language->get('text_two_state'),
-            'text_no_two_order' => $this->language->get('text_no_two_order'),
-            'button_invoice' => $this->language->get('button_invoice'),
-            'help_invoice' => $this->language->get('help_invoice'),
+            'invoice' => in_array($state, OrderLifecycle::FULFILLED_STATES, true) ? $link('invoice') : '',
+            'credit_note' => $state === 'REFUNDED' || in_array(RefundRecords::DONE, array_column($refunds, 'state'), true) ? $link('creditNote') : '',
+            'refundable' => $refundable,
+            'read' => $two !== null,
+            'refund_action' => $link('refund'),
+            'retry_action' => $link('refundRetry'),
+            'unresolved' => $unresolved,
+            'currency' => (string) ($two['currency'] ?? ''),
+            'refunded' => $two === null ? '' : Postprocessing::money(OrderRefunds::refundedCents($two)),
+            'remaining' => $remaining === null ? '' : Postprocessing::money($remaining),
+            'lines' => $lines,
+            'panel_action' => $link('panel'),
+            'rates' => $two === null ? [] : OrderRefunds::rates($two),
+            'refunds' => $refunds,
         ]);
+    }
+
+    /**
+     * The partial refund form's action: refunds the picked lines and the
+     * amount line at Two and notes the outcome in the order history.
+     * Needs the right to modify orders and this extension.
+     */
+    public function refund(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->user->hasPermission('modify', 'sale/order') || !$this->user->hasPermission('modify', self::ROUTE)) {
+            $this->json(['error' => $this->language->get('error_refund_permission')]);
+
+            return;
+        }
+        $orderId = (int) ($this->request->get['order_id'] ?? 0);
+        $order = $this->twoOrder($orderId);
+        if ($order === null) {
+            $this->json(['error' => $this->language->get('error_invoice_no_reference')]);
+
+            return;
+        }
+        $post = $this->request->post;
+        $lines = [];
+        foreach (is_array($post['two_refund_line'] ?? null) ? $post['two_refund_line'] : [] as $id => $quantity) {
+            if (is_scalar($quantity) && trim((string) $quantity) !== '') {
+                $lines[(string) $id] = ctype_digit(trim((string) $quantity)) ? (int) $quantity : -1;
+            }
+        }
+        if (in_array(-1, $lines, true)) {
+            $this->json(['error' => 'Not refunded: a quantity is not a whole number.']);
+
+            return;
+        }
+        $request = ['lines' => $lines];
+        foreach (['net', 'tax', 'rate', 'reason'] as $field) {
+            $request[$field] = self::raw($post['two_refund_' . $field] ?? '');
+        }
+
+        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->partial($orderId, $request);
+        $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
+        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
+    }
+
+    /**
+     * Sends a refund whose outcome is unknown again, under its own key, and
+     * notes the outcome in the order history. Same rights as a refund.
+     */
+    public function refundRetry(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->user->hasPermission('modify', 'sale/order') || !$this->user->hasPermission('modify', self::ROUTE)) {
+            $this->json(['error' => $this->language->get('error_refund_permission')]);
+
+            return;
+        }
+        $orderId = (int) ($this->request->get['order_id'] ?? 0);
+        $order = $this->twoOrder($orderId);
+        if ($order === null) {
+            $this->json(['error' => $this->language->get('error_invoice_no_reference')]);
+
+            return;
+        }
+        $refundId = (int) ($this->request->post['two_refund_id'] ?? 0);
+        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->retry($orderId, $refundId);
+        $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
+        $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
+    }
+
+    /**
+     * Streams the order's latest Two credit note, behind the same guard as
+     * the invoice.
+     */
+    public function creditNote(): void
+    {
+        $this->load->language(self::ROUTE);
+        if (!$this->user->hasPermission('access', 'sale/order') || !$this->user->hasPermission('access', self::ROUTE)) {
+            $this->invoiceNotice($this->language->get('error_invoice_permission'), 403);
+
+            return;
+        }
+        $orderId = (int) ($this->request->get['order_id'] ?? 0);
+        $order = $this->twoOrder($orderId);
+        if ($order === null) {
+            $this->invoiceNotice($this->language->get('error_invoice_no_reference'), 404);
+
+            return;
+        }
+        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->event)->creditNote($orderId);
+        if (isset($result['pdf'])) {
+            $this->pdf($result['pdf'], 'credit-note-' . $orderId . '.pdf');
+
+            return;
+        }
+        $this->invoiceNotice($this->language->get($result['notice'] === OrderRefunds::CREDIT_NOTE_NO_REFERENCE ? 'error_invoice_no_reference' : 'error_credit_note'), 200);
+    }
+
+    /**
+     * The event registry of the order's store front, as OpenCart's own admin
+     * order edits run it (a store instance). The admin registers only admin/
+     * and system/ triggers, so a write sent from here fires the order
+     * postprocessing event there, where the merchant's subscribers on
+     * `catalog/extension/two/order_postprocessing` are registered.
+     */
+    private function catalogEvent(int $storeId): \Opencart\System\Engine\Event
+    {
+        $this->load->model('setting/store');
+        $event = $this->model_setting_store->createStoreInstance($storeId, (string) $this->config->get('config_language'))->get('event');
+        if (!$event instanceof \Opencart\System\Engine\Event) {
+            throw new \RuntimeException('The store instance has no event registry.');
+        }
+
+        return $event;
+    }
+
+    /**
+     * The shop order when it was paid with this extension, else null.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function twoOrder(int $orderId): ?array
+    {
+        $this->load->model('sale/order');
+        $order = $orderId > 0 ? $this->model_sale_order->getOrder($orderId) : [];
+
+        return $order && (string) ($order['payment_method']['code'] ?? '') === 'two.two' ? $order : null;
+    }
+
+    /**
+     * A line in the order history at the order's current status, not
+     * notified. Written directly: the admin has no order history model, and
+     * the status does not change, so no order event is due.
+     */
+    private function historyNote(int $orderId, int $statusId, string $reason): void
+    {
+        $this->db->query('INSERT INTO `' . DB_PREFIX . "order_history` SET `order_id` = '" . $orderId . "', `order_status_id` = '" . $statusId . "', `notify` = '0', `comment` = '"
+            . $this->db->escape('Two: ' . $reason) . "', `date_added` = NOW()");
+    }
+
+    private function pdf(string $body, string $filename): void
+    {
+        $this->response->addHeader('Content-Type: application/pdf');
+        $this->response->addHeader('Content-Disposition: attachment; filename="' . $filename . '"');
+        $this->response->addHeader('Cache-Control: private, no-store');
+        $this->response->setOutput($body);
     }
 
     /**
@@ -304,9 +511,8 @@ class Two extends \Opencart\System\Engine\Controller
             return;
         }
         $orderId = (int) ($this->request->get['order_id'] ?? 0);
-        $this->load->model('sale/order');
-        $order = $orderId > 0 ? $this->model_sale_order->getOrder($orderId) : [];
-        if (!$order || (string) ($order['payment_method']['code'] ?? '') !== 'two.two') {
+        $order = $this->twoOrder($orderId);
+        if ($order === null) {
             $this->invoiceNotice($this->language->get('error_invoice_no_reference'), 404);
 
             return;
@@ -314,10 +520,7 @@ class Two extends \Opencart\System\Engine\Controller
 
         $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderLifecycle($this->event)->invoice($orderId);
         if (isset($result['pdf'])) {
-            $this->response->addHeader('Content-Type: application/pdf');
-            $this->response->addHeader('Content-Disposition: attachment; filename="invoice-' . $orderId . '.pdf"');
-            $this->response->addHeader('Cache-Control: private, no-store');
-            $this->response->setOutput($result['pdf']);
+            $this->pdf($result['pdf'], 'invoice-' . $orderId . '.pdf');
 
             return;
         }

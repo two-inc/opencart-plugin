@@ -10,8 +10,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * fulfils the whole Two order, into the mapped cancel status cancels it.
  * Plus the invoice download once the order is fulfilled.
  *
- * - Whole orders only. Partial fulfilment, refunds and order-edit sync are
- *   later work; the refund status map is not acted on yet.
+ * - Whole orders only: Two's partial fulfilment is done in the Two merchant
+ *   portal. Refunds (OrderRefunds) and order-edit sync (OrderEdit) have
+ *   their own classes.
  * - Idempotent: the stored Two state and then Two's live state decide
  *   whether anything is sent, so a repeated event or a re-save never fulfils
  *   or cancels twice. Each call also carries an idempotency key
@@ -29,6 +30,7 @@ final class OrderLifecycle
 {
     public const FULFIL = 'fulfil';
     public const CANCEL = 'cancel';
+    public const REFUND = 'refund';
 
     /** Two accepted the request. */
     public const DONE = 'done';
@@ -68,12 +70,13 @@ final class OrderLifecycle
     }
 
     /**
-     * What moving an order into a status asks of Two: FULFIL, CANCEL or null.
-     * A status in both maps fulfils, the order the settings page lists them.
+     * What moving an order into a status asks of Two: FULFIL, CANCEL,
+     * REFUND (the rest of the order) or null. A status in more than one map
+     * takes the first, in the order the settings page lists them.
      *
      * @param list<int> $fulfilStatusIds
      */
-    public static function action(int $statusId, array $fulfilStatusIds, ?int $cancelStatusId): ?string
+    public static function action(int $statusId, array $fulfilStatusIds, ?int $cancelStatusId, ?int $refundStatusId = null): ?string
     {
         if ($statusId <= 0) {
             return null;
@@ -81,8 +84,11 @@ final class OrderLifecycle
         if (in_array($statusId, $fulfilStatusIds, true)) {
             return self::FULFIL;
         }
+        if ($statusId === $cancelStatusId) {
+            return self::CANCEL;
+        }
 
-        return $statusId === $cancelStatusId ? self::CANCEL : null;
+        return $statusId === $refundStatusId ? self::REFUND : null;
     }
 
     /**
@@ -129,6 +135,9 @@ final class OrderLifecycle
         }
         if (($record['rows_hash'] ?? '') === '') {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: no record of the order as placed was kept, so it cannot be checked. Fulfil it in the Two merchant portal.');
+        }
+        if (($record['payload_hash'] ?? '') === '') {
+            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: whether Two holds the last edit of this order is unknown. Save the status again to send the order to Two first; if the notes show it still cannot be sent, fulfil the order in the Two merchant portal.');
         }
         if ($rows === null || !hash_equals($record['rows_hash'], self::rowsHash($rows))) {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: the order was edited after it was placed with Two. Two still holds the order as placed.');

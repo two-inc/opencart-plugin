@@ -11,7 +11,9 @@ use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\OrderEdit;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
+use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\RecordProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
@@ -40,7 +42,7 @@ final class Services
     public const EVENT_CODE = 'two_order_lifecycle';
     public const EVENT_TRIGGER = 'catalog/model/checkout/order.addHistory/after';
     public const EVENT_ACTION = 'extension/two/event/two.history';
-    public const EVENT_DESCRIPTION = 'Fulfils or cancels the Two order when an order moves into a mapped status.';
+    public const EVENT_DESCRIPTION = 'Sends order edits to Two, and fulfils, cancels or refunds the Two order when an order moves into a mapped status.';
 
     public readonly SettingsProvider $settings;
     public readonly Environment $environment;
@@ -49,6 +51,7 @@ final class Services
     public readonly RecordProvider $records;
     public readonly SettingsSave $save;
     public readonly DbOrderRecords $orders;
+    public readonly DbRefundRecords $refunds;
     private readonly LogLogger $logger;
 
     public function __construct(private readonly \Opencart\System\Library\DB $db, \Opencart\System\Library\Log $log, int $storeId = 0)
@@ -61,6 +64,7 @@ final class Services
         $this->records = new RecordProvider($this->client, $this->settings, $this->verdict, $logger);
         $this->save = new SettingsSave($this->settings, $this->environment, $this->verdict, $this->records);
         $this->orders = new DbOrderRecords($db);
+        $this->refunds = new DbRefundRecords($db);
     }
 
     /**
@@ -81,6 +85,21 @@ final class Services
         $flow = new OrderFlow($this->client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
 
         return new OrderLifecycle($flow, $this->client, $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
+    }
+
+    /** Refunds and the credit note. */
+    public function orderRefunds(\Opencart\System\Engine\Event $event): OrderRefunds
+    {
+        return new OrderRefunds($this->client, new Postprocessing(new EventSubscribers($this->db, $event), $this->logger), new ErrorMapper(), $this->orders, $this->refunds, $this->logger);
+    }
+
+    /** Order-edit sync, sharing the checkout flow's rebuild and Two reads. */
+    public function orderEdit(\Opencart\System\Engine\Event $event): OrderEdit
+    {
+        $postprocessing = new Postprocessing(new EventSubscribers($this->db, $event), $this->logger);
+        $flow = new OrderFlow($this->client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
+
+        return new OrderEdit($flow, $this->client, new OrderBuilder(), $postprocessing, new ErrorMapper(), $this->orders, $this->logger);
     }
 
     public static function internalEnvironmentsEnabled(): bool

@@ -314,6 +314,20 @@ final class OrderFlow
     }
 
     /**
+     * The hash of the create payload the shop's stored order rebuilds now,
+     * through the hook as a snapshot (nothing is sent), compared with the
+     * stored payload_hash.
+     *
+     * @param array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>} $input
+     *
+     * @throws OrderRefused when the order no longer builds
+     */
+    public function snapshotHash(array $input): string
+    {
+        return self::payloadHash($this->payload($input['order'], $input['lines'], $input['totals'], $input['context'] ?? [], 'snapshot_hash'));
+    }
+
+    /**
      * Why the shop's stored order no longer rebuilds the payload Two holds,
      * as the outcome (CHANGED when it rebuilds to a different payload) and
      * the reason, or null when it still does.
