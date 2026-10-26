@@ -108,9 +108,11 @@ class Two extends \Opencart\System\Engine\Controller
         $data['languages'] = $this->model_localisation_language->getLanguages();
         $data['titles'] = [];
         foreach ($data['languages'] as $language) {
-            // Each language's default title from its own language file, prefixed so this page's keys stay.
-            $copy = $this->load->language(self::ROUTE, 'two_title', (string) $language['code']);
-            $data['titles'][$language['language_id']] = $settings->title((int) $language['language_id'], (string) ($copy['two_title_text_title_default'] ?? ''));
+            // Each language's default title from its own language file, over en-gb's as OpenCart does for a
+            // language this extension does not ship, prefixed so this page's keys stay.
+            $this->load->language(self::ROUTE, 'two_title', 'en-gb');
+            $this->load->language(self::ROUTE, 'two_title', (string) $language['code']);
+            $data['titles'][$language['language_id']] = $settings->title((int) $language['language_id'], $this->language->get('two_title_text_title_default'));
         }
 
         // Checkout fields: the placement switch, the optional fields and the minimum order.
