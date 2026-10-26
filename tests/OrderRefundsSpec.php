@@ -33,6 +33,7 @@ final class OrderRefundsSpec
         self::testPartial();
         self::testRetry();
         self::testCreditNote();
+        self::testPanel();
     }
 
     private static function testUntaxed(): void
@@ -67,10 +68,11 @@ final class OrderRefundsSpec
             ['stored' => 'FULFILLED', 'responses' => [self::two('FULFILLED'), self::json(502, []), self::two('FULFILLED')], 'outcome' => OrderRefunds::UNKNOWN, 'calls' => [$read, $post, $read], 'row' => RefundRecords::UNKNOWN, 'description' => 'a 5xx and no rise: unknown'],
             ['stored' => 'FULFILLED', 'responses' => [self::two('FULFILLED'), self::json(201, ['id' => 'r0']), self::two('FULFILLED')], 'outcome' => OrderRefunds::NOT_APPLIED, 'calls' => [$read, $post, $read], 'row' => RefundRecords::NOT_APPLIED, 'description' => 'Two answers 201 but the total did not rise: an earlier refund under this key, not applied'],
             ['stored' => 'FULFILLED', 'blocked' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'row' => RefundRecords::UNKNOWN, 'description' => 'a refund awaits a retry: refused before asking Two'],
+            ['stored' => 'FULFILLED', 'handlers' => ['ref' => static fn (array $p, array $c): array => $c['request_type'] === Postprocessing::REFUND ? $p + ['reason' => 'Returned'] : $p], 'responses' => [self::two('FULFILLED'), self::json(201, ['id' => 'r1']), self::two('REFUNDED', [self::refund('r1', '250.00', '200.00', '50.00')])], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'row' => RefundRecords::DONE, 'body' => '{"reason":"Returned"}', 'description' => 'a hook adds a field to the full refund\'s empty body: still the whole rest, done'],
             ['stored' => 'FULFILLED', 'held' => true, 'responses' => [], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [], 'row' => null, 'description' => 'a form refund holds the order\'s lock: the status-map refund is refused, never sent alongside'],
         ];
         foreach ($cases as $case) {
-            $shop = self::shop($case['responses'], $case['stored'], blocked: !empty($case['blocked']), held: !empty($case['held']));
+            $shop = self::shop($case['responses'], $case['stored'], blocked: !empty($case['blocked']), held: !empty($case['held']), handlers: $case['handlers'] ?? []);
             $result = $shop['refunds']->remainder(42);
             self::check('remainder: ' . $case['description'], $case, $result, $shop);
         }
@@ -137,12 +139,19 @@ final class OrderRefundsSpec
             ['row' => RefundRecords::UNKNOWN, 'first' => '0.00', 'responses' => [$applied, self::json(201, []), $applied], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'state' => RefundRecords::DONE, 'reason' => 'risen by the amount since the first attempt', 'description' => 'Two\'s answer has no id, but the total rose by the amount since the first attempt: done, not "not applied"'],
             ['row' => RefundRecords::UNKNOWN, 'first' => '0.00', 'responses' => [$applied, HttpResponse::unreachable('timeout'), $applied], 'outcome' => OrderRefunds::UNKNOWN, 'calls' => [$read, $post, $read], 'state' => RefundRecords::UNKNOWN, 'description' => 'the retry gets no answer though the total has risen since the first attempt (maybe a portal refund): still unknown'],
             ['row' => RefundRecords::UNKNOWN, 'first' => '125.00', 'responses' => [$applied, self::json(201, []), $applied], 'outcome' => OrderRefunds::NOT_APPLIED, 'calls' => [$read, $post, $read], 'state' => RefundRecords::NOT_APPLIED, 'description' => 'no id and no rise since the first attempt: not applied'],
+            ['row' => RefundRecords::UNKNOWN, 'stored_row' => ['kind' => RefundRecords::KIND_REMAINDER, 'amount' => '250.00', 'payload' => '[]', 'idempotency_key' => 'refund_remainder_x'], 'key' => 'refund_remainder_x', 'body' => '{}',
+                'responses' => [self::two('REFUNDED', [self::refund('p1', '100.00', '80.00', '20.00')]), self::json(201, ['id' => 'r2']), self::two('REFUNDED', [self::refund('p1', '100.00', '80.00', '20.00'), self::refund('r2', '150.00', '120.00', '30.00')])],
+                'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'state' => RefundRecords::DONE, 'description' => 'a full refund retried after a portal refund: Two refunds what remains (150.00), judged against that, done'],
+            ['row' => RefundRecords::UNKNOWN, 'responses' => [self::two('REFUNDED', [self::refund('p1', '200.00', '160.00', '40.00')]), self::json(400, ['error_code' => 'REFUND_AMOUNT_TOO_HIGH'])], 'outcome' => OrderLifecycle::REFUSED, 'calls' => [$read, $post], 'state' => RefundRecords::REFUSED,
+                'description' => 'more than now remains: still sent under its key, Two refuses it, the row settles refused'],
+            ['row' => RefundRecords::PENDING, 'stored_row' => ['idempotency_key' => ''], 'responses' => [self::two('FULFILLED'), self::json(201, ['id' => 'r9']), $applied], 'outcome' => OrderLifecycle::DONE, 'calls' => [$read, $post, $read], 'state' => RefundRecords::DONE,
+                'description' => 'a row left without its key (the request stopped after the insert): the key is rebuilt from the row id'],
         ];
-        $key = 'refund_' . self::ID . '_1';
-        $body = '{"amount":"125.00","currency":"NOK"}';
         foreach ($cases as $case) {
+            $key = $case['key'] ?? 'refund_' . self::ID . '_1';
+            $body = $case['body'] ?? '{"amount":"125.00","currency":"NOK"}';
             $shop = self::shop($case['responses'], 'FULFILLED');
-            $shop['rows']->create(42, ['two_order_id' => self::ID, 'kind' => RefundRecords::KIND_PARTIAL, 'amount' => '125.00', 'currency' => 'NOK', 'payload' => $body, 'idempotency_key' => $key, 'state' => $case['row'], 'refunded_before' => $case['first'] ?? '']);
+            $shop['rows']->create(42, ($case['stored_row'] ?? []) + ['two_order_id' => self::ID, 'kind' => RefundRecords::KIND_PARTIAL, 'amount' => '125.00', 'currency' => 'NOK', 'payload' => '{"amount":"125.00","currency":"NOK"}', 'idempotency_key' => $key, 'state' => $case['row'], 'refunded_before' => $case['first'] ?? '']);
             $result = $shop['refunds']->retry(42, 1);
             $d = 'retry: ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'], $d . ': outcome (' . $result['reason'] . ')');
@@ -159,6 +168,31 @@ final class OrderRefundsSpec
                 TinyAssert::same($body, $shop['transport']->calls[1]['body'], $d . ': the same payload');
             }
             TinyAssert::same(1, count($shop['rows']->rows), $d . ': no new row');
+            TinyAssert::same($key, $shop['rows']->rows[1]['idempotency_key'], $d . ': the row holds its key');
+        }
+    }
+
+    /** The Two tab reads Two whatever state was stored, so a stale one never hides the refund form. */
+    private static function testPanel(): void
+    {
+        $read = 'GET /v1/order/' . self::ID;
+        $cases = [
+            ['FULFILLING', [self::two('FULFILLED')], true, 'FULFILLED', [$read], 'stored FULFILLING (a fulfil read back too early), FULFILLED at Two: the form opens'],
+            ['CONFIRMED', [self::two('FULFILLED')], true, 'FULFILLED', [$read], 'stored CONFIRMED, fulfilled in the Two merchant portal: the form opens'],
+            ['REFUNDED', [self::two('REFUNDED', [self::refund('r1', '100.00', '80.00', '20.00')])], true, 'REFUNDED', [$read], 'partly refunded: the form stays open'],
+            ['CONFIRMED', [self::two('CONFIRMED')], false, 'CONFIRMED', [$read], 'not fulfilled at Two: no form'],
+            ['FULFILLED', [self::json(500, [])], false, 'FULFILLED', [$read], 'Two cannot be read: no form, the stored state stays'],
+            ['CANCELLED', [], false, 'CANCELLED', [], 'cancelled: Two is not asked'],
+            [null, [], false, '', [], 'no Two order linked: Two is not asked'],
+        ];
+        foreach ($cases as [$stored, $responses, $refundable, $state, $calls, $description]) {
+            $kept = $state === '' ? null : $state;
+            $shop = self::shop($responses, $stored);
+            $panel = $shop['refunds']->panel(42);
+            $d = 'panel: ' . $description;
+            TinyAssert::same([$refundable, $state], [$panel['refundable'], $panel['state']], $d . ': refundable and state');
+            TinyAssert::same($calls, self::calls($shop['transport']), $d . ': requests');
+            TinyAssert::same($kept, $shop['records']->rows[42]['two_order_state'] ?? null, $d . ': the state read is stored');
         }
     }
 
@@ -220,9 +254,10 @@ final class OrderRefundsSpec
     /**
      * @param list<HttpResponse> $responses
      * @param array<string, int>  $earlier   earlier refund rows of the Widget line: state => quantity
-     * @return array{refunds: OrderRefunds, transport: ScriptedTransport, rows: MemoryRefunds, logger: RecordingLogger}
+     * @param array<string, \Closure(array<string, mixed>, array<string, mixed>): mixed> $handlers postprocessing subscribers
+     * @return array{refunds: OrderRefunds, transport: ScriptedTransport, rows: MemoryRefunds, logger: RecordingLogger, records: MemoryRecords}
      */
-    private static function shop(array $responses, ?string $stored, bool $storeFails = false, bool $blocked = false, array $earlier = [], bool $held = false): array
+    private static function shop(array $responses, ?string $stored, bool $storeFails = false, bool $blocked = false, array $earlier = [], bool $held = false, array $handlers = []): array
     {
         $records = new MemoryRecords($stored === null ? [] : [42 => ['two_order_id' => self::ID, 'two_order_state' => $stored]]);
         $rows = new MemoryRefunds($storeFails, $held);
@@ -236,9 +271,9 @@ final class OrderRefundsSpec
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
         $client = new Client(new Environment(false), new SettingsProvider(new MemoryStore(['api_key' => 'key-0123456789', 'environment' => 'sandbox'])), new CustomHeaders(), $transport, $logger, '1.0.0');
-        $refunds = new OrderRefunds($client, new Postprocessing(new ScriptedSubscribers([]), $logger), new ErrorMapper(), $records, $rows, $logger);
+        $refunds = new OrderRefunds($client, new Postprocessing(new ScriptedSubscribers($handlers), $logger), new ErrorMapper(), $records, $rows, $logger);
 
-        return ['refunds' => $refunds, 'transport' => $transport, 'rows' => $rows, 'logger' => $logger];
+        return ['refunds' => $refunds, 'transport' => $transport, 'rows' => $rows, 'logger' => $logger, 'records' => $records];
     }
 
     /** @return list<string> */

@@ -39,6 +39,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\Admin\Model\Setting\Cron $model_setting_cron
  * @property-read \Opencart\Admin\Model\Setting\Event $model_setting_event
  * @property-read \Opencart\Admin\Model\Sale\Order $model_sale_order
+ * @property-read \Opencart\Admin\Model\Setting\Store $model_setting_store
  * @property-read \Opencart\System\Engine\Event $event
  * @property-read \Opencart\Admin\Model\Localisation\Language $model_localisation_language
  * @property-read \Opencart\Admin\Model\Localisation\OrderStatus $model_localisation_order_status
@@ -307,11 +308,9 @@ class Two extends \Opencart\System\Engine\Controller
         $order = $this->twoOrder($orderId);
         $services = new Services($this->db, $this->log, (int) ($order['store_id'] ?? 0));
         $record = $services->orders->get($orderId) ?? [];
-        $state = $record['two_order_state'] ?? '';
+        ['two' => $two, 'state' => $state, 'refundable' => $refundable] = $services->orderRefunds($this->event)->panel($orderId);
         $link = fn (string $action): string => $this->url->link(self::ROUTE . '.' . $action, 'user_token=' . $this->session->data['user_token'] . '&order_id=' . $orderId, true);
 
-        $refundable = in_array($state, OrderRefunds::REFUNDABLE_STATES, true);
-        $two = $refundable ? $services->orderRefunds($this->event)->read($orderId, $record['two_order_id'] ?? '', OrderLifecycle::INVOICE_TIMEOUT_SECONDS) : null;
         $remaining = $two === null ? null : OrderRefunds::remainingCents($two);
         $refunds = $services->refunds->forOrder($orderId);
         $earlier = OrderRefunds::refundedPerLine($refunds);
@@ -390,7 +389,7 @@ class Two extends \Opencart\System\Engine\Controller
             $request[$field] = self::raw($post['two_refund_' . $field] ?? '');
         }
 
-        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->event)->partial($orderId, $request);
+        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->partial($orderId, $request);
         $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
         $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
     }
@@ -415,7 +414,7 @@ class Two extends \Opencart\System\Engine\Controller
             return;
         }
         $refundId = (int) ($this->request->post['two_refund_id'] ?? 0);
-        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->event)->retry($orderId, $refundId);
+        $result = (new Services($this->db, $this->log, (int) $order['store_id']))->orderRefunds($this->catalogEvent((int) $order['store_id']))->retry($orderId, $refundId);
         $this->historyNote($orderId, (int) $order['order_status_id'], $result['reason']);
         $this->json($result['outcome'] === OrderLifecycle::DONE ? ['success' => $result['reason']] : ['error' => $result['reason']]);
     }
@@ -446,6 +445,24 @@ class Two extends \Opencart\System\Engine\Controller
             return;
         }
         $this->invoiceNotice($this->language->get($result['notice'] === OrderRefunds::CREDIT_NOTE_NO_REFERENCE ? 'error_invoice_no_reference' : 'error_credit_note'), 200);
+    }
+
+    /**
+     * The event registry of the order's store front, as OpenCart's own admin
+     * order edits run it (a store instance). The admin registers only admin/
+     * and system/ triggers, so a write sent from here fires the order
+     * postprocessing event there, where the merchant's subscribers on
+     * `catalog/extension/two/order_postprocessing` are registered.
+     */
+    private function catalogEvent(int $storeId): \Opencart\System\Engine\Event
+    {
+        $this->load->model('setting/store');
+        $event = $this->model_setting_store->createStoreInstance($storeId, (string) $this->config->get('config_language'))->get('event');
+        if (!$event instanceof \Opencart\System\Engine\Event) {
+            throw new \RuntimeException('The store instance has no event registry.');
+        }
+
+        return $event;
     }
 
     /**

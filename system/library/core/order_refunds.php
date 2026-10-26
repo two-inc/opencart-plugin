@@ -74,6 +74,29 @@ final class OrderRefunds
     }
 
     /**
+     * What the Two tab shows: Two's order as it stands, read for any linked
+     * order Two has not cancelled whatever state was stored (a fulfil read
+     * back as FULFILLING, or an order fulfilled in the merchant portal, has
+     * a stored state that nothing else refreshes), and whether it can be
+     * refunded now, judged on that live state.
+     *
+     * @return array{two: array<string, mixed>|null, state: string, refundable: bool}
+     */
+    public function panel(int $orderId, int $timeout = OrderLifecycle::INVOICE_TIMEOUT_SECONDS): array
+    {
+        $record = $this->records->get($orderId) ?? [];
+        $twoOrderId = $record['two_order_id'] ?? '';
+        $stored = $record['two_order_state'] ?? '';
+        if (!OrderFlow::validTwoOrderId($twoOrderId) || $stored === 'CANCELLED') {
+            return ['two' => null, 'state' => $stored, 'refundable' => false];
+        }
+        $two = $this->read($orderId, $twoOrderId, $timeout);
+        $state = $two === null ? $stored : strtoupper((string) $two['state']);
+
+        return ['two' => $two, 'state' => $state, 'refundable' => $two !== null && in_array($state, self::REFUNDABLE_STATES, true)];
+    }
+
+    /**
      * What Two has refunded on the order, in cents. Two reports each refund's total as a negative amount.
      *
      * @param array<string, mixed> $twoOrder
@@ -489,7 +512,13 @@ final class OrderRefunds
         }
         $twoOrderId = $row['two_order_id'];
         $payload = json_decode($row['payload'], true);
-        if (!OrderFlow::validTwoOrderId($twoOrderId) || !is_array($payload) || $row['idempotency_key'] === '') {
+        $key = $row['idempotency_key'];
+        if ($key === '' && $row['kind'] === RefundRecords::KIND_PARTIAL && OrderFlow::validTwoOrderId($twoOrderId)) {
+            // The request stopped between the row and its key: a partial refund's key is its row id by definition.
+            $key = IdempotencyKey::refund($twoOrderId, $refundId);
+            $this->refunds->update($refundId, ['idempotency_key' => $key]);
+        }
+        if (!OrderFlow::validTwoOrderId($twoOrderId) || !is_array($payload) || $key === '') {
             return $this->refused($orderId, 'Not retried: the stored refund cannot be read. Check the order in the Two merchant portal.');
         }
         $two = $this->read($orderId, $twoOrderId);
@@ -498,8 +527,16 @@ final class OrderRefunds
         }
 
         $first = ($row['refunded_before'] ?? '') === '' ? null : Postprocessing::cents($row['refunded_before']);
+        $amount = Postprocessing::cents($row['amount']);
+        if ($payload === []) {
+            // A full refund's empty body asks Two for whatever remains now: after a refund made meanwhile
+            // (in the merchant portal) that is less than when it was first sent, and that is what to look for.
+            $amount = min($amount, self::remainingCents($two) ?? $amount);
+        }
+        // An explicit amount over what remains is still sent under its key: Two answers with the earlier
+        // attempt if it applied it, and refuses it otherwise, which settles the row either way.
 
-        return $this->post($orderId, $twoOrderId, $two, $refundId, $payload, Postprocessing::cents($row['amount']), $row['idempotency_key'], $row['currency'], true, $first);
+        return $this->post($orderId, $twoOrderId, $two, $refundId, $payload, $amount, $key, $row['currency'], true, $first);
     }
 
     /**
@@ -518,8 +555,10 @@ final class OrderRefunds
         } catch (OrderRefused $refused) {
             return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not refunded: ' . $refused->detail);
         }
-        if ($body !== []) {
-            $amount = Postprocessing::cents($body['amount'] ?? 0);
+        // The amount Two is asked for: the hooked body's when it names one, else the plugin's own (a full
+        // refund's empty body may come back with a field added, and still asks Two for the whole rest).
+        if (array_key_exists('amount', $body)) {
+            $amount = Postprocessing::cents($body['amount']);
         }
         $remaining = self::remainingCents($two) ?? 0;
         if ($amount <= 0 || $amount > $remaining) {
