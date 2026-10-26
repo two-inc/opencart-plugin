@@ -9,6 +9,10 @@ declare(strict_types=1);
  * - Drops the demo data's fixed-amount tax (Eco Tax) from its tax classes.
  *   A Two line carries one percentage rate, so the extension refuses an
  *   order with a fixed-amount rate; the specs check out with UK VAT alone.
+ * - Makes pounds the store's currency (the demo data's is US dollars), so a
+ *   UK buyer's order is in GBP, as in the sibling plugins' E2E stores: Two's
+ *   sandbox approves a GB company's order in its own currency. OpenCart holds
+ *   the default currency at 1 and every other relative to it.
  */
 
 // CLI only: the staging shops serve the whole repo under the web root.
@@ -30,3 +34,19 @@ $prefix = DB_PREFIX;
 
 $db->query("DELETE tr FROM `{$prefix}tax_rule` tr JOIN `{$prefix}tax_rate` r ON r.tax_rate_id = tr.tax_rate_id WHERE r.type = 'F'");
 echo '[seed] removed ' . $db->affected_rows . " fixed-amount tax rule(s)\n";
+
+$current = $db->query("SELECT value FROM `{$prefix}setting` WHERE store_id = 0 AND `key` = 'config_currency'")->fetch_row()[0] ?? '';
+if ($current !== 'GBP') {
+    $rate = (float) ($db->query("SELECT value FROM `{$prefix}currency` WHERE code = 'GBP'")->fetch_row()[0] ?? 0);
+    if ($rate <= 0) {
+        fwrite(STDERR, "[seed] the shop has no GBP currency to make its default\n");
+        exit(1);
+    }
+    $db->query("UPDATE `{$prefix}currency` SET value = value / {$rate}");
+    $db->query("UPDATE `{$prefix}currency` SET value = 1, status = 1 WHERE code = 'GBP'");
+    $db->query("UPDATE `{$prefix}setting` SET value = 'GBP' WHERE store_id = 0 AND `key` = 'config_currency'");
+    foreach (glob(DIR_STORAGE . 'cache/cache.currency*') ?: [] as $cached) {
+        unlink($cached);
+    }
+}
+echo "[seed] the store's currency is GBP\n";
