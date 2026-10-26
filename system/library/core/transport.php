@@ -26,8 +26,10 @@ interface Transport
     ): HttpResponse;
 
     /**
-     * Several calls at once, each answered as send() answers it, in the
-     * order given. Every call shares the one timeout.
+     * Several calls at once, for the fee quotes only (every other request
+     * goes through send()), each answered as send() answers it, in the
+     * order given: a call cut off or failed at the transport is
+     * unreachable, never a partial answer. Every call shares the one timeout.
      *
      * @param list<array{method: string, url: string, headers: array<string, string>, body: string|null}> $requests
      * @return list<HttpResponse>

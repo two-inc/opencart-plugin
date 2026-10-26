@@ -69,6 +69,7 @@ final class Client
     /**
      * Several calls to Two at once, sharing one timeout, each prepared,
      * checked and logged as request() does it. Answers in the order given.
+     * For the fee quotes only: every other request goes through request().
      *
      * @param list<array{method: string, path: string, body: array<string, mixed>|null, headers: array<string, string>}> $calls
      * @return list<HttpResponse>

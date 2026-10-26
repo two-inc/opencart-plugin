@@ -11,6 +11,11 @@ use Opencart\System\Library\Extension\Two\Core\Transport;
  * The core's Transport port over cURL. TLS verification is on (peer and host)
  * unless the Client passes the merchant's bypass. A call with no HTTP answer
  * returns HttpResponse::unreachable() with cURL's reason.
+ *
+ * send() carries every request. sendAll() exists for the fee quotes alone
+ * (the chips' preview asks every term at once): each handle's own result is
+ * read, and any cURL error, a timeout mid-body included, or a body shorter
+ * than its Content-Length is a call that got no answer, so it fails closed.
  */
 final class CurlTransport implements Transport
 {
@@ -18,10 +23,48 @@ final class CurlTransport implements Transport
 
     public function send(string $method, string $url, array $headers, ?string $body, bool $verifyTls, int $timeoutSeconds): HttpResponse
     {
-        return $this->sendAll([['method' => $method, 'url' => $url, 'headers' => $headers, 'body' => $body]], $verifyTls, $timeoutSeconds)[0];
+        $lines = [];
+        foreach ($headers as $name => $value) {
+            $lines[] = $name . ': ' . $value;
+        }
+        $received = [];
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => $method,
+            CURLOPT_HTTPHEADER => $lines,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_TIMEOUT => $timeoutSeconds,
+            CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT_SECONDS,
+            CURLOPT_SSL_VERIFYPEER => $verifyTls,
+            CURLOPT_SSL_VERIFYHOST => $verifyTls ? 2 : 0,
+            CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$received): int {
+                $parts = explode(':', $line, 2);
+                if (count($parts) === 2) {
+                    $received[strtolower(trim($parts[0]))] = trim($parts[1]);
+                }
+
+                return strlen($line);
+            },
+        ]);
+        if ($body !== null) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+
+        $response = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if (!is_string($response) || $error !== '' || $status === 0) {
+            return HttpResponse::unreachable($error);
+        }
+
+        return new HttpResponse($status, $response, $received);
     }
 
-    /** Every call on one cURL multi handle, so they run at once. */
+    /** The fee quotes' parallel path: every call on one cURL multi handle. */
     public function sendAll(array $requests, bool $verifyTls, int $timeoutSeconds): array
     {
         $multi = curl_multi_init();
@@ -58,21 +101,38 @@ final class CurlTransport implements Transport
             curl_multi_add_handle($multi, $ch);
             $handles[$index] = $ch;
         }
+
+        // Each handle's own result: curl_error() is empty for a multi handle.
+        $results = [];
         do {
             $status = curl_multi_exec($multi, $running);
+            while (($done = curl_multi_info_read($multi)) !== false) {
+                $index = array_search($done['handle'], $handles, true);
+                if ($index !== false) {
+                    $results[$index] = (int) $done['result'];
+                }
+            }
             if ($running > 0) {
                 curl_multi_select($multi, 1.0);
             }
-        } while ($running > 0 && $status === CURLM_OK);
+        } while (($running > 0 || count($results) < count($handles)) && $status === CURLM_OK);
 
         $responses = [];
         foreach ($handles as $index => $ch) {
-            $response = curl_multi_getcontent($ch);
+            $body = curl_multi_getcontent($ch);
             $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-            $error = curl_error($ch);
+            $result = $results[$index] ?? CURLE_RECV_ERROR;
             curl_multi_remove_handle($multi, $ch);
-            curl_close($ch);
-            $responses[] = !is_string($response) || $error !== '' || $code === 0 ? HttpResponse::unreachable($error) : new HttpResponse($code, $response, $received[$index]);
+            $length = $received[$index]['content-length'] ?? null;
+            if ($result !== CURLE_OK) {
+                $responses[] = HttpResponse::unreachable(curl_strerror($result));
+            } elseif (!is_string($body) || $code === 0) {
+                $responses[] = HttpResponse::unreachable('no response');
+            } elseif ($length !== null && ctype_digit($length) && strlen($body) !== (int) $length) {
+                $responses[] = HttpResponse::unreachable('truncated body: ' . strlen($body) . ' of ' . $length . ' bytes');
+            } else {
+                $responses[] = new HttpResponse($code, $body, $received[$index]);
+            }
         }
         curl_multi_close($multi);
 
