@@ -14,6 +14,7 @@ use Opencart\System\Library\Extension\Two\Opencart\DbOrderLock;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
+use Opencart\System\Library\Extension\Two\Core\PaymentTerms;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
@@ -469,7 +470,7 @@ class Two extends \Opencart\System\Engine\Controller
             'countries' => $isoById,
             'companies' => $this->state()['companies'] ?? (object) [],
             'min_length' => CompanyLookup::MIN_TERM_LENGTH,
-            'end_of_month' => $services->paymentTerms()->isEndOfMonth(),
+            'end_of_month' => $services->settings->paymentTermType() === PaymentTerms::END_OF_MONTH,
             'i18n' => $copy,
         ];
     }

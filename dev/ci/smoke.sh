@@ -95,6 +95,11 @@ ok "install() registered the record refresh cron"
 lifecycle() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(\`trigger\`, '|', action, '|', status) FROM oc_event WHERE code = 'two_order_lifecycle'"; }
 [ "$(lifecycle)" = 'catalog/model/checkout/order.addHistory/after|extension/two/event/two.history|1' ] || fail "install() did not register the order lifecycle event (got '$(lifecycle)')"
 ok "install() registered the order lifecycle event"
+feetotal() { docker exec "$db" mariadb -uroot -padmin opencart -N -e "SELECT CONCAT(e.extension, '|', (SELECT value FROM oc_setting WHERE \`key\` = 'total_two_fee_status' AND store_id = 0), '|', (SELECT value FROM oc_setting WHERE \`key\` = 'total_two_fee_sort_order' AND store_id = 0)) FROM oc_extension e WHERE e.type = 'total' AND e.code = 'two_fee'"; }
+[ "$(feetotal)" = 'two|1|4' ] || fail "install() did not install and enable the payment terms fee total (got '$(feetotal)')"
+ok "install() installed the payment terms fee total, enabled, before Taxes"
+contains "fee total admin page" "$(admin 'extension/two/total/two_fee')" 'Two payment terms fee'
+contains "Payment terms tab" "$(admin 'extension/two/payment/two')" 'payment_two_surcharge_tax_class_id'
 
 # configure.php: puts the extension back, is idempotent, refuses a bad environment.
 configure > /dev/null
@@ -109,6 +114,10 @@ docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_event WHERE
 configure > /dev/null
 [ "$(lifecycle)" = 'catalog/model/checkout/order.addHistory/after|extension/two/event/two.history|1' ] || fail "configure.php did not register the order lifecycle event"
 ok "configure.php registers the order lifecycle event"
+docker exec "$db" mariadb -uroot -padmin opencart -e "DELETE FROM oc_extension WHERE type = 'total' AND code = 'two_fee'; DELETE FROM oc_setting WHERE code = 'total_two_fee'"
+configure > /dev/null
+[ "$(feetotal)" = 'two|1|4' ] || fail "configure.php did not install the payment terms fee total (got '$(feetotal)')"
+ok "configure.php installs the payment terms fee total"
 if configure -e TWO_ENVIRONMENT=bogus > /dev/null 2>&1; then fail "configure.php accepted TWO_ENVIRONMENT=bogus"; fi
 ok "configure.php refuses an unknown environment"
 
