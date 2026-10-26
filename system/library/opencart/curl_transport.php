@@ -135,7 +135,7 @@ final class CurlTransport implements Transport
             if ($result !== CURLE_OK) {
                 $responses[] = HttpResponse::unreachable(curl_strerror($result));
             } elseif (!is_string($body) || $code === 0) {
-                $responses[] = HttpResponse::unreachable('no response');
+                $responses[] = HttpResponse::unreachable(HttpResponse::NO_RESPONSE);
             } elseif ($length !== null && ctype_digit($length) && strlen($body) !== (int) $length) {
                 $responses[] = HttpResponse::unreachable('truncated body: ' . strlen($body) . ' of ' . $length . ' bytes');
             } else {

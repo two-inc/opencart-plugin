@@ -138,16 +138,16 @@ final class OrderEdit
             // Kept so the same refused edit is not resent and noted on every status save; another edit is still tried.
             $this->records->put($orderId, ['edit_refused_hash' => $rowsHash]);
 
-            return $this->refused($orderId, Message::of('note_edit_refused', $twoOrderId, $this->errors->reason($response)));
+            return $this->refused($orderId, Message::of('note_edit_refused', $twoOrderId, $this->errors->noteReason($response)));
         }
         if ($response->reachedTwo() && $response->status < 500 && !in_array($response->status, self::TRANSIENT, true)) {
             // Not about the edit itself (an API key being changed, a conflict): nothing recorded, so the next save sends it again.
-            return $this->refused($orderId, Message::of('note_edit_not_taken', $twoOrderId, $this->errors->reason($response)));
+            return $this->refused($orderId, Message::of('note_edit_not_taken', $twoOrderId, $this->errors->noteReason($response)));
         }
         // Two may or may not hold the edit: the next save must send it whatever the hash says.
         $this->records->put($orderId, ['payload_hash' => '']);
 
-        return $this->refused($orderId, Message::of('note_edit_unknown', $twoOrderId, $this->errors->reason($response)), self::UNKNOWN);
+        return $this->refused($orderId, Message::of('note_edit_unknown', $twoOrderId, $this->errors->noteReason($response)), self::UNKNOWN);
     }
 
     /**

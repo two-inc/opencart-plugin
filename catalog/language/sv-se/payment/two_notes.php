@@ -123,3 +123,6 @@ $_['refusal_refund_amount_rate'] = 'beloppsradens momssats är inte en av ordern
 $_['refusal_refund_amount_zero'] = 'beloppsraden har inget nettobelopp.';
 $_['refusal_refund_empty'] = 'inget att återbetala. Välj ett antal på en rad, eller ange ett belopp.';
 $_['refusal_refund_line_untaxed'] = '"%1$s" har ett nettobelopp men ingen moms med %2$s. Ange momsen som butiken tog ut.';
+// Why a call to Two failed when Two was not reached (ErrorMapper), a parameter of the notes above. Two's own error text stays as Two sends it.
+$_['reason_unreachable'] = 'Two kunde inte nås (%s).';
+$_['reason_no_response'] = 'Two kunde inte nås (inget svar).';

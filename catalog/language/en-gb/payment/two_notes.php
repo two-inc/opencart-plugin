@@ -123,3 +123,6 @@ $_['refusal_refund_amount_rate'] = 'the amount line\'s tax rate is not one of th
 $_['refusal_refund_amount_zero'] = 'the amount line has no net amount.';
 $_['refusal_refund_empty'] = 'nothing to refund. Pick a quantity on a line, or enter an amount.';
 $_['refusal_refund_line_untaxed'] = '"%1$s" has a net amount but no tax at %2$s. Enter the tax the shop charged.';
+// Why a call to Two failed when Two was not reached (ErrorMapper), a parameter of the notes above. Two's own error text stays as Two sends it.
+$_['reason_unreachable'] = 'Two could not be reached (%s).';
+$_['reason_no_response'] = 'Two could not be reached (no response).';

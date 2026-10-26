@@ -143,7 +143,7 @@ final class OrderFlow
         $response = $this->client->request('POST', '/v1/order', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderCreate($orderId, $stored['token_hash'])));
         $body = $response->json();
         if (!$response->reachedTwo() || $response->status >= 400) {
-            return $this->refused($orderId, Message::of('note_create_refused', $this->errors->reason($response)), $this->errors->buyerMessageKeys($response->status, $body));
+            return $this->refused($orderId, Message::of('note_create_refused', $this->errors->noteReason($response)), $this->errors->buyerMessageKeys($response->status, $body));
         }
         $twoOrderId = is_scalar($body['id'] ?? null) ? (string) $body['id'] : '';
         $paymentUrl = is_string($body['payment_url'] ?? null) ? $body['payment_url'] : '';
@@ -217,7 +217,7 @@ final class OrderFlow
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CONFIRM, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
-            return self::outcome(self::REFUSED, Message::of('note_confirm_refused', $twoOrderId, $this->errors->reason($response)), $twoOrderId);
+            return self::outcome(self::REFUSED, Message::of('note_confirm_refused', $twoOrderId, $this->errors->noteReason($response)), $twoOrderId);
         }
         $this->records->put($orderId, self::stateFields($response->json() ?? []) + ['two_order_state' => 'CONFIRMED'] + $placed);
 
@@ -459,7 +459,7 @@ final class OrderFlow
                 ? self::intentOutcome(self::APPROVED, Message::of('note_intent_approved'), [])
                 : self::intentOutcome(self::DECLINED, Message::of('note_intent_declined'), []);
         }
-        $message = $response->reachedTwo() && $response->status < 300 ? Message::of('note_intent_undecided', $response->status) : Message::of('note_intent_unanswered', $this->errors->reason($response));
+        $message = $response->reachedTwo() && $response->status < 300 ? Message::of('note_intent_undecided', $response->status) : Message::of('note_intent_unanswered', $this->errors->noteReason($response));
         $this->logger->error('Order ' . $orderId . ': ' . $message->english());
         $buyer = match (true) {
             !$response->reachedTwo() => self::INTENT_CONNECTION,
@@ -574,10 +574,9 @@ final class OrderFlow
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::CANCEL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
-            $reason = $this->errors->reason($response);
-            $this->logger->error('Two order ' . $twoOrderId . ' cancel refused: ' . $reason);
+            $this->logger->error('Two order ' . $twoOrderId . ' cancel refused: ' . $this->errors->reason($response));
 
-            return ['failure' => $reason, 'status' => $response->status];
+            return ['failure' => $this->errors->noteReason($response), 'status' => $response->status];
         }
 
         return ['failure' => null, 'status' => $response->status];

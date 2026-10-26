@@ -142,6 +142,9 @@ final class Message
         'refusal_refund_amount_zero' => 'the amount line has no net amount.',
         'refusal_refund_empty' => 'nothing to refund. Pick a quantity on a line, or enter an amount.',
         'refusal_refund_line_untaxed' => '"%1$s" has a net amount but no tax at %2$s. Enter the tax the shop charged.',
+        // Why a call to Two failed when Two was not reached (ErrorMapper), a parameter of the notes above.
+        'reason_unreachable' => 'Two could not be reached (%s).',
+        'reason_no_response' => 'Two could not be reached (no response).',
     ];
 
     /** @param list<string|self> $params */

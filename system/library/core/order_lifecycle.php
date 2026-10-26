@@ -168,7 +168,7 @@ final class OrderLifecycle
         }
         $response = $this->client->request('POST', $path, $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::forTwoOrder(IdempotencyKey::FULFIL, $twoOrderId)));
         if (!$response->reachedTwo() || $response->status >= 400) {
-            return $this->refused($orderId, Message::of('note_fulfil_refused', $twoOrderId, $this->errors->reason($response)));
+            return $this->refused($orderId, Message::of('note_fulfil_refused', $twoOrderId, $this->errors->noteReason($response)));
         }
         // Marks the fulfilment as asked for before the read back, so a repeat skips even when the read fails.
         $this->records->put($orderId, ['two_order_state' => 'FULFILLING']);

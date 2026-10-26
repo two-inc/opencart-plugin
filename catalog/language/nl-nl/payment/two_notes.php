@@ -123,3 +123,6 @@ $_['refusal_refund_amount_rate'] = 'het btw-tarief van de bedragregel is niet ee
 $_['refusal_refund_amount_zero'] = 'de bedragregel heeft geen nettobedrag.';
 $_['refusal_refund_empty'] = 'niets terug te betalen. Kies een aantal op een regel, of vul een bedrag in.';
 $_['refusal_refund_line_untaxed'] = '"%1$s" heeft een nettobedrag maar geen btw tegen %2$s. Vul de btw in die de winkel heeft berekend.';
+// Why a call to Two failed when Two was not reached (ErrorMapper), a parameter of the notes above. Two's own error text stays as Two sends it.
+$_['reason_unreachable'] = 'Two was niet bereikbaar (%s).';
+$_['reason_no_response'] = 'Two was niet bereikbaar (geen antwoord).';

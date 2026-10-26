@@ -600,7 +600,7 @@ final class OrderRefunds
         $response = $this->client->request('POST', '/v1/order/' . $twoOrderId . '/refund', $body, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header($key));
         $money = Postprocessing::money($amount) . ' ' . $currency;
         if ($response->reachedTwo() && $response->status >= 400 && $response->status < 500) {
-            $result = $this->refused($orderId, Message::of('note_refund_refused', $money, $twoOrderId, $this->errors->reason($response)));
+            $result = $this->refused($orderId, Message::of('note_refund_refused', $money, $twoOrderId, $this->errors->noteReason($response)));
 
             return $this->settled($rowId, RefundRecords::REFUSED, $result);
         }
@@ -622,7 +622,7 @@ final class OrderRefunds
 
             return $this->settled($rowId, RefundRecords::NOT_APPLIED, $result);
         }
-        $result = $this->refused($orderId, $answered ? Message::of('note_refund_unknown_unread', $money, $twoOrderId) : Message::of('note_refund_unknown', $money, $twoOrderId, $this->errors->reason($response)), self::UNKNOWN);
+        $result = $this->refused($orderId, $answered ? Message::of('note_refund_unknown_unread', $money, $twoOrderId) : Message::of('note_refund_unknown', $money, $twoOrderId, $this->errors->noteReason($response)), self::UNKNOWN);
 
         return $this->settled($rowId, RefundRecords::UNKNOWN, $result);
     }

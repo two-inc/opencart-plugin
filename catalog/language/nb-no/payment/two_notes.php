@@ -123,3 +123,6 @@ $_['refusal_refund_amount_rate'] = 'avgiftssatsen på beløpslinjen er ikke en a
 $_['refusal_refund_amount_zero'] = 'beløpslinjen har ikke noe nettobeløp.';
 $_['refusal_refund_empty'] = 'ingenting å refundere. Velg et antall på en linje, eller skriv inn et beløp.';
 $_['refusal_refund_line_untaxed'] = '«%1$s» har et nettobeløp, men ingen avgift med %2$s. Skriv inn avgiften butikken beregnet.';
+// Why a call to Two failed when Two was not reached (ErrorMapper), a parameter of the notes above. Two's own error text stays as Two sends it.
+$_['reason_unreachable'] = 'Two kunne ikke nås (%s).';
+$_['reason_no_response'] = 'Two kunne ikke nås (ikke noe svar).';

@@ -123,3 +123,6 @@ $_['refusal_refund_amount_rate'] = 'el tipo impositivo de la línea de importe n
 $_['refusal_refund_amount_zero'] = 'la línea de importe no tiene importe neto.';
 $_['refusal_refund_empty'] = 'nada que reembolsar. Elige una cantidad en una línea o introduce un importe.';
 $_['refusal_refund_line_untaxed'] = '«%1$s» tiene un importe neto pero ningún impuesto al %2$s. Introduce el impuesto que cobró la tienda.';
+// Why a call to Two failed when Two was not reached (ErrorMapper), a parameter of the notes above. Two's own error text stays as Two sends it.
+$_['reason_unreachable'] = 'No se ha podido contactar con Two (%s).';
+$_['reason_no_response'] = 'No se ha podido contactar con Two (sin respuesta).';
