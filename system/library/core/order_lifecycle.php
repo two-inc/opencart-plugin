@@ -140,9 +140,10 @@ final class OrderLifecycle
             return $this->refused($orderId, Message::of('note_fulfil_edit_unknown', $twoOrderId));
         }
         // Before the rows, which a currency-only edit leaves alike (OpenCart keeps them in the default currency).
-        $currency = FeeQuote::currencyChange($record, (string) ($rows['currency'] ?? ''), 'save the status again');
-        if ($currency !== null) {
-            return $this->refused($orderId, 'Two order ' . $twoOrderId . ' not fulfilled: ' . $currency);
+        $currency = (string) ($rows['currency'] ?? '');
+        $placed = FeeQuote::placedInOtherCurrency($record, $currency);
+        if ($placed !== null) {
+            return $this->refused($orderId, Message::of('note_fulfil_currency_changed', $twoOrderId, $placed, $currency));
         }
         if ($rows === null || !hash_equals($record['rows_hash'], self::rowsHash($rows))) {
             return $this->refused($orderId, Message::of('note_fulfil_edited', $twoOrderId));

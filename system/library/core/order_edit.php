@@ -84,9 +84,10 @@ final class OrderEdit
             return hash_equals($record['rows_hash'], $rowsHash) ? null : $this->afterFulfilment($orderId, $twoOrderId, $rowsHash);
         }
         // Judged before the rows: OpenCart keeps rows in the default currency, so a currency-only edit leaves them alike.
-        $currency = FeeQuote::currencyChange($record, (string) ($rows['currency'] ?? ''), 'save it again to send the edit');
-        if ($currency !== null) {
-            return $this->refused($orderId, 'The edit to this order was not sent to Two: ' . $currency);
+        $currency = (string) ($rows['currency'] ?? '');
+        $placed = FeeQuote::placedInOtherCurrency($record, $currency);
+        if ($placed !== null) {
+            return $this->refused($orderId, Message::of('note_edit_currency_changed', $placed, $currency));
         }
         if (!$unknown && (hash_equals($record['rows_hash'], $rowsHash) || hash_equals($record['edit_refused_hash'] ?? '', $rowsHash))) {
             return null;

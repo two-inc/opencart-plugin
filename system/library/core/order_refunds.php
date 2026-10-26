@@ -532,7 +532,7 @@ final class OrderRefunds
             // and that is what to look for.
             $amount = min($amount, self::remainingCents($two) ?? $amount);
             if ($amount <= 0) {
-                $result = $this->done($orderId, $key, 'Nothing was left to refund on Two order ' . $twoOrderId . ': Two holds it as refunded in full, by the earlier attempt or by a refund made meanwhile in the Two merchant portal. Nothing was sent.');
+                $result = $this->done($orderId, $key, Message::of('note_refund_nothing_left', $twoOrderId));
 
                 return $this->settled($refundId, RefundRecords::DONE, $result);
             }
