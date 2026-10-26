@@ -32,12 +32,6 @@
         }
     }
 
-    /**
-     * The calls that never write the shop's session, so may run side by side.
-     * Every other call is queued: OpenCart writes the whole session at the end
-     * of each request, so two at once could lose one's change.
-     */
-    const PARALLEL = ['search', 'company_details'];
 
     /** The shop's relay: every call carries the session's token. */
     class Api {
@@ -47,11 +41,13 @@
             this.queue = Promise.resolve();
         }
 
-        /** Runs a session-writing call after the ones before it have finished. */
+        /**
+         * Runs a call after the ones before it have finished. Every call is
+         * queued: OpenCart writes the whole session back at the end of every
+         * request, even one that only reads it, so two at once could undo
+         * one's change.
+         */
         serial(name, call) {
-            if (PARALLEL.indexOf(name) !== -1) {
-                return call();
-            }
             const run = this.queue.then(call, call);
             this.queue = run.catch(() => null);
             return run;
@@ -60,6 +56,11 @@
         url(name, params) {
             const query = new URLSearchParams(Object.assign({ two_token: this.config.token }, params || {}));
             return this.config.urls[name] + '&' + query.toString();
+        }
+
+        /** Resolves once every call queued so far has finished. */
+        settled() {
+            return this.queue;
         }
 
         get(name, params, signal) {
@@ -422,7 +423,8 @@
             this.input.value = company.company_name;
             this.orgInput.value = company.organization_number;
             this.setStatus(labelFor(company.company_name, company.organization_number));
-            return this.save(company).then(() => this.onChange(company, this.role));
+            // Only if it is still the company: a later clear or choice supersedes it.
+            return this.save(company).then(() => (this.selected === company ? this.onChange(company, this.role) : null));
         }
 
         clearSelection() {
@@ -457,7 +459,19 @@
 
         scheduleManual() {
             clearTimeout(this.manualTimer);
-            this.manualTimer = setTimeout(() => this.saveManual(), DEBOUNCE_MS);
+            this.manualTimer = setTimeout(() => {
+                this.manualTimer = null;
+                this.saveManual();
+            }, DEBOUNCE_MS);
+        }
+
+        /** Saves a manual entry still waiting on its debounce, now. */
+        flush() {
+            if (this.manualTimer) {
+                clearTimeout(this.manualTimer);
+                this.manualTimer = null;
+                this.saveManual();
+            }
         }
 
         saveManual() {
@@ -465,6 +479,11 @@
             const number = this.orgInput.value.trim();
             const country = this.country();
             const same = this.selected && this.selected.company_name === name && this.selected.organization_number === number && this.selected.country_code === country;
+            if (this.manual && this.selected && (!name || !number || !country)) {
+                // An emptied name or number withdraws the saved company.
+                this.clearSelection();
+                return Promise.resolve();
+            }
             if (!this.manual || !name || !number || !country || same) {
                 return Promise.resolve();
             }
@@ -665,6 +684,15 @@
             return this.doc.getElementById('input-payment-company') || (this.config.companies || {}).payment ? 'payment' : 'shipping';
         }
 
+        /**
+         * Resolves once every pending save has reached the shop, so placing
+         * the order reads the company the buyer last gave.
+         */
+        settled() {
+            Object.keys(this.instances).forEach((role) => this.instances[role].flush());
+            return this.api.settled();
+        }
+
         /** The payment tile has rendered (Two is the chosen method). */
         tileReady(form) {
             this.tile = form;
@@ -729,7 +757,7 @@
         return;
     }
     const checkout = new Checkout(config, root.document, new Api(config)).start();
-    root.TwoCheckout = { tileReady: (form) => checkout.tileReady(form) };
+    root.TwoCheckout = { tileReady: (form) => checkout.tileReady(form), settled: () => checkout.settled() };
     // The tile may have rendered before this script ran.
     const form = root.document.getElementById('form-two');
     if (form) {

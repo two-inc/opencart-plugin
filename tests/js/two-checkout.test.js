@@ -118,11 +118,15 @@ describe('company search', () => {
         const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
         checkout.mountAddressRoles();
         const search = checkout.instances.payment;
+        await flush();
         const first = search.search('acm');
         const second = search.search('acme');
-        pending.acme({ items: [{ name: 'Acme Ltd', organization_number: '1' }] });
+        await flush();
         pending.acm({ items: [{ name: 'Acm Old', organization_number: '2' }] });
-        await Promise.all([first, second]);
+        await first;
+        await flush();
+        pending.acme({ items: [{ name: 'Acme Ltd', organization_number: '1' }] });
+        await second;
         expect(Array.from(search.list.children).map((option) => option.textContent)).toEqual(['Acme Ltd1']);
     });
 
@@ -138,6 +142,9 @@ describe('company search', () => {
             input.dispatchEvent(new Event('input'));
         });
         jest.advanceTimersByTime(300);
+        jest.useRealTimers();
+        await flush();
+        await flush();
         expect(calls.filter(([route]) => route === 's').map(([, params]) => params.q)).toEqual(['acme']);
     });
 
@@ -307,6 +314,64 @@ describe('review round 1', () => {
         await flush();
         expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ role: 'tile', company_name: 'Acme Ltd' });
         expect(calls.filter(([route]) => route === 'i').pop()[1]).toMatchObject({ two_company_name: 'Acme Ltd', two_organization_number: '0123' });
+    });
+});
+
+describe('review round 2', () => {
+    test('every call is queued: a search in flight finishes before a save starts', async () => {
+        const order = [];
+        const resolvers = {};
+        const fetchImpl = jest.fn((url, init) => new Promise((resolve) => {
+            const route = new URLSearchParams(url.split('?')[1]).get('route');
+            order.push('start ' + route);
+            resolvers[route] = () => { order.push('end ' + route); resolve({ json: () => Promise.resolve({ items: [], ok: true }) }); };
+        }));
+        const api = new Api(config(), fetchImpl);
+        const search = api.get('search', { q: 'acme', country: 'GB' });
+        const save = api.post('save_company', { company_name: 'Acme' });
+        await flush();
+        expect(order).toEqual(['start s']);
+        resolvers.s();
+        await search;
+        await flush();
+        expect(order).toEqual(['start s', 'end s', 'start save']);
+        resolvers.save();
+        await save;
+    });
+
+    test('Confirm waits for a manual entry still on its debounce and for queued saves', async () => {
+        addressForms();
+        const { calls, fetchImpl } = shop({ st: { available: false }, save: { ok: true } });
+        const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
+        checkout.mountAddressRoles();
+        const search = checkout.instances.payment;
+        search.manualButton.click();
+        search.input.value = 'Small Shop';
+        search.orgInput.value = '998877';
+        search.orgInput.dispatchEvent(new Event('input'));
+        await checkout.settled();
+        expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ company_name: 'Small Shop', organization_number: '998877', source: 'manual' });
+    });
+
+    test.each([
+        ['name', 'Small Shop', ''],
+        ['number', '', '998877'],
+    ])('manual entry: emptying the %s withdraws the saved company', async (field, name, number) => {
+        addressForms();
+        const { calls, fetchImpl } = shop({ st: { available: false }, save: { ok: true } });
+        const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
+        checkout.mountAddressRoles();
+        const search = checkout.instances.payment;
+        search.manualButton.click();
+        search.input.value = 'Small Shop';
+        search.orgInput.value = '998877';
+        search.orgInput.dispatchEvent(new Event('input'));
+        await checkout.settled();
+        search.input.value = name;
+        search.orgInput.value = number;
+        search.orgInput.dispatchEvent(new Event('input'));
+        await checkout.settled();
+        expect([search.selected, calls.filter(([route]) => route === 'save').pop()[1].company_name, checkout.config.companies.payment]).toEqual([null, '', undefined]);
     });
 });
 
