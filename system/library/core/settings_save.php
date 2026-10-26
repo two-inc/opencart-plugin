@@ -42,6 +42,7 @@ final class SettingsSave
     public const SWITCH_INVALID = 'switch_invalid';
     public const MINIMUM_INVALID = 'minimum_invalid';
     public const BASIS_INVALID = 'basis_invalid';
+    public const PROXY_INVALID = 'proxy_invalid';
 
     /** The on/off settings of the Checkout fields tab: the placement switch and the optional field toggles. */
     public const SWITCHES = ['company_search_in_address', 'enable_invoice_email', 'enable_po_number', 'enable_project', 'enable_department'];
@@ -61,7 +62,7 @@ final class SettingsSave
      * Validates and writes the submitted settings in one write, then brings
      * the verdict (and, for new credentials, the merchant record) up to date.
      *
-     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string} $submitted
+     * @param array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string} $submitted
      * @param list<int> $orderStatusIds the shop's order statuses, which the maps may name
      * @param int       $voidStatusId   the shop's void status (0 for none), which no map may name
      * @return array{errors: array<string, string>, credentials: string|null, status: string|null, code: int|null}
@@ -134,6 +135,15 @@ final class SettingsSave
                 $write['min_order_basis'] = $basis;
             } else {
                 $errors['min_order_basis'] = self::BASIS_INVALID;
+            }
+        }
+
+        if (isset($submitted['trusted_proxies'])) {
+            $entries = RateLimiter::parseProxies($submitted['trusted_proxies']);
+            if (array_filter($entries, static fn (string $entry): bool => !RateLimiter::isValidProxyEntry($entry)) === []) {
+                $write['trusted_proxies'] = trim($submitted['trusted_proxies']);
+            } else {
+                $errors['trusted_proxies'] = self::PROXY_INVALID;
             }
         }
 

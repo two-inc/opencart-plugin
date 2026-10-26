@@ -199,6 +199,14 @@
             </div>
 
             <div id="tab-diagnostics" class="tab-pane">
+              <div class="row mb-3">
+                <label for="input-trusted-proxies" class="col-sm-2 col-form-label">{{ entry_trusted_proxies }}</label>
+                <div class="col-sm-10">
+                  <textarea name="payment_two_trusted_proxies" rows="3" id="input-trusted-proxies" class="form-control">{{ trusted_proxies|e }}</textarea>
+                  <div id="error-trusted-proxies" class="invalid-feedback"></div>
+                  <div class="form-text">{{ help_trusted_proxies }}</div>
+                </div>
+              </div>
               <p class="text-muted">{{ text_coming_later }}</p>
             </div>
 

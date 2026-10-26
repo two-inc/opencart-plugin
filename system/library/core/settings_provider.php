@@ -40,6 +40,7 @@ final class SettingsProvider
         'enable_department' => '1',
         'min_order_amount' => '',
         'min_order_basis' => '',
+        'trusted_proxies' => '',
     ];
 
     /**
@@ -165,6 +166,17 @@ final class SettingsProvider
         $basis = trim((string) $this->store->get('min_order_basis'));
 
         return in_array($basis, [self::BASIS_GROSS, self::BASIS_NET], true) ? $basis : null;
+    }
+
+    /**
+     * The merchant's own proxies (Diagnostics > Trusted proxies), as IPs or
+     * CIDR ranges: the rate limits read the caller through them.
+     *
+     * @return list<string>
+     */
+    public function trustedProxies(): array
+    {
+        return RateLimiter::parseProxies((string) $this->store->get('trusted_proxies'));
     }
 
     /** TLS verification is on unless the merchant switched it off (section 13.2). */

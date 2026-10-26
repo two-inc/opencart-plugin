@@ -164,3 +164,8 @@ $_['button_retry'] = 'Retry';
 $_['text_refund_blocked'] = 'A refund below has an unknown outcome. Retry it before sending another refund: it is sent again under the same key, so Two refunds it at most once.';
 $_['column_left'] = 'Left to refund';
 $_['error_ajax'] = 'The shop did not answer as expected. Check the order history and the Two tab before trying again.';
+
+// Diagnostics: trusted proxies for the checkout's rate limits.
+$_['entry_trusted_proxies'] = 'Trusted proxies';
+$_['help_trusted_proxies'] = 'Addresses of your own reverse proxies, load balancers or CDN egress, as IPs or CIDR ranges, separated by commas or new lines. These IP addresses will be exempt from rate limiting.';
+$_['error_proxy_invalid'] = 'Trusted proxies: "%s" is not a valid IP address or CIDR range.';

@@ -10,6 +10,7 @@ use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\RefundRecords;
+use Opencart\System\Library\Extension\Two\Core\RateLimiter;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderRecords;
@@ -114,6 +115,7 @@ class Two extends \Opencart\System\Engine\Controller
         }
         $data['min_order_amount'] = trim((string) $settings->store()->get('min_order_amount'));
         $data['min_order_basis'] = $settings->merchantMinimumOrderBasis() ?? '';
+        $data['trusted_proxies'] = trim((string) $settings->store()->get('trusted_proxies'));
         $shopCurrency = (string) $this->config->get('config_currency');
         $data['entry_min_order_amount'] = sprintf($this->language->get('entry_min_order_amount'), $shopCurrency);
 
@@ -178,6 +180,11 @@ class Two extends \Opencart\System\Engine\Controller
 
         foreach ($result['errors'] as $field => $code) {
             $json['error'][$field] = $this->language->get('error_' . $code);
+        }
+        if (isset($result['errors']['trusted_proxies'])) {
+            // Name the first entry that is not an IP or a range, as the reference plugin does.
+            $bad = array_values(array_filter(RateLimiter::parseProxies(self::raw($post[self::CODE . '_trusted_proxies'] ?? '')), static fn (string $entry): bool => !RateLimiter::isValidProxyEntry($entry)));
+            $json['error']['trusted_proxies'] = htmlspecialchars(sprintf($this->language->get('error_proxy_invalid'), $bad[0] ?? ''), ENT_QUOTES, 'UTF-8');
         }
         $key = $this->credentialsMessage($result);
         if ($key !== null && $key['refused']) {
@@ -573,13 +580,13 @@ class Two extends \Opencart\System\Engine\Controller
      * decoded here and escaped again when rendered.
      *
      * @param array<string, mixed> $post
-     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string}
+     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string}
      */
     private function submitted(array $post): array
     {
         $field = static fn (string $key): mixed => $post[self::CODE . '_' . $key] ?? null;
         $submitted = [];
-        foreach (array_merge(['api_key', 'environment', 'cancel_status_id', 'refund_status_id', 'min_order_amount', 'min_order_basis'], SettingsSave::SWITCHES) as $key) {
+        foreach (array_merge(['api_key', 'environment', 'cancel_status_id', 'refund_status_id', 'min_order_amount', 'min_order_basis', 'trusted_proxies'], SettingsSave::SWITCHES) as $key) {
             if (is_scalar($field($key))) {
                 $submitted[$key] = self::raw($field($key));
             }

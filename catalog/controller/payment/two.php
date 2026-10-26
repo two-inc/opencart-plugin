@@ -468,11 +468,7 @@ class Two extends \Opencart\System\Engine\Controller
         } else {
             $this->load->model(self::ROUTE);
             $model = $this->model_extension_two_payment_two;
-            $rebuild = static fn (array $record): ?array => $model->orderInput($orderId, [
-                'company_name' => $record['company_name'] ?? '',
-                'organization_number' => $record['organization_number'] ?? '',
-                'country_code' => $record['country_code'] ?? '',
-            ], [], BuyerFields::decode($record['buyer_fields'] ?? ''));
+            $rebuild = OrderFlow::rebuildFrom(static fn (array $company, array $fields): ?array => $model->orderInput($orderId, $company, [], $fields));
             $result = $flow->confirm($orderId, $token, $rebuild, $model->orderRows($orderId));
         }
 
@@ -698,7 +694,7 @@ class Two extends \Opencart\System\Engine\Controller
 
             return false;
         }
-        if (isset(RateLimiter::CALLER_LIMITS[$action]) && !(new DbRateLimits($this->db))->allow($action, (string) ($this->request->server['REMOTE_ADDR'] ?? ''), time())) {
+        if (!(new DbRateLimits($this->db))->allow($action, $this->caller(), time())) {
             $this->log->write('Two: rate limit exceeded on ' . $action . ' (more than ' . RateLimiter::CALLER_LIMITS[$action][0] . ' requests in ' . RateLimiter::CALLER_LIMITS[$action][1] . 's from one caller)');
             $this->response->addHeader(($this->request->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1') . ' 429 Too Many Requests');
             $this->json(['error' => 'Too many requests']);
@@ -731,6 +727,23 @@ class Two extends \Opencart\System\Engine\Controller
         $this->response->addHeader('Content-Type: application/json');
         $this->response->addHeader('Cache-Control: no-store');
         $this->response->setOutput((string) json_encode($json));
+    }
+
+    /**
+     * The caller the rate limits count: the socket address, read from the
+     * server's own environment, because OpenCart's startup overwrites
+     * REMOTE_ADDR with the client-sent Client-IP header. Through the
+     * merchant's trusted proxies, the nearest forwarded hop that is not one.
+     */
+    private function caller(): string
+    {
+        $socket = getenv('REMOTE_ADDR');
+        if (!is_string($socket) || $socket === '') {
+            // No server environment: REMOTE_ADDR is only the socket when no Client-IP header replaced it.
+            $socket = isset($this->request->server['HTTP_CLIENT_IP']) ? '' : (string) ($this->request->server['REMOTE_ADDR'] ?? '');
+        }
+
+        return RateLimiter::callerIdentity($socket, (string) ($this->request->server['HTTP_X_FORWARDED_FOR'] ?? ''), $this->services()->settings->trustedProxies());
     }
 
     private function services(): Services
