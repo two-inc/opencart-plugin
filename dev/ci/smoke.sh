@@ -219,6 +219,20 @@ contains "the Two tab on the admin order page" "$(admin 'sale/order.info&order_i
 [ "$(sql "SHOW COLUMNS FROM oc_two_refund LIKE 'refunded_before'" | cut -f1)" = "refunded_before" ] || fail "install did not add the refunded_before column"
 contains "the Two tab reloads on its own route" "$(admin 'extension/two/payment/two.panel&order_id=9001')" 'No Two order is linked to this order.'
 contains "the refund action refuses an order with no Two order" "$(curl -s -b "$jar" -X POST -d "two_refund_net=10.00&two_refund_tax=2.50&two_refund_rate=0.25" "$base/admin/index.php?route=extension/two/payment/two.refund&order_id=9001&${user_token}")" 'Not refunded: no Two order is linked to this order.'
+# A shop in another language (nb-no, with OpenCart's own copy borrowed from en-gb): the admin offers that
+# language's default title, and an order history note is written in the shop's language whoever changes
+# the status. Both read a prefixed language load back through the registry, not the loader's en-gb copy.
+docker exec "$app" sh -c 'for side in catalog admin; do [ -d /var/www/html/$side/language/nb-no ] || cp -r /var/www/html/$side/language/en-gb /var/www/html/$side/language/nb-no; done'
+sql "DELETE FROM oc_language WHERE code = 'nb-no'; INSERT INTO oc_language SET name = 'Norsk', code = 'nb-no', locale = 'nb-no,nb', extension = '', sort_order = 2, status = 1"
+nb=$(sql "SELECT language_id FROM oc_language WHERE code = 'nb-no'")
+docker exec "$app" find /var/www/html/system/storage/cache -name 'cache.language.*' -delete
+contains "the admin offers a language's own default title" "$(admin extension/two/payment/two)" "payment_two_title[${nb}]\" value=\"Bedriftsfaktura\""
+sql "UPDATE oc_setting SET value = 'nb-no' WHERE store_id = 0 AND \`key\` = 'config_language_catalog'"
+history "$shipped"
+[ "$(sql "SELECT comment FROM oc_order_history WHERE order_id = 9001 ORDER BY order_history_id DESC LIMIT 1")" = 'Two: Ikke oppfylt: ingen Two-ordre er knyttet til denne ordren.' ] || fail "the order history note was not in the shop's language"
+ok "the order history note is in the shop's language"
+sql "UPDATE oc_setting SET value = 'en-gb' WHERE store_id = 0 AND \`key\` = 'config_language_catalog'; DELETE FROM oc_language WHERE code = 'nb-no'"
+docker exec "$app" find /var/www/html/system/storage/cache -name 'cache.language.*' -delete
 # The two refusals are expected in the log; anything else still fails the check below.
 docker exec "$app" sed -i '/Two error: Order 9001: Not \(fulfilled\|cancelled\|refunded\): no Two order is linked/d' /var/www/html/system/storage/logs/error.log
 

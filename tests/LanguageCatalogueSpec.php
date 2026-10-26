@@ -32,6 +32,7 @@ final class LanguageCatalogueSpec
                 $reference[substr($file, strlen($root . '/'))] = self::load($file);
             }
         }
+        self::prefixedLoadsReadBack($root);
         TinyAssert::true(count($reference) === 5, 'en-gb has the payment, total and notes files for the admin, and the payment and notes files for the catalog');
         foreach (['admin/language/en-gb/payment/two_notes.php', 'catalog/language/en-gb/payment/two_notes.php'] as $notes) {
             TinyAssert::same(Message::TEMPLATES, $reference[$notes] ?? [], $notes . ' is the core\'s English for every message, key for key');
@@ -63,6 +64,24 @@ final class LanguageCatalogueSpec
             foreach ($english as $key => $value) {
                 TinyAssert::true(!str_contains($value, "\u{2014}"), 'en-gb ' . $path . ' ' . $key . ': no em-dash');
                 TinyAssert::true(!self::barePercent($value) || !self::placeholders($value), 'en-gb ' . $path . ' ' . $key . ': a % is a placeholder or %%, since the string is formatted');
+            }
+        }
+    }
+
+    /**
+     * OpenCart's loader returns the en-gb copy and its language event then
+     * loads the shop language over it, so a prefixed load is read back through
+     * the registry, never from what the loader returned.
+     */
+    private static function prefixedLoadsReadBack(string $root): void
+    {
+        foreach (['admin', 'catalog', 'system/library/opencart'] as $dir) {
+            $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $dir, FilesystemIterator::SKIP_DOTS));
+            foreach ($files as $file) {
+                if ($file->getExtension() === 'php' && !str_contains($file->getPathname(), '/language/')) {
+                    $source = (string) file_get_contents($file->getPathname());
+                    TinyAssert::true(preg_match('~=\s*\$(this->)?load->language\([^;]*,~', $source) !== 1, $file->getFilename() . ': a prefixed language load is read back with language->get, not from the loader\'s answer');
+                }
             }
         }
     }
