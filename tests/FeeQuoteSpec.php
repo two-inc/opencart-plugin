@@ -41,21 +41,32 @@ final class FeeQuoteSpec
     /** An admin edit puts back the fee the order was placed with, or none: never a new quote. */
     private static function testPlacedFee(): void
     {
-        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => 2.5]];
-        $placed = FeeQuote::encodePlaced([['code' => 'sub_total', 'value' => 100], $fee]);
-        $line = ['title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => 2.5]];
+        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => ['amount' => 2.5, 'name' => 'VAT 25%']]];
+        $placed = FeeQuote::encodePlaced([['code' => 'sub_total', 'value' => 100], $fee], 1.0);
+        $line = ['title' => 'Payment terms fee - 30 days', 'value' => 10.0, 'tax' => 2.5, 'rate' => 0.25, 'tax_rates' => [86 => ['amount' => 2.5, 'name' => 'VAT 25%']]];
         $cases = [
-            [['payment_fee' => '1', 'placed_fee' => $placed], $line, 'placed with a fee: that fee, its tax rows as stored'],
+            [['payment_fee' => '1', 'placed_fee' => $placed], $line, 'placed with a fee: that fee, its tax rows and their names as stored'],
             [['payment_fee' => '0', 'placed_fee' => ''], null, 'placed without a fee (a shop with no surcharge, or a term with none): none, and nothing to quote'],
             [['payment_fee' => '1', 'placed_fee' => ''], null, 'a fee flag with no stored fee: none'],
             [['payment_fee' => '0', 'placed_fee' => $placed], null, 'a stored fee on an order flagged without one: none'],
             [[], null, 'no Two record: none'],
         ];
         foreach ($cases as [$record, $expected, $description]) {
-            TinyAssert::same($expected, FeeQuote::editLine($record), 'edit line: ' . $description);
+            TinyAssert::same($expected, FeeQuote::editLine($record, 1.0), 'edit line: ' . $description);
         }
-        TinyAssert::same('', FeeQuote::encodePlaced([['code' => 'shipping', 'value' => 5]]), 'placed fee: none when the order has no fee line');
-        TinyAssert::same(null, FeeQuote::decodePlaced('{"value":0,"tax":0}'), 'placed fee: a zero fee is none');
+        TinyAssert::same('', FeeQuote::encodePlaced([['code' => 'shipping', 'value' => 5]], 1.0), 'placed fee: none when the order has no fee line');
+        TinyAssert::same(null, FeeQuote::decodePlaced('{"net":0,"tax":0}', 1.0), 'placed fee: a zero fee is none');
+
+        // A shop in EUR, an order in NOK placed at 11.5 and edited when the rate is 12.0:
+        // the fee in the order's currency stays exactly as placed, never drifting with the rate.
+        $nok = ['value' => 100.0 / 11.5, 'tax' => 25.0 / 11.5, 'tax_rates' => [86 => ['amount' => 25.0 / 11.5, 'name' => 'MVA 25%']]] + $fee;
+        $edited = FeeQuote::editLine(['payment_fee' => '1', 'placed_fee' => FeeQuote::encodePlaced([$nok], 11.5)], 12.0);
+        TinyAssert::same(['100.00', '25.00', '25.00', 'MVA 25%'], [
+            number_format(($edited['value'] ?? 0) * 12.0, 2, '.', ''),
+            number_format(($edited['tax'] ?? 0) * 12.0, 2, '.', ''),
+            number_format(($edited['tax_rates'][86]['amount'] ?? 0) * 12.0, 2, '.', ''),
+            $edited['tax_rates'][86]['name'] ?? '',
+        ], 'placed fee: in a non-default currency at a changed rate, the order-currency fee and tax are exactly as placed');
     }
 
     /** The chips' preview: terms asked together, a kept quote reused, the fresh ones handed back to keep. */

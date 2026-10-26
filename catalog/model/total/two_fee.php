@@ -47,11 +47,17 @@ class TwoFee extends \Opencart\System\Engine\Model
         if ($rows === null && $fee['tax_class_id'] > 0) {
             $rows = [];
             foreach ($this->tax->getRates($fee['value'], $fee['tax_class_id']) as $rate) {
-                $rows[(int) $rate['tax_rate_id']] = (float) $rate['amount'];
+                $rows[(int) $rate['tax_rate_id']] = ['amount' => (float) $rate['amount'], 'name' => (string) $rate['name']];
             }
         }
-        foreach ($rows ?? [] as $id => $amount) {
-            $taxes[$id] = ($taxes[$id] ?? 0.0) + $amount;
+        foreach ($rows ?? [] as $id => $row) {
+            if (!$this->tax->getRateName($id) && $row['name'] !== '') {
+                // A rate deleted since the order was placed: its own Taxes row, under the name it had.
+                $totals[] = ['extension' => 'two', 'code' => 'tax', 'title' => $row['name'], 'value' => $row['amount'], 'sort_order' => (int) $this->config->get('total_tax_sort_order')];
+                $total += $row['amount'];
+                continue;
+            }
+            $taxes[$id] = ($taxes[$id] ?? 0.0) + $row['amount'];
         }
         $total += $fee['value'];
     }

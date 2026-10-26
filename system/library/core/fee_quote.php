@@ -161,56 +161,67 @@ final class FeeQuote
     }
 
     /**
-     * The fee line an order was placed with, as stored on its record: the
-     * `two_fee` total's title, net (in the shop's default currency, as the
-     * order keeps it), tax and rate, and its tax by OpenCart tax rate id.
-     * '' when the order was placed without one.
+     * The fee line an order was placed with, as stored on its record, in the
+     * order's own currency (the shop keeps totals in its default currency,
+     * and an edit re-stamps the order's currency value at today's rate, so
+     * only the order-currency figures stay exact): its title, net, tax and
+     * rate, and its tax rows with their names (a rate the merchant deletes
+     * later still has its title). $fx is the order's currency value. '' when
+     * the order was placed without one.
      *
      * @param list<array<string, mixed>> $totals
      */
-    public static function encodePlaced(array $totals): string
+    public static function encodePlaced(array $totals, float $fx): string
     {
         foreach ($totals as $total) {
-            if (($total['code'] ?? null) === 'two_fee') {
-                return (string) json_encode([
-                    'title' => (string) ($total['title'] ?? ''),
-                    'value' => (float) ($total['value'] ?? 0),
-                    'tax' => (float) ($total['tax'] ?? 0),
-                    'rate' => isset($total['rate']) ? (float) $total['rate'] : null,
-                    'tax_rates' => is_array($total['tax_rates'] ?? null) ? $total['tax_rates'] : [],
-                ]);
+            if (($total['code'] ?? null) !== 'two_fee') {
+                continue;
             }
+            $rows = [];
+            foreach (is_array($total['tax_rates'] ?? null) ? $total['tax_rates'] : [] as $id => $row) {
+                $rows[(string) $id] = ['amount' => round((float) ($row['amount'] ?? 0) * $fx, 2), 'name' => (string) ($row['name'] ?? '')];
+            }
+
+            return (string) json_encode([
+                'title' => (string) ($total['title'] ?? ''),
+                'net' => round((float) ($total['value'] ?? 0) * $fx, 2),
+                'tax' => round((float) ($total['tax'] ?? 0) * $fx, 2),
+                'rate' => isset($total['rate']) ? (float) $total['rate'] : null,
+                'tax_rates' => (object) $rows,
+            ]);
         }
 
         return '';
     }
 
     /**
-     * The placed fee read back, or null when there is none. An edit puts it
-     * back as it was placed (never repriced, never its tax recomputed), as
-     * the reference plugin replays a placed order's fee rows.
+     * The placed fee read back in the shop's default currency at the
+     * order's currency value now ($fx), so that in the order's currency it
+     * is exactly as placed; null when there is none. An edit puts it back as
+     * it was placed (never repriced, never its tax recomputed), as the
+     * reference plugin replays a placed order's fee rows.
      *
-     * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, float>}|null
+     * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, array{amount: float, name: string}>}|null
      */
-    public static function decodePlaced(string $stored): ?array
+    public static function decodePlaced(string $stored, float $fx): ?array
     {
         $fee = json_decode($stored, true);
-        if (!is_array($fee) || !is_numeric($fee['value'] ?? null) || (float) $fee['value'] <= 0 || !is_numeric($fee['tax'] ?? null)) {
+        if ($fx <= 0 || !is_array($fee) || !is_numeric($fee['net'] ?? null) || (float) $fee['net'] <= 0 || !is_numeric($fee['tax'] ?? null)) {
             return null;
         }
-        $rates = [];
-        foreach (is_array($fee['tax_rates'] ?? null) ? $fee['tax_rates'] : [] as $id => $amount) {
-            if (is_numeric($id) && is_numeric($amount)) {
-                $rates[(int) $id] = (float) $amount;
+        $rows = [];
+        foreach (is_array($fee['tax_rates'] ?? null) ? $fee['tax_rates'] : [] as $id => $row) {
+            if (is_numeric($id) && is_array($row) && is_numeric($row['amount'] ?? null)) {
+                $rows[(int) $id] = ['amount' => (float) $row['amount'] / $fx, 'name' => is_string($row['name'] ?? null) ? $row['name'] : ''];
             }
         }
 
         return [
             'title' => is_string($fee['title'] ?? null) ? $fee['title'] : '',
-            'value' => (float) $fee['value'],
-            'tax' => (float) $fee['tax'],
+            'value' => (float) $fee['net'] / $fx,
+            'tax' => (float) $fee['tax'] / $fx,
             'rate' => is_numeric($fee['rate'] ?? null) ? (float) $fee['rate'] : null,
-            'tax_rates' => $rates,
+            'tax_rates' => $rows,
         ];
     }
 
@@ -220,11 +231,11 @@ final class FeeQuote
      * quote, whatever the surcharge, terms or quotes now say.
      *
      * @param array<string, string> $record the order's two_order row
-     * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, float>}|null
+     * @return array{title: string, value: float, tax: float, rate: float|null, tax_rates: array<int, array{amount: float, name: string}>}|null
      */
-    public static function editLine(array $record): ?array
+    public static function editLine(array $record, float $fx): ?array
     {
-        return ($record['payment_fee'] ?? '') === '1' ? self::decodePlaced((string) ($record['placed_fee'] ?? '')) : null;
+        return ($record['payment_fee'] ?? '') === '1' ? self::decodePlaced((string) ($record['placed_fee'] ?? ''), $fx) : null;
     }
 
     /**

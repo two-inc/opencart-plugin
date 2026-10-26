@@ -125,9 +125,9 @@ final class OrderFlow
             'country_code' => trim((string) $company['country_code']),
             'buyer_fields' => BuyerFields::encode(is_array($order['buyer_fields'] ?? null) ? $order['buyer_fields'] : []),
             'payment_terms' => is_array($order['terms'] ?? null) ? (string) json_encode($order['terms']) : '',
-            // An edit reprices the fee only on an order placed with one, and never adds one.
+            // An edit puts back the fee the order was placed with, and never adds one.
             'payment_fee' => in_array('two_fee', array_column($totals, 'code'), true) ? '1' : '0',
-            'placed_fee' => FeeQuote::encodePlaced($totals),
+            'placed_fee' => FeeQuote::encodePlaced($totals, (float) $order['currency_value']),
         ];
         $this->records->put($orderId, $stored);
         $record = $this->records->get($orderId) ?? [];
