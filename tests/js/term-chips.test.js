@@ -78,7 +78,7 @@ describe('keyboard', () => {
 describe('saving a term', () => {
     test.each([
         [{ term: { ok: true } }, ['14:false:-1', '30:true:0'], 'new', 'Pay in 30 days', [], 'a saved term reloads the totals'],
-        [{ term: { ok: false, error: 'not offered' } }, ['14:true:0', '30:false:-1'], 'old', 'Pay in 14 days', ['not offered'], 'a refused term puts the saved one back'],
+        [{ term: { ok: false, error: 'not offered' } }, ['14:true:0', '30:false:-1'], 'new', 'Pay in 14 days', ['not offered'], 'a refused term puts the saved one back and re-syncs the totals'],
     ])('%#: %s', async (answers, expected, totals, payIn, alerts, description) => {
         const result = chips(answers, [14, 30], 14);
         await result.instance.choose(30);
@@ -123,6 +123,27 @@ describe('arrow keys and Confirm', () => {
         }
         expect(confirmed).toEqual(['60']);
         expect(calls.map(([route]) => route)).toEqual(['fees', 'term', 'totals']);
+    });
+});
+
+describe('a failed save', () => {
+    test.each([
+        [false, ['14:true:0', '30:false:-1', '60:false:-1'], ['30'], 'new', 'with nothing waiting, the chips and the totals re-sync to the saved term'],
+        [true, ['14:false:-1', '30:false:-1', '60:true:0'], ['30', '60'], 'new', 'with a later choice waiting, that choice saves and both follow it'],
+    ])('%#: %s', async (later, expected, saves, totals, description) => {
+        const result = chips({ term: (params) => (params.days === '30' ? { ok: false, error: 'busy' } : { ok: true }) }, [14, 30, 60], 14);
+        const first = result.instance.choose(30);
+        if (later) {
+            await flush();
+            result.instance.choose(60);
+        }
+        await first;
+        for (let i = 0; i < 6; i += 1) {
+            await flush();
+        }
+        const terms = result.calls.filter(([route]) => route === 'term').map(([, params]) => params.days);
+        expect({ description, state: state(), terms, totals: document.querySelector('#checkout-confirm tfoot td').textContent })
+            .toEqual({ description, state: expected, terms: saves, totals: totals });
     });
 });
 

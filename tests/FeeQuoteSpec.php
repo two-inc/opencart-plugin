@@ -49,7 +49,22 @@ final class FeeQuoteSpec
         TinyAssert::same([30 => ['net' => 3.0, 'currency' => 'NOK'], 60 => null, 90 => ['net' => 9.0, 'currency' => 'NOK']], [30 => $result[30], 60 => $result[60], 90 => $result[90]], 'quote all: each term answered, a failure null, a kept quote reused');
         TinyAssert::same(2, count($transport->calls), 'quote all: only the terms not kept are asked');
         TinyAssert::same(FeeQuote::PREVIEW_SECONDS, $transport->calls[0]['timeout'], 'quote all: the preview\'s whole wait is capped');
-        TinyAssert::same([['net' => 3.0, 'currency' => 'NOK']], array_values($quotes->fresh()), 'quote all: only Two\'s new answers are handed back to keep');
+        TinyAssert::same([['net' => 3.0, 'currency' => 'NOK'], null], array_values($quotes->fresh()), 'quote all: Two\'s new answers are handed back to keep, a failure as null');
+
+        // A failure kept from an earlier request answers without asking Two again.
+        [$quotes, $transport, $settings] = self::quotes(['surcharge_type' => 'percentage'], []);
+        $surcharge = Surcharge::from($settings);
+        $terms = PaymentTerms::from(['available_terms' => [30, 60, 90]], $settings);
+        $failed = $quotes->payload($surcharge, $terms, 30, 100.0, 'NO', 'NOK', 'NOK');
+        $quotes->remember([hash('sha256', (string) json_encode($failed)) => null]);
+        TinyAssert::same(null, $quotes->quote($surcharge, $terms, 30, 100.0, 'NO', 'NOK', 'NOK'), 'quote all: a kept failure answers null');
+        TinyAssert::same(0, count($transport->calls), 'quote all: a kept failure is not asked again, so an outage costs one wait');
+
+        // Outside the checkout only quotes already held answer.
+        [$quotes, $transport, $settings] = self::quotes(['surcharge_type' => 'percentage'], [new HttpResponse(200, '{"currency":"NOK","buyer_fee_share":"3"}')]);
+        $quotes->askTwo = false;
+        TinyAssert::same(null, $quotes->quote(Surcharge::from($settings), PaymentTerms::from(['available_terms' => [30]], $settings), 30, 100.0, 'NO', 'NOK', 'NOK'), 'quote all: outside the checkout an unheld quote is none');
+        TinyAssert::same(0, count($transport->calls), 'quote all: outside the checkout Two is never asked');
     }
 
     private static function testLineValue(): void
@@ -99,9 +114,9 @@ final class FeeQuoteSpec
             [[], 100.0, 'NOK', 'NOK', [], 100.0, 0, 'the same currency needs no rate'],
             [[FxRates::CACHE_KEY => $fresh, FxRates::STAMP_KEY => (string) (self::NOW - 60)], 100.0, 'GBP', 'NOK', [], 1352.94, 0, 'a fresh table converts through the EUR pivot, rounded once, with no fetch'],
             [[FxRates::CACHE_KEY => $fresh, FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [$answer], 1200.0, 1, 'a table past its TTL is refreshed, and the fresh rate used'],
-            [[FxRates::CACHE_KEY => self::table(self::NOW - FxRates::TTL - 1), FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], 1352.94, 1, 'a failed refresh serves the last good table within the grace'],
-            [[FxRates::CACHE_KEY => self::table(self::NOW - FxRates::STALE_GRACE - 1), FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], null, 1, 'past the grace a failed refresh fails closed'],
-            [[FxRates::CACHE_KEY => self::table(self::NOW - FxRates::STALE_GRACE - 1), FxRates::STAMP_KEY => (string) (self::NOW - 60)], 100.0, 'GBP', 'NOK', [], null, 0, 'past the grace, within the backoff, fails closed without a fetch'],
+            [[FxRates::CACHE_KEY => self::table(self::NOW - FxRates::TTL - 1), FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], 1352.94, 1, 'a failed refresh serves the last good table'],
+            [[FxRates::CACHE_KEY => self::table(self::NOW - 90 * 86_400), FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], 1352.94, 1, 'a months-old table is still served while refreshes fail, as the reference plugin does'],
+            [[FxRates::STAMP_KEY => $due], 100.0, 'GBP', 'NOK', [new HttpResponse(503, '')], null, 1, 'no table ever fetched fails closed'],
             [[], 100.0, 'GBP', 'NOK', [$answer], 1200.0, 1, 'a missing table is fetched on demand'],
             [[FxRates::CACHE_KEY => $fresh, FxRates::STAMP_KEY => (string) (self::NOW - 60)], 100.0, 'GBP', 'SEK', [], null, 0, 'a currency the table lacks'],
         ];
@@ -174,6 +189,19 @@ final class FeeQuoteSpec
             [$quotes, , $settings] = self::quotes($settings, $responses);
             TinyAssert::same($expected, $quotes->charged(Surcharge::from($settings), PaymentTerms::from(['available_terms' => [30, 60]], $settings), $chosen, $gross, 'NO', 'NOK', 'NOK'), 'charged: ' . $description);
         }
+
+        // An existing order (an admin edit) is priced on its stored term, never the default.
+        $stored = [
+            [['surcharge_type' => 'percentage'], 60, [$ok], ['applies' => true, 'days' => 60, 'net' => 7.0], '', 'the stored term is priced as it is'],
+            [['surcharge_type' => 'percentage', 'payment_terms' => '[30]'], 60, [$ok], ['applies' => true, 'days' => 60, 'net' => null], 'no longer one the merchant record offers', 'a stored term no longer offered is not swapped for the default'],
+            [['surcharge_type' => 'percentage', 'surcharge_grid' => '{"30":{"percentage":"2"}}'], 60, [$ok], ['applies' => true, 'days' => 60, 'net' => null], 'no longer prices a payment terms fee', 'a stored term that no longer prices a fee'],
+            [['surcharge_type' => 'percentage'], null, [], ['applies' => true, 'days' => null, 'net' => null], 'no stored payment term', 'no stored term'],
+        ];
+        foreach ($stored as [$settings, $days, $responses, $expected, $failure, $description]) {
+            [$quotes, , $settings] = self::quotes($settings, $responses);
+            TinyAssert::same($expected, $quotes->charged(Surcharge::from($settings), PaymentTerms::from(['available_terms' => [30, 60]], $settings), $days, 100.0, 'NO', 'NOK', 'NOK', true), 'charged on a stored term: ' . $description);
+            TinyAssert::true($failure === '' ? $quotes->failure === '' : str_contains($quotes->failure, $failure), 'charged on a stored term, the reason: ' . $description . ' (' . $quotes->failure . ')');
+        }
     }
 
     private static function testCurrencyFailure(): void
@@ -213,7 +241,7 @@ final class FeeQuoteSpec
      */
     private static function quotes(array $settings, array $responses): array
     {
-        $provider = new SettingsProvider(new MemoryStore($settings + ['api_key' => 'k', 'surcharge_grid' => self::GRID, FxRates::CACHE_KEY => self::TABLE, FxRates::STAMP_KEY => (string) self::NOW]));
+        $provider = new SettingsProvider(new MemoryStore($settings + ['api_key' => 'k', 'payment_terms' => '[30,60,90]', 'surcharge_grid' => self::GRID, FxRates::CACHE_KEY => self::TABLE, FxRates::STAMP_KEY => (string) self::NOW]));
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
         $client = new Client(new Environment(false), $provider, new CustomHeaders(), $transport, $logger, '1.0.0');

@@ -955,27 +955,29 @@
         /**
          * Saves the term, then reloads the totals, from inside the queue
          * (calls made here go straight to the shop, not to the back of the
-         * queue). A refused term puts the last saved one back.
+         * queue). A failed save re-syncs the chips and the totals with the
+         * shop's last saved term, unless a later choice is already waiting:
+         * that one then saves, and the chips and totals follow it.
          */
         save(days) {
             const body = new URLSearchParams({ two_token: this.config.token, days: String(days) }).toString();
+            const failed = (message) => {
+                if (message) {
+                    this.alert(message, true);
+                }
+                if (this.pending || this.saved === null) {
+                    return null;
+                }
+                this.select(this.saved);
+                return this.totals().catch(() => null);
+            };
             return this.api.timed('term', this.config.urls.term, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body }).then((json) => {
                 if (!json || !json.ok) {
-                    if (this.saved !== null) {
-                        this.select(this.saved);
-                    }
-                    if (json && json.error) {
-                        this.alert(json.error, true);
-                    }
-                    return null;
+                    return failed(json && json.error);
                 }
                 this.saved = days;
                 return this.totals();
-            }).catch(() => {
-                if (this.saved !== null) {
-                    this.select(this.saved);
-                }
-            });
+            }, () => failed(''));
         }
 
         /**

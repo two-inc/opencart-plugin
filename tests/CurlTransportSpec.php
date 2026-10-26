@@ -15,7 +15,8 @@ final class CurlTransportSpec
     public static function runAll(): void
     {
         $port = self::freePort();
-        $server = proc_open([PHP_BINARY, '-S', '127.0.0.1:' . $port, __DIR__ . '/fixtures/http-router.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
+        // Workers, so a stalled /truncated never holds up the other calls.
+        $server = proc_open([PHP_BINARY, '-S', '127.0.0.1:' . $port, __DIR__ . '/fixtures/http-router.php'], [1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes, null, ['PHP_CLI_SERVER_WORKERS' => '8'] + getenv());
         TinyAssert::true(is_resource($server), 'curl transport: the scripted server starts');
         try {
             self::waitFor($port);

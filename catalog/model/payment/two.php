@@ -48,6 +48,9 @@ class Two extends \Opencart\System\Engine\Model
 
     private ?Services $services = null;
 
+    /** Why the fee of the order being edited in this request could not be priced. */
+    private string $editFeeFailure = '';
+
     /** Whether this request already logged why Two was withheld: OpenCart asks for the methods more than once per render. */
     private static bool $withholdLogged = false;
 
@@ -164,7 +167,14 @@ class Two extends \Opencart\System\Engine\Model
         if (self::$feeSuspended || $code !== 'two.two') {
             return null;
         }
+        // An admin edit keeps the fee the order was placed with: none stays none, one is repriced on the stored term.
+        if ($this->inAdminEdit() && ($this->services()->orders->get($this->editedOrderId())['payment_fee'] ?? '') !== '1') {
+            return null;
+        }
         $fee = $this->cartFee();
+        if ($this->inAdminEdit() && $fee['applies'] && $fee['net'] === null) {
+            $this->editFeeFailure = $fee['failure'];
+        }
         $value = FeeQuote::lineValue($fee, $code, (float) $this->currency->getValue($this->sessionCurrency()));
         if ($value === null || $fee['days'] === null) {
             return null;
@@ -194,7 +204,9 @@ class Two extends \Opencart\System\Engine\Model
     {
         $services = $this->services();
         $this->rememberQuotes();
-        $charged = $services->fees->charged($services->surcharge(), $services->paymentTerms(), $this->chosenTerm(), $this->grossWithoutFee(), $this->buyerCountry($address) ?? '', $this->sessionCurrency(), (string) $this->config->get('config_currency'));
+        // Outside the checkout (the header cart on every page) only a quote already held answers.
+        $services->fees->askTwo = $this->inCheckout();
+        $charged = $services->fees->charged($services->surcharge(), $services->paymentTerms(), $this->chosenTerm(), $this->grossWithoutFee(), $this->buyerCountry($address) ?? '', $this->sessionCurrency(), (string) $this->config->get('config_currency'), $this->inAdminEdit());
         $this->keepQuotes();
 
         return $charged + ['failure' => $services->fees->failure];
@@ -239,7 +251,12 @@ class Two extends \Opencart\System\Engine\Model
     {
         $known = [];
         foreach ((array) ($this->session->data['two_fee_quotes'] ?? []) as $hash => $quote) {
-            if (is_array($quote) && (int) ($quote['at'] ?? 0) > time() - self::FEE_CACHE_SECONDS && is_numeric($quote['net'] ?? null) && is_string($quote['currency'] ?? null)) {
+            if (!is_array($quote) || (int) ($quote['at'] ?? 0) <= time() - self::FEE_CACHE_SECONDS) {
+                continue;
+            }
+            if (($quote['failed'] ?? false) === true) {
+                $known[(string) $hash] = null;
+            } elseif (is_numeric($quote['net'] ?? null) && is_string($quote['currency'] ?? null)) {
                 $known[(string) $hash] = ['net' => (float) $quote['net'], 'currency' => $quote['currency']];
             }
         }
@@ -258,7 +275,7 @@ class Two extends \Opencart\System\Engine\Model
         }
         $kept = array_filter((array) ($this->session->data['two_fee_quotes'] ?? []), static fn (mixed $quote): bool => is_array($quote) && (int) ($quote['at'] ?? 0) > time() - self::FEE_CACHE_SECONDS);
         foreach ($fresh as $hash => $quote) {
-            $kept[$hash] = $quote + ['at' => time()];
+            $kept[$hash] = ($quote ?? ['failed' => true]) + ['at' => time()];
         }
         $this->session->data['two_fee_quotes'] = $kept;
     }
@@ -320,8 +337,8 @@ class Two extends \Opencart\System\Engine\Model
      */
     public function chosenTerm(): ?int
     {
-        if (str_starts_with((string) ($this->request->get['route'] ?? ''), 'api/')) {
-            $orderId = (int) ($this->request->post['order_id'] ?? $this->request->get['order_id'] ?? 0);
+        if ($this->inAdminEdit()) {
+            $orderId = $this->editedOrderId();
             $stored = $orderId > 0 ? PaymentTerms::decode((string) ($this->services()->orders->get($orderId)['payment_terms'] ?? '')) : null;
 
             return $stored['duration_days'] ?? null;
@@ -338,21 +355,40 @@ class Two extends \Opencart\System\Engine\Model
             && $this->db->query('SELECT `extension_id` FROM `' . DB_PREFIX . "extension` WHERE `type` = 'total' AND `code` = 'two_fee'")->num_rows > 0;
     }
 
-    /**
-     * Whether an order rebuilt on its stored term must carry a fee line: the
-     * surcharge prices one for that term. An edit whose fee could not be
-     * quoted is then refused, not sent without its fee.
-     *
-     * @param array<string, mixed> $terms
-     */
-    private function feeExpected(array $terms, float $total): bool
+    /** An admin order edit: OpenCart's admin runs the catalog's api/ routes in a fresh session. */
+    private function inAdminEdit(): bool
     {
-        $services = $this->services();
-        $surcharge = $services->surcharge();
-        $days = is_int($terms['duration_days'] ?? null) ? $terms['duration_days'] : 0;
-        $offered = $services->paymentTerms();
+        return str_starts_with((string) ($this->request->get['route'] ?? ''), 'api/');
+    }
 
-        return $days > 0 && $total > 0 && $surcharge->isKnown() && $surcharge->pricesFee($days, $offered->defaultTerm(), $offered->isEndOfMonth());
+    private function editedOrderId(): int
+    {
+        return (int) ($this->request->post['order_id'] ?? $this->request->get['order_id'] ?? 0);
+    }
+
+    /** The checkout's own requests (and an admin edit), where a fee may be asked of Two. */
+    private function inCheckout(): bool
+    {
+        $route = (string) ($this->request->get['route'] ?? '');
+
+        return str_starts_with($route, 'checkout/') || str_starts_with($route, 'extension/two/') || str_starts_with($route, 'api/');
+    }
+
+    /**
+     * Why a rebuilt order (a confirm or an edit sync, on its stored term)
+     * may not be sent, or '': it was placed with a payment terms fee and no
+     * longer carries one. Judged against what the order was placed with,
+     * never the current surcharge setting.
+     *
+     * @param array<int, array{code: string}> $totals
+     */
+    private function feeRefusal(int $orderId, array $totals): string
+    {
+        if (($this->services()->orders->get($orderId)['payment_fee'] ?? '') !== '1' || in_array('two_fee', array_column($totals, 'code'), true)) {
+            return '';
+        }
+
+        return $this->editFeeFailure !== '' ? $this->editFeeFailure : 'the order was placed with a payment terms fee but no longer carries one';
     }
 
     /** The cart's gross without the fee, in the session currency at the shop's own currency value (the factor the order is sent at). */
@@ -502,7 +538,7 @@ class Two extends \Opencart\System\Engine\Model
                 'merchant_urls' => $urls,
                 'buyer_fields' => $buyerFields,
                 'terms' => $terms ?? $this->termsBlock(),
-                'fee_expected' => $terms !== null && $terms !== [] && $this->feeExpected($terms, (float) $order['total']),
+                'fee_refusal' => $terms === null ? '' : $this->feeRefusal($orderId, $totals),
             ],
             'lines' => $lines,
             'totals' => $totals,

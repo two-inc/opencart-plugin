@@ -28,6 +28,7 @@ final class OrderFlowSpec
         self::testCreate();
         self::testRecreate();
         self::testCreateKeyPerAttempt();
+        self::testCreateKeepsTermsAndFee();
         self::testConfirm();
         self::testCancel();
         self::testNewToken();
@@ -113,6 +114,26 @@ final class OrderFlowSpec
     }
 
     /** One key per checkout attempt: each attempt has its own token, so the same cart and company never share a create key. */
+    /** The order's term and whether it was placed with a fee are kept, so a rebuild judges the fee by what was placed. */
+    private static function testCreateKeepsTermsAndFee(): void
+    {
+        $created = self::json(201, ['id' => self::ID, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);
+        $fee = ['code' => 'two_fee', 'title' => 'Payment terms fee - 30 days', 'value' => 10, 'tax' => 0, 'rate' => 0.0];
+        $cases = [
+            [['terms' => ['type' => 'NET_TERMS', 'duration_days' => 30]], [$fee], ['{"type":"NET_TERMS","duration_days":30}', '1'], 'placed on a term with a fee'],
+            [['terms' => ['type' => 'NET_TERMS', 'duration_days' => 60]], [], ['{"type":"NET_TERMS","duration_days":60}', '0'], 'placed on a term without a fee'],
+            [[], [], ['', '0'], 'placed with no term'],
+        ];
+        foreach ($cases as [$over, $totals, $expected, $description]) {
+            $records = new MemoryRecords();
+            [$flow] = self::flow([$created], $records);
+            $order = $over + self::order();
+            $order['total'] = (float) $order['total'] + array_sum(array_column($totals, 'value'));
+            $flow->create($order, self::lines(2), $totals, self::TOKEN);
+            TinyAssert::same($expected, [$records->rows[42]['payment_terms'] ?? null, $records->rows[42]['payment_fee'] ?? null], 'create keeps the term and the fee: ' . $description);
+        }
+    }
+
     private static function testCreateKeyPerAttempt(): void
     {
         $created = static fn (): HttpResponse => self::json(201, ['id' => self::ID, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/1']);

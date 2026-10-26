@@ -13,10 +13,12 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * Cached through the SettingsStore. Every conversion refreshes the table
  * once it is older than TTL; the attempt is stamped before the call, so
  * concurrent requests share one, and a failed one is retried after BACKOFF.
- * Meanwhile the last good table is served, but only for STALE_GRACE after it
- * was fetched: past that a rate is missing, and the charge paths fail
- * closed. A fresh table is merged over the cached one, so a currency that
- * drops out of one answer keeps its last rate.
+ * Meanwhile the last good table is served for as long as no refresh
+ * succeeds, as the reference plugin does; a rate is missing only when no
+ * table was ever fetched or it lacks the currency, and the charge paths
+ * then fail closed. The admin health row shows the table's age. A fresh
+ * table is merged over the cached one, so a currency that drops out of one
+ * answer keeps its last rate.
  */
 final class FxRates
 {
@@ -26,8 +28,6 @@ final class FxRates
     public const TTL = 21_600;
     public const BACKOFF = 300;
     public const TIMEOUT_SECONDS = 5;
-    /** How long after its fetch a table is still served while refreshes fail. */
-    public const STALE_GRACE = 259_200;
 
     /** @var \Closure(): int */
     private readonly \Closure $clock;
@@ -58,7 +58,7 @@ final class FxRates
         }
         $this->refreshIfDue();
         $table = $this->table();
-        if ($table === null || ($this->clock)() - $table['fetched_at'] > self::STALE_GRACE) {
+        if ($table === null) {
             return null;
         }
         $rates = $table['rates'];
