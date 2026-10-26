@@ -143,7 +143,139 @@
             </div>
 
             <div id="tab-payment-terms" class="tab-pane">
-              <p class="text-muted">{{ text_coming_later }}</p>
+              {% if not record_terms %}
+                <div class="alert alert-warning">{{ text_terms_none|e }}</div>
+              {% endif %}
+              <div class="row mb-3">
+                <label for="input-payment-term-type" class="col-sm-2 col-form-label">{{ entry_payment_term_type|e }}</label>
+                <div class="col-sm-10">
+                  <select name="payment_two_payment_term_type" id="input-payment-term-type" class="form-select">
+                    <option value="STANDARD"{% if payment_term_type == 'STANDARD' %} selected{% endif %}>{{ text_term_type_standard|e }}</option>
+                    <option value="EOM"{% if payment_term_type == 'EOM' %} selected{% endif %}>{{ text_term_type_eom|e }}</option>
+                  </select>
+                  <div id="error-payment-term-type" class="invalid-feedback"></div>
+                  <div class="form-text">{{ help_payment_term_type|e }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-2 col-form-label">{{ entry_payment_terms|e }}</label>
+                <div class="col-sm-10" id="input-payment-terms">
+                  <input type="hidden" name="payment_two_payment_terms[]" value=""/>
+                  {% for days in record_terms %}
+                    <div class="form-check form-check-inline">
+                      <input type="checkbox" name="payment_two_payment_terms[]" value="{{ days }}" id="input-payment-term-{{ days }}" class="form-check-input"{% if days in ticked_terms %} checked{% endif %}/>
+                      <label for="input-payment-term-{{ days }}" class="form-check-label">{{ text_days|format(days)|e }}</label>
+                    </div>
+                  {% endfor %}
+                  <div id="error-payment-terms" class="invalid-feedback"></div>
+                  <div class="form-text">{{ help_payment_terms|e }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label for="input-default-payment-term" class="col-sm-2 col-form-label">{{ entry_default_payment_term|e }}</label>
+                <div class="col-sm-10">
+                  <select name="payment_two_default_payment_term" id="input-default-payment-term" class="form-select">
+                    <option value="">{{ text_default_term_auto|e }}</option>
+                    {% for days in record_terms %}
+                      <option value="{{ days }}"{% if days == default_payment_term %} selected{% endif %}>{{ text_days|format(days)|e }}</option>
+                    {% endfor %}
+                  </select>
+                  <div id="error-default-payment-term" class="invalid-feedback"></div>
+                  <div class="form-text">{{ help_default_payment_term|e }}</div>
+                </div>
+              </div>
+              <fieldset>
+                <legend>{{ legend_surcharge|e }}</legend>
+                <div class="row mb-3">
+                  <label for="input-surcharge-type" class="col-sm-2 col-form-label">{{ entry_surcharge_type|e }}</label>
+                  <div class="col-sm-10">
+                    <select name="payment_two_surcharge_type" id="input-surcharge-type" class="form-select">
+                      {% for value, label in surcharge_types %}
+                        <option value="{{ value|e }}"{% if value == surcharge.type %} selected{% endif %}>{{ label|e }}</option>
+                      {% endfor %}
+                    </select>
+                    <div id="error-surcharge-type" class="invalid-feedback"></div>
+                    <div class="form-text">{{ help_surcharge_type|e }}</div>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <label for="input-surcharge-differential" class="col-sm-2 col-form-label">{{ entry_surcharge_differential|e }}</label>
+                  <div class="col-sm-10">
+                    <select name="payment_two_surcharge_differential" id="input-surcharge-differential" class="form-select">
+                      <option value="0"{% if not surcharge.differential %} selected{% endif %}>{{ text_differential_total|e }}</option>
+                      <option value="1"{% if surcharge.differential %} selected{% endif %}>{{ text_differential_difference|e }}</option>
+                    </select>
+                    <div class="form-text">{{ help_surcharge_differential|e }}</div>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <label for="input-surcharge-line-description" class="col-sm-2 col-form-label">{{ entry_surcharge_line_description|e }}</label>
+                  <div class="col-sm-10">
+                    <input type="text" name="payment_two_surcharge_line_description" value="{{ surcharge.line_description|e }}" id="input-surcharge-line-description" class="form-control" maxlength="255"/>
+                    <div class="form-text">{{ help_surcharge_line_description|e }}</div>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <label for="input-surcharge-rounding-basis" class="col-sm-2 col-form-label">{{ entry_surcharge_rounding_basis|e }}</label>
+                  <div class="col-sm-10">
+                    <select name="payment_two_surcharge_rounding_basis" id="input-surcharge-rounding-basis" class="form-select">
+                      {% for value, label in rounding_bases %}
+                        <option value="{{ value|e }}"{% if value == surcharge.rounding_basis %} selected{% endif %}>{{ label|e }}</option>
+                      {% endfor %}
+                    </select>
+                    <div id="error-surcharge-rounding-basis" class="invalid-feedback"></div>
+                    <div class="form-text">{{ help_surcharge_rounding_basis|e }}</div>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <label for="input-surcharge-rounding-step" class="col-sm-2 col-form-label">{{ entry_surcharge_rounding_step|e }}</label>
+                  <div class="col-sm-10">
+                    <select name="payment_two_surcharge_rounding_step" id="input-surcharge-rounding-step" class="form-select">
+                      <option value="">{{ text_no_rounding|e }}</option>
+                      {% for step in rounding_steps %}
+                        <option value="{{ step|e }}"{% if step == surcharge.rounding_step %} selected{% endif %}>{{ step|e }}</option>
+                      {% endfor %}
+                    </select>
+                    <div id="error-surcharge-rounding-step" class="invalid-feedback"></div>
+                    <div class="form-text">{{ help_surcharge_rounding_step|e }}</div>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <label for="input-surcharge-tax-class-id" class="col-sm-2 col-form-label">{{ entry_surcharge_tax_class|e }}</label>
+                  <div class="col-sm-10">
+                    <select name="payment_two_surcharge_tax_class_id" id="input-surcharge-tax-class-id" class="form-select">
+                      <option value="">{{ text_select|e }}</option>
+                      {% for tax_class in tax_classes %}
+                        <option value="{{ tax_class.tax_class_id|e }}"{% if tax_class.tax_class_id == surcharge.tax_class_id %} selected{% endif %}>{{ tax_class.title|e }}</option>
+                      {% endfor %}
+                    </select>
+                    <div id="error-surcharge-tax-class-id" class="invalid-feedback"></div>
+                    <div class="form-text">{{ help_surcharge_tax_class|e }}</div>
+                  </div>
+                </div>
+                <div class="row mb-3">
+                  <label class="col-sm-2 col-form-label">{{ entry_surcharge_grid|e }}</label>
+                  <div class="col-sm-10">
+                    <table class="table table-sm" id="input-surcharge-grid">
+                      <thead>
+                        <tr><th scope="col">{{ column_term|e }}</th><th scope="col">{{ column_percentage|e }}</th><th scope="col">{{ column_fixed|e }}</th><th scope="col">{{ column_cap|e }}</th></tr>
+                      </thead>
+                      <tbody>
+                        {% for row in surcharge_grid %}
+                          <tr>
+                            <th scope="row">{{ text_days|format(row.days)|e }}</th>
+                            {% for column in ['percentage', 'fixed', 'cap'] %}
+                              <td><input type="text" name="payment_two_surcharge_grid[{{ row.days }}][{{ column }}]" value="{{ row[column]|e }}" class="form-control form-control-sm" inputmode="decimal" aria-label="{{ (column_labels[column] ~ ', ' ~ text_days|format(row.days))|e }}"/></td>
+                            {% endfor %}
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                    <div id="error-surcharge-grid" class="invalid-feedback"></div>
+                    <div class="form-text">{{ help_surcharge_grid|e }}</div>
+                  </div>
+                </div>
+              </fieldset>
             </div>
 
             <div id="tab-order-management" class="tab-pane">

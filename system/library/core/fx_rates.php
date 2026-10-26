@@ -108,7 +108,7 @@ final class FxRates
         $this->settings->store()->setMany([self::CACHE_KEY => (string) json_encode([
             'base' => is_string($body['base'] ?? null) ? $body['base'] : 'EUR',
             'as_of' => is_scalar($body['as_of'] ?? null) ? (string) $body['as_of'] : '',
-            'rates' => $rates + ($this->table()['rates'] ?? []),
+            'rates' => array_merge($this->table()['rates'] ?? [], $rates),
         ])]);
 
         return true;

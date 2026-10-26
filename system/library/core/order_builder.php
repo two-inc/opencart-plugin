@@ -23,7 +23,8 @@ namespace Opencart\System\Library\Extension\Two\Core;
  *   order's tax rows, so the adapter reproduces the merchant's own
  *   computation, and the default handler's shop-match check refuses the
  *   order unless the lines add up to the tax and total the shop actually
- *   charged. Tax is never invented;
+ *   charged. Tax is never invented. The payment terms fee (`two_fee`) is
+ *   one of them, at the tax class the merchant selected for it;
  * - discount totals (coupon, reward points) are pre-tax: the shop takes
  *   their tax off its tax rows, so their tax is what the stored tax total
  *   leaves once every other line is counted. A discount cannot add tax,
@@ -41,7 +42,7 @@ namespace Opencart\System\Library\Extension\Two\Core;
 final class OrderBuilder
 {
     /** Totals that add a taxed charge, and the Two line type each becomes. */
-    public const CHARGE_CODES = ['shipping' => 'SHIPPING_FEE', 'handling' => 'SERVICE', 'low_order_fee' => 'SERVICE'];
+    public const CHARGE_CODES = ['shipping' => 'SHIPPING_FEE', 'handling' => 'SERVICE', 'low_order_fee' => 'SERVICE', 'two_fee' => 'SERVICE'];
     public const DISCOUNT_CODES = ['coupon', 'reward'];
     public const POST_TAX_CODES = ['credit', 'voucher'];
     /** Totals the payload already states through its lines. */
@@ -58,7 +59,8 @@ final class OrderBuilder
      *     buyer: array{email: string, first_name: string, last_name: string, phone_number: string},
      *     billing_address: array<string, string>, shipping_address?: array<string, string>|null,
      *     merchant_urls: array<string, string>,
-     *     buyer_fields?: array<string, string>
+     *     buyer_fields?: array<string, string>,
+     *     terms?: array<string, mixed>|null
      * } $order
      * @param list<array{name: string, quantity: int|string, price: float|string, total: float|string, tax: float|string, rate: float|null, fixed_tax?: bool, type: string}> $lines
      * @param list<array{code: string, title: string, value: float|string, tax?: float|string|null, rate?: float|null, fixed_tax?: bool}> $totals
@@ -147,6 +149,10 @@ final class OrderBuilder
             if (trim((string) ($fields[$field] ?? '')) !== '') {
                 $payload[$key] = trim((string) $fields[$field]);
             }
+        }
+        // Section 4: the term the buyer chose, as the order is booked on it.
+        if (is_array($order['terms'] ?? null) && $order['terms'] !== []) {
+            $payload['terms'] = $order['terms'];
         }
         if (trim((string) ($fields['invoice_email'] ?? '')) !== '') {
             $payload['invoice_details'] = ['invoice_emails' => [trim((string) $fields['invoice_email'])]];

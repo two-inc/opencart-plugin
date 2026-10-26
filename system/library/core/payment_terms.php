@@ -73,7 +73,7 @@ final class PaymentTerms
         }
         sort($days);
 
-        return array_values($days);
+        return $days;
     }
 
     /**

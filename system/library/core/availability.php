@@ -12,7 +12,9 @@ namespace Opencart\System\Library\Extension\Two\Core;
  * Only a definitive rejection of the API key withholds on Two's account: an
  * unreachable or erroring Two falls through to the cached merchant record,
  * which has no expiry, so an incident at Two never empties the checkout.
- * The fee-quote gate joins the chain with the surcharge (P7).
+ * The fee-quote gate closes the chain: with a surcharge on, a cart whose fee
+ * cannot be quoted is not offered Two rather than charged nothing, and the
+ * health row names the last such failure.
  */
 final class Availability
 {
@@ -26,15 +28,25 @@ final class Availability
     public const BUYER_COUNTRY = 'buyer_country';
     public const NO_COUNTRY = 'no_country';
     public const BELOW_MINIMUM = 'below_minimum';
+    public const FEE_QUOTE = 'fee_quote';
+
+    /** The last fee-quote withhold, for the health row. */
+    public const FEE_FAILURE_KEY = 'fee_quote_failure';
 
     /** The currencies Two invoices in. */
     public const SUPPORTED_CURRENCIES = ['NOK', 'GBP', 'SEK', 'USD', 'DKK', 'EUR'];
 
+    /** @var \Closure(): int */
+    private readonly \Closure $clock;
+
+    /** @param (\Closure(): int)|null $clock */
     public function __construct(
         private readonly SettingsProvider $settings,
         private readonly RecordProvider $records,
         private readonly ApiKeyVerdict $verdict,
+        ?\Closure $clock = null,
     ) {
+        $this->clock = $clock ?? static fn (): int => time();
     }
 
     /**
@@ -46,9 +58,10 @@ final class Availability
      *
      * @param array{enabled: bool, currency: string, shop_currency: string, gross: float, net: float, buyer_country: string|null, value_currency?: string} $checkout
      * @param \Closure(float, string, string): ?float $convert puts an amount from one currency into another, null when it cannot
+     * @param (\Closure(): ?string)|null $feeQuote why the fee this cart would be charged cannot be quoted, null when it can (or no fee applies)
      * @return array{reason: string, detail: string}|null
      */
-    public function withholdReason(array $checkout, \Closure $convert): ?array
+    public function withholdReason(array $checkout, \Closure $convert, ?\Closure $feeQuote = null): ?array
     {
         $shop = $this->shopReason($checkout['enabled']);
         if ($shop !== null) {
@@ -66,6 +79,16 @@ final class Availability
         $shortfall = MinimumOrder::from($this->records->record(), $this->settings, $checkout['shop_currency'])->shortfall($checkout['gross'], $checkout['net'], $checkout['value_currency'] ?? $currency, $convert);
         if ($shortfall !== null) {
             return ['reason' => self::BELOW_MINIMUM, 'detail' => $shortfall];
+        }
+        $unquotable = $feeQuote === null ? null : $feeQuote();
+        $stored = $this->settings->store()->get(self::FEE_FAILURE_KEY);
+        if ($unquotable !== null) {
+            $this->settings->store()->setMany([self::FEE_FAILURE_KEY => (string) json_encode(['at' => ($this->clock)(), 'detail' => $unquotable])]);
+
+            return ['reason' => self::FEE_QUOTE, 'detail' => $unquotable];
+        }
+        if ($feeQuote !== null && $stored !== null && $stored !== '') {
+            $this->settings->store()->setMany([self::FEE_FAILURE_KEY => '']);
         }
 
         return null;
@@ -133,7 +156,7 @@ final class Availability
      * invoices in; otherwise the others are a per-cart constraint.
      *
      * @param list<string> $shopCurrencies the shop's enabled currencies
-     * @return array{shown: bool, reason: string|null, floors: list<array{amount: float, currency: string, basis: string}>, buyer_countries: list<string>, refused_currencies: list<string>}
+     * @return array{shown: bool, reason: string|null, floors: list<array{amount: float, currency: string, basis: string}>, buyer_countries: list<string>, refused_currencies: list<string>, fee_quote_failure: array{at: int, detail: string}|null}
      */
     public function health(bool $enabled, string $shopCurrency, array $shopCurrencies): array
     {
@@ -156,7 +179,21 @@ final class Availability
             'floors' => $reason === null ? MinimumOrder::from($record, $this->settings, $shopCurrency)->bindingFloors() : [],
             'buyer_countries' => $reason === null ? BuyerCountries::fromRecord($record)->allowed : [],
             'refused_currencies' => $reason === null ? $refused : [],
+            'fee_quote_failure' => $reason === null ? $this->feeFailure() : null,
         ];
+    }
+
+    /**
+     * The last cart withheld because its fee could not be quoted, until a
+     * quote succeeds again.
+     *
+     * @return array{at: int, detail: string}|null
+     */
+    private function feeFailure(): ?array
+    {
+        $failure = json_decode((string) $this->settings->store()->get(self::FEE_FAILURE_KEY), true);
+
+        return is_array($failure) && is_int($failure['at'] ?? null) && is_string($failure['detail'] ?? null) ? ['at' => $failure['at'], 'detail' => $failure['detail']] : null;
     }
 
     private static function country(?string $country): ?string

@@ -11,15 +11,19 @@ use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\ErrorMapper;
+use Opencart\System\Library\Extension\Two\Core\FeeQuote;
+use Opencart\System\Library\Extension\Two\Core\FxRates;
 use Opencart\System\Library\Extension\Two\Core\OrderBuilder;
 use Opencart\System\Library\Extension\Two\Core\OrderFlow;
 use Opencart\System\Library\Extension\Two\Core\OrderEdit;
 use Opencart\System\Library\Extension\Two\Core\OrderLifecycle;
 use Opencart\System\Library\Extension\Two\Core\OrderRefunds;
+use Opencart\System\Library\Extension\Two\Core\PaymentTerms;
 use Opencart\System\Library\Extension\Two\Core\Postprocessing;
 use Opencart\System\Library\Extension\Two\Core\RecordProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 use Opencart\System\Library\Extension\Two\Core\SettingsSave;
+use Opencart\System\Library\Extension\Two\Core\Surcharge;
 
 /**
  * Wires the core for one OpenCart request: the shop's settings table, its
@@ -55,6 +59,10 @@ final class Services
     public const CHECKOUT_EVENT_ACTION = 'extension/two/event/two_checkout';
     public const CHECKOUT_EVENT_DESCRIPTION = 'Adds the Two company search and order intent script to the checkout page.';
 
+    /** The payment terms fee order total, and its default sort order: before core's Taxes total (5), so its tax is listed and charged. */
+    public const FEE_TOTAL_CODE = 'two_fee';
+    public const FEE_TOTAL_SORT_ORDER = '4';
+
     public readonly SettingsProvider $settings;
     public readonly Environment $environment;
     public readonly Client $client;
@@ -65,6 +73,8 @@ final class Services
     public readonly Availability $availability;
     public readonly CompanyLookup $companies;
     public readonly DbRefundRecords $refunds;
+    public readonly FxRates $fx;
+    public readonly FeeQuote $fees;
     private readonly LogLogger $logger;
 
     public function __construct(private readonly \Opencart\System\Library\DB $db, \Opencart\System\Library\Log $log, int $storeId = 0)
@@ -80,6 +90,19 @@ final class Services
         $this->availability = new Availability($this->settings, $this->records, $this->verdict);
         $this->companies = new CompanyLookup($this->client, $this->environment, $this->settings);
         $this->refunds = new DbRefundRecords($db);
+        $this->fx = new FxRates($this->client, $this->settings, $logger);
+        $this->fees = new FeeQuote($this->client, $this->fx, $logger);
+    }
+
+    /** The payment terms offered now: the merchant record's, narrowed by the merchant's settings. */
+    public function paymentTerms(): PaymentTerms
+    {
+        return PaymentTerms::from($this->records->record(), $this->settings);
+    }
+
+    public function surcharge(): Surcharge
+    {
+        return Surcharge::from($this->settings);
     }
 
     /**
