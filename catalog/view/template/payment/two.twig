@@ -38,12 +38,21 @@ if (window.TwoCheckout) {
 }
 
 $('#button-two-confirm').on('click', function() {
+    if (window.TwoCheckout) {
+        // One confirm however often it is pressed, after pending company saves.
+        window.TwoCheckout.confirm(this, document.getElementById('form-two'));
+
+        return;
+    }
+
+    // The capture script did not load: place the order directly, once.
     var element = this;
 
-    // Pending company saves reach the shop first, so the order is placed for the company the buyer last gave.
-    var settled = window.TwoCheckout ? window.TwoCheckout.settled() : Promise.resolve();
+    if (element.disabled) {
+        return;
+    }
 
-    settled.then(function() { $.ajax({
+    $.ajax({
         url: 'index.php?route=extension/two/payment/two.confirm&language={{ language|e('url') }}',
         type: 'post',
         data: $('#form-two').serialize(),
@@ -67,6 +76,6 @@ $('#button-two-confirm').on('click', function() {
         error: function(xhr, ajaxOptions, thrownError) {
             console.log(thrownError + "\r\n" + xhr.statusText + "\r\n" + xhr.responseText);
         }
-    }); });
+    });
 });
 //--></script>

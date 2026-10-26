@@ -375,6 +375,106 @@ describe('review round 2', () => {
     });
 });
 
+describe('review round 3', () => {
+    function tileForm() {
+        document.body.innerHTML = '<div id="alert"></div><input id="input-payment-company"><form id="form-two" data-two-tile="address"><p data-two-company-summary>Buying for Acme</p><input name="two_project" value="Roof"></form><div id="two-intent-notice"></div><button id="go">Confirm</button>';
+        return [document.getElementById('form-two'), document.getElementById('go')];
+    }
+
+    test('a double click sends one confirm, and the button is disabled at once', async () => {
+        const [form, button] = tileForm();
+        const { calls, fetchImpl } = shop({ confirm: { error: 'Refused.' } });
+        const cfg = config();
+        cfg.urls.confirm = 'index.php?route=confirm';
+        const checkout = new Checkout(cfg, document, new Api(cfg, fetchImpl), window);
+        const first = checkout.confirm(button, form);
+        expect(button.disabled).toBe(true);
+        const second = checkout.confirm(button, form);
+        await Promise.all([first, second]);
+        expect(calls.filter(([route]) => route === 'confirm')).toEqual([['confirm', { two_token: 'tok', two_project: 'Roof' }]]);
+        expect([button.disabled, document.getElementById('alert').textContent]).toEqual([false, 'Refused.']);
+    });
+
+    test('Confirm waits for pending saves at most 15 s, then re-enables with a message and sends nothing', async () => {
+        jest.useFakeTimers();
+        const [form, button] = tileForm();
+        const fetchImpl = jest.fn(() => new Promise(() => {}));
+        const cfg = config({ i18n: Object.assign(config().i18n, { settle_timeout: 'still saving' }) });
+        cfg.urls.confirm = 'index.php?route=confirm';
+        const api = new Api(cfg, fetchImpl);
+        const checkout = new Checkout(cfg, document, api, window);
+        api.post('save_company', { company_name: 'Acme' });
+        const confirming = checkout.confirm(button, form);
+        await jest.advanceTimersByTimeAsync(15000);
+        await confirming;
+        expect([button.disabled, document.getElementById('alert').textContent]).toEqual([false, 'still saving']);
+        expect(fetchImpl.mock.calls.filter(([url]) => url.includes('route=confirm')).length).toBe(0);
+    });
+
+    test.each([
+        ['save_company', 20000, 'a relay call'],
+        ['intent', 40000, 'the intent'],
+        ['confirm', 75000, 'confirm'],
+    ])('%s is abandoned after %d ms, and the queue moves on', async (name, ms) => {
+        jest.useFakeTimers();
+        const aborted = [];
+        const fetchImpl = jest.fn((url, init) => new Promise((resolve, reject) => {
+            init.signal.addEventListener('abort', () => { aborted.push(url); reject(new Error('aborted')); });
+        }));
+        const cfg = config();
+        cfg.urls.confirm = 'index.php?route=confirm';
+        const api = new Api(cfg, fetchImpl);
+        const call = api.post(name, {}).catch(() => 'gave up');
+        await jest.advanceTimersByTimeAsync(ms - 1);
+        expect(aborted.length).toBe(0);
+        await jest.advanceTimersByTimeAsync(1);
+        expect(await call).toBe('gave up');
+        await api.settled();
+    });
+
+    test('a search waits at most 2 s behind a slow intent; the save after it waits for both', async () => {
+        jest.useFakeTimers();
+        const order = [];
+        const release = {};
+        const fetchImpl = jest.fn((url) => new Promise((resolve) => {
+            const route = new URLSearchParams(url.split('?')[1]).get('route');
+            order.push('start ' + route);
+            release[route] = () => { order.push('end ' + route); resolve({ json: () => Promise.resolve({ items: [] }) }); };
+        }));
+        const api = new Api(config(), fetchImpl);
+        api.post('intent', {});
+        api.get('search', { q: 'acme', country: 'GB' });
+        api.post('save_company', { company_name: 'Acme' });
+        await jest.advanceTimersByTimeAsync(1999);
+        expect(order).toEqual(['start i']);
+        await jest.advanceTimersByTimeAsync(1);
+        expect(order).toEqual(['start i', 'start s']);
+        release.s();
+        await jest.advanceTimersByTimeAsync(0);
+        expect(order).toEqual(['start i', 'start s', 'end s']);
+        release.i();
+        await jest.advanceTimersByTimeAsync(0);
+        expect(order).toEqual(['start i', 'start s', 'end s', 'end i', 'start save']);
+        release.save();
+        await api.settled();
+    });
+
+    test('settled() also waits for the intent a choice asks after its save', async () => {
+        const [form] = tileForm();
+        addressForms();
+        document.body.appendChild(form);
+        const order = [];
+        const { fetchImpl } = shop({ st: { available: false }, save: () => { order.push('save'); return { ok: true }; }, i: () => { order.push('intent'); return { outcome: 'approved', notice: 'ok' }; } });
+        const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
+        checkout.mountAddressRoles();
+        checkout.tile = form;
+        checkout.instances.payment.select({ company_name: 'Acme', organization_number: '1', country_code: 'GB', source: 'search' });
+        await checkout.settled();
+        order.push('settled');
+        expect(order).toEqual(['save', 'intent', 'settled']);
+    });
+});
+
 describe('sole trader', () => {
     test.each([
         [{ available: true }, false, 'offered where the registry lists sole traders'],

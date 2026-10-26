@@ -33,7 +33,19 @@
     }
 
 
-    /** The shop's relay: every call carries the session's token. */
+    /** How long a relay call may take before it is abandoned, by call (the shop's own calls to Two time out at 30 s; confirm makes two). */
+    const TIMEOUTS = { intent: 40000, confirm: 75000 };
+    const DEFAULT_TIMEOUT = 20000;
+    /** How long a call waits for the queue ahead of it before it runs anyway, by call. */
+    const QUEUE_CAPS = { search: 2000, company_details: 2000 };
+    /** How long Confirm waits for pending saves before it gives the buyer a message instead. */
+    const SETTLE_CAP = 15000;
+
+    function wait(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    /** The shop's relay: every call carries the session's token, and none runs forever. */
     class Api {
         constructor(config, fetchImpl) {
             this.config = config;
@@ -45,12 +57,28 @@
          * Runs a call after the ones before it have finished. Every call is
          * queued: OpenCart writes the whole session back at the end of every
          * request, even one that only reads it, so two at once could undo
-         * one's change.
+         * one's change. A search waits at most its cap (it writes nothing of
+         * its own, so overlapping a slow intent loses nothing), and the calls
+         * after it still wait for everything before them.
          */
         serial(name, call) {
-            const run = this.queue.then(call, call);
-            this.queue = run.catch(() => null);
+            const before = this.queue;
+            const start = QUEUE_CAPS[name] ? Promise.race([before, wait(QUEUE_CAPS[name])]) : before;
+            const run = start.then(call, call);
+            this.queue = Promise.all([before, run.catch(() => null)]).then(() => null, () => null);
             return run;
+        }
+
+        /** One request, abandoned after its timeout or when the caller's signal aborts. */
+        timed(name, url, init, signal) {
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            const timer = setTimeout(() => controller && controller.abort(), TIMEOUTS[name] || DEFAULT_TIMEOUT);
+            if (signal && controller) {
+                signal.addEventListener('abort', () => controller.abort());
+            }
+            return this.fetch(url, Object.assign({ credentials: 'same-origin', signal: controller ? controller.signal : undefined }, init))
+                .then((response) => response.json())
+                .finally(() => clearTimeout(timer));
         }
 
         url(name, params) {
@@ -64,18 +92,16 @@
         }
 
         get(name, params, signal) {
-            return this.serial(name, () => this.fetch(this.url(name, params), { credentials: 'same-origin', signal: signal })
-                .then((response) => response.json()));
+            return this.serial(name, () => this.timed(name, this.url(name, params), {}, signal));
         }
 
         post(name, params) {
             const body = new URLSearchParams(Object.assign({ two_token: this.config.token }, params || {}));
-            return this.serial(name, () => this.fetch(this.config.urls[name], {
+            return this.serial(name, () => this.timed(name, this.config.urls[name], {
                 method: 'POST',
-                credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: body.toString()
-            }).then((response) => response.json()));
+            }));
         }
     }
 
@@ -424,7 +450,9 @@
             this.orgInput.value = company.organization_number;
             this.setStatus(labelFor(company.company_name, company.organization_number));
             // Only if it is still the company: a later clear or choice supersedes it.
-            return this.save(company).then(() => (this.selected === company ? this.onChange(company, this.role) : null));
+            // Kept as pending, so settled() also waits for the intent this choice asks.
+            this.pending = this.save(company).then(() => (this.selected === company ? this.onChange(company, this.role) : null));
+            return this.pending;
         }
 
         clearSelection() {
@@ -472,6 +500,7 @@
                 this.manualTimer = null;
                 this.saveManual();
             }
+            return Promise.resolve(this.pending).catch(() => null);
         }
 
         saveManual() {
@@ -685,12 +714,79 @@
         }
 
         /**
-         * Resolves once every pending save has reached the shop, so placing
-         * the order reads the company the buyer last gave.
+         * Resolves once every pending save, and the intent each choice asks
+         * after its save, has reached the shop, so placing the order reads the
+         * company the buyer last gave.
          */
         settled() {
-            Object.keys(this.instances).forEach((role) => this.instances[role].flush());
-            return this.api.settled();
+            const pending = Object.keys(this.instances).map((role) => this.instances[role].flush());
+            return Promise.all(pending).then(() => this.api.settled());
+        }
+
+        /**
+         * Places the order: one confirm however often the button is pressed.
+         * The button is disabled at once; Confirm waits for pending saves for
+         * at most SETTLE_CAP, and goes through the same queue as every call.
+         */
+        confirm(button, form) {
+            if (this.confirming) {
+                return Promise.resolve();
+            }
+            this.confirming = true;
+            button.disabled = true;
+            button.setAttribute('aria-busy', 'true');
+            const reset = (message) => {
+                this.confirming = false;
+                button.disabled = false;
+                button.removeAttribute('aria-busy');
+                if (message) {
+                    this.alert(message);
+                }
+            };
+            const capped = Promise.race([this.settled().then(() => true), wait(SETTLE_CAP).then(() => false)]);
+            return capped.then((settled) => {
+                if (!settled) {
+                    reset(this.config.i18n.settle_timeout);
+                    return null;
+                }
+                const params = {};
+                new FormData(form).forEach((value, key) => {
+                    params[key] = value;
+                });
+                return this.api.post('confirm', params).then((json) => {
+                    if (json && json.redirect) {
+                        this.win.location = json.redirect;
+                        return;
+                    }
+                    // The shop escapes its notice.
+                    reset('');
+                    if (json && json.error) {
+                        this.alert(json.error, true);
+                    }
+                });
+            }).catch(() => reset(this.config.i18n.confirm_failed));
+        }
+
+        /** A dismissible notice where OpenCart shows its own. */
+        alert(message, escaped) {
+            const host = this.doc.getElementById('alert');
+            if (!host) {
+                return;
+            }
+            const box = this.doc.createElement('div');
+            box.className = 'alert alert-danger alert-dismissible';
+            box.setAttribute('role', 'alert');
+            if (escaped) {
+                box.innerHTML = message;
+            } else {
+                box.textContent = message;
+            }
+            const close = this.doc.createElement('button');
+            close.type = 'button';
+            close.className = 'btn-close';
+            close.setAttribute('data-bs-dismiss', 'alert');
+            box.appendChild(close);
+            host.prepend(box);
         }
 
         /** The payment tile has rendered (Two is the chosen method). */
@@ -757,7 +853,7 @@
         return;
     }
     const checkout = new Checkout(config, root.document, new Api(config)).start();
-    root.TwoCheckout = { tileReady: (form) => checkout.tileReady(form), settled: () => checkout.settled() };
+    root.TwoCheckout = { tileReady: (form) => checkout.tileReady(form), settled: () => checkout.settled(), confirm: (button, form) => checkout.confirm(button, form) };
     // The tile may have rendered before this script ran.
     const form = root.document.getElementById('form-two');
     if (form) {

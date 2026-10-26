@@ -358,14 +358,14 @@ class Two extends \Opencart\System\Engine\Controller
         $link = fn (string $action): string => str_replace('&amp;', '&', $this->url->link(self::ROUTE . '.' . $action, 'language=' . $this->config->get('config_language')));
         $brand = Brand::default()->productName;
         $copy = [];
-        foreach (['search_label', 'search_hint', 'searching', 'no_matches', 'search_unavailable', 'select_country', 'country_not_covered', 'manual_entry', 'back_to_search', 'sole_trader_entry', 'sole_trader_error', 'sole_trader_popup_blocked', 'change_company', 'organization_number', 'checking', 'selected', 'number_missing'] as $key) {
+        foreach (['search_label', 'search_hint', 'searching', 'no_matches', 'search_unavailable', 'select_country', 'country_not_covered', 'manual_entry', 'back_to_search', 'sole_trader_entry', 'sole_trader_error', 'sole_trader_popup_blocked', 'change_company', 'organization_number', 'checking', 'selected', 'number_missing', 'settle_timeout', 'confirm_failed'] as $key) {
             $copy[$key] = sprintf($this->language->get('js_' . $key), $brand, CompanyLookup::MIN_TERM_LENGTH);
         }
 
         return [
             'token' => $this->csrfToken(),
             'in_address' => $services->settings->companySearchInAddressArea(),
-            'urls' => ['search' => $link('search'), 'countries' => $link('countries'), 'sole_trader' => $link('soleTrader'), 'sole_trader_tokens' => $link('soleTraderTokens'), 'save_company' => $link('saveCompany'), 'intent' => $link('intent'), 'company_details' => $link('companyDetails')],
+            'urls' => ['search' => $link('search'), 'countries' => $link('countries'), 'sole_trader' => $link('soleTrader'), 'sole_trader_tokens' => $link('soleTraderTokens'), 'save_company' => $link('saveCompany'), 'intent' => $link('intent'), 'company_details' => $link('companyDetails'), 'confirm' => $link('confirm')],
             'countries' => $isoById,
             'companies' => $this->state()['companies'] ?? (object) [],
             'min_length' => CompanyLookup::MIN_TERM_LENGTH,
@@ -694,7 +694,8 @@ class Two extends \Opencart\System\Engine\Controller
 
             return false;
         }
-        if (!(new DbRateLimits($this->db))->allow($action, $this->caller(), time())) {
+        // The merchant's switch removes the per-caller ceiling only; the per-session intent limit stays.
+        if (!$this->services()->settings->rateLimitDisabled() && !(new DbRateLimits($this->db))->allow($action, $this->caller(), time())) {
             $this->log->write('Two: rate limit exceeded on ' . $action . ' (more than ' . RateLimiter::CALLER_LIMITS[$action][0] . ' requests in ' . RateLimiter::CALLER_LIMITS[$action][1] . 's from one caller)');
             $this->response->addHeader(($this->request->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1') . ' 429 Too Many Requests');
             $this->json(['error' => 'Too many requests']);
