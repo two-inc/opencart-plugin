@@ -6,10 +6,11 @@ $_['heading_title'] = 'Two';
 $_['text_title_default'] = 'Factura para empresas';
 
 // Tile. %s is the brand's product name.
-$_['entry_company_name'] = 'Nombre de la empresa';
+$_['entry_company'] = 'Empresa';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Compras para %s.';
 $_['text_company_missing'] = 'Para pagar con %s, busca tu empresa en el campo de empresa de tu dirección y selecciónala en los resultados.';
+$_['text_company_missing_saved'] = 'Para pagar con %s, añade tu empresa a la dirección que estás usando.';
 $_['button_confirm'] = 'Confirmar pedido';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.

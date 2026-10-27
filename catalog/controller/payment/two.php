@@ -6,11 +6,12 @@ namespace Opencart\Catalog\Controller\Extension\Two\Payment;
 
 use Opencart\System\Library\Extension\Two\Core\Brand;
 use Opencart\System\Library\Extension\Two\Core\BuyerFields;
+use Opencart\System\Library\Extension\Two\Core\CompanyCapture;
 use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
 use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
 use Opencart\System\Library\Extension\Two\Core\Message;
-use Opencart\System\Library\Extension\Two\Core\OrderRecords;
 use Opencart\System\Library\Extension\Two\Core\RateLimiter;
+use Opencart\System\Library\Extension\Two\Core\RequestToken;
 use Opencart\System\Library\Extension\Two\Opencart\DbOrderLock;
 use Opencart\System\Library\Extension\Two\Opencart\DbRateLimits;
 use Opencart\System\Library\Extension\Two\Opencart\NoteText;
@@ -75,7 +76,7 @@ class Two extends \Opencart\System\Engine\Controller
         $services = $this->services();
         // Only the placement setting decides whether the tile holds the company
         // control: never what the address forms captured (TWO-26721).
-        $inTile = !$services->settings->companySearchInAddressArea();
+        $inTile = $services->settings->companyControlInTile();
         $company = $inTile ? $this->companyFor('tile') : $this->addressCompany($this->buyerRole(false));
         $this->load->model(self::ROUTE);
         $fields = [];
@@ -105,11 +106,12 @@ class Two extends \Opencart\System\Engine\Controller
             'company' => $company,
             'company_label' => $company === null ? '' : CompanyLookup::displayLabel($company['company_name'], $company['organization_number']),
             'fields' => $fields,
-            'text_company_missing' => sprintf($this->language->get('text_company_missing'), $brand),
-            'edit_address' => $this->editAddressLink(),
+            'edit_address' => $editAddress = $this->editAddressLink(),
+            // A saved address has no company field on the page: say where it is.
+            'text_company_missing' => sprintf($this->language->get($editAddress === '' ? 'text_company_missing' : 'text_company_missing_saved'), $brand),
             'text_company_edit_address' => $this->language->get('text_company_edit_address'),
             'text_company_from_address' => $this->language->get('text_company_from_address'),
-            'entry_company_name' => $this->language->get('entry_company_name'),
+            'entry_company' => $this->language->get('entry_company'),
             'text_optional' => $this->language->get('text_optional'),
             'button_confirm' => $this->language->get('button_confirm'),
         ]);
@@ -303,7 +305,7 @@ class Two extends \Opencart\System\Engine\Controller
         if (!$this->guarded(false, 'search')) {
             return;
         }
-        $companies = $this->services()->companies->search((string) ($this->request->get['q'] ?? ''), (string) ($this->request->get['country'] ?? ''));
+        $companies = CompanyCapture::relay(fn (): ?array => $this->services()->companies->search((string) ($this->request->get['q'] ?? ''), (string) ($this->request->get['country'] ?? '')), $this->reloadSession(...));
         $this->json($companies === null ? ['error' => 'unavailable'] : ['items' => $companies]);
     }
 
@@ -313,7 +315,7 @@ class Two extends \Opencart\System\Engine\Controller
         if (!$this->guarded(false, 'companyDetails')) {
             return;
         }
-        $details = $this->services()->companies->details((string) ($this->request->get['lookup_id'] ?? ''));
+        $details = CompanyCapture::relay(fn (): ?array => $this->services()->companies->details((string) ($this->request->get['lookup_id'] ?? '')), $this->reloadSession(...));
         $this->json($details ?? ['error' => 'unavailable']);
     }
 
@@ -325,14 +327,13 @@ class Two extends \Opencart\System\Engine\Controller
         }
         $cached = $this->state()['countries'] ?? null;
         if (!is_array($cached) || ($cached['at'] ?? 0) < time() - self::CACHE_SECONDS) {
-            $countries = $this->services()->companies->supportedCountries();
+            $countries = CompanyCapture::relay(fn (): ?array => $this->services()->companies->supportedCountries(), $this->reloadSession(...));
             $cached = $countries === null ? null : ['at' => time(), 'list' => $countries];
             if ($cached !== null) {
                 $this->remember('countries', $cached);
             }
         }
-        $list = $cached['list'] ?? null;
-        $this->json(['ok' => $list !== null, 'status' => $list !== null ? 200 : 502, 'body' => ['supported_countries' => $list ?? []]]);
+        $this->json(CompanyLookup::countriesEnvelope($cached['list'] ?? null));
     }
 
     /** Whether a buyer in a country may enrol as a sole trader; one country kept in the session. */
@@ -348,7 +349,7 @@ class Two extends \Opencart\System\Engine\Controller
 
             return;
         }
-        $types = $this->services()->companies->supportedCompanyTypes($country);
+        $types = CompanyCapture::relay(fn (): ?array => $this->services()->companies->supportedCompanyTypes($country), $this->reloadSession(...));
         if ($types === null) {
             $this->response->addHeader(($this->request->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1') . ' 502 Bad Gateway');
             $this->json(['error' => 'unavailable']);
@@ -378,7 +379,13 @@ class Two extends \Opencart\System\Engine\Controller
         $attempt = (int) ($this->state()['sole_trader_attempt'] ?? 0) + 1;
         $this->remember('sole_trader_attempt', $attempt);
         $companies = $this->services()->companies;
-        $tokens = $companies->soleTraderTokens(IdempotencyKey::soleTraderAttempt($this->sessionHash(), $attempt));
+        $tokens = CompanyCapture::relay(
+            fn (): ?array => $companies->soleTraderTokens(IdempotencyKey::soleTraderAttempt($this->sessionHash(), $attempt)),
+            $this->reloadSession(...),
+            function (?array $tokens) use ($attempt): void {
+                $this->remember('sole_trader_attempt', max($attempt, (int) ($this->state()['sole_trader_attempt'] ?? 0)));
+            },
+        );
         $this->json($tokens === null
             ? ['error' => $this->language->get('error_sole_trader')]
             : $tokens + ['signup_url' => $companies->signupUrl(), 'api_base' => $companies->apiBaseUrl(), 'country' => $country]);
@@ -396,20 +403,10 @@ class Two extends \Opencart\System\Engine\Controller
         }
         $post = fn (string $key): string => trim(html_entity_decode((string) ($this->request->post[$key] ?? ''), ENT_QUOTES, 'UTF-8'));
         $role = $post('role');
-        $company = [
-            'company_name' => $post('company_name'),
-            'organization_number' => $post('organization_number'),
-            'country_code' => strtoupper($post('country')),
-            'source' => $post('source'),
-        ];
-        $valid = in_array($role, self::ROLES, true)
-            && in_array($company['source'], ['search', 'manual', 'sole_trader'], true)
-            && preg_match('~^[A-Z]{2}\z~', $company['country_code']) === 1
-            && preg_match('~[\x00-\x1F\x7F]~', $company['company_name'] . $company['organization_number']) !== 1;
-        foreach (OrderRecords::MAX_LENGTHS as $field => $max) {
-            $valid = $valid && mb_strlen($company[$field]) <= $max;
-        }
-        if (!$valid) {
+        $company = in_array($role, self::ROLES, true)
+            ? CompanyCapture::fromPost(['company_name' => $post('company_name'), 'organization_number' => $post('organization_number'), 'country' => $post('country'), 'source' => $post('source')])
+            : null;
+        if ($company === null) {
             $this->json(['ok' => false]);
 
             return;
@@ -419,6 +416,7 @@ class Two extends \Opencart\System\Engine\Controller
             unset($companies[$role]);
         } else {
             $companies[$role] = $company;
+            $this->topUpSavedAddress($role, $company);
         }
         $this->remember('companies', $companies);
         $this->json(['ok' => true]);
@@ -447,6 +445,8 @@ class Two extends \Opencart\System\Engine\Controller
         foreach (['chip_registered', 'chip_sole_trader', 'chip_manual', 'search_aria', 'search_too_short', 'no_matches', 'search_unavailable', 'select_country', 'back_to_search', 'company_number', 'select_different_sole_trader', 'sole_trader_prompt', 'sole_trader_error', 'address_unavailable', 'checking', 'settle_timeout', 'confirm_failed', 'totals_failed'] as $key) {
             $copy[$key] = sprintf($this->language->get('js_' . $key), $brand, CompanyLookup::MIN_TERM_LENGTH);
         }
+        // The tile's line for the company the address form holds, kept current by the script.
+        $copy['company_from_address'] = $this->language->get('text_company_from_address');
         // The panel fills in the count itself, so these two are not formatted here.
         foreach (['results_one', 'results_many'] as $key) {
             $copy[$key] = $this->language->get('js_' . $key);
@@ -754,21 +754,31 @@ class Two extends \Opencart\System\Engine\Controller
      */
     private function addressCompany(string $role): ?array
     {
-        $address = $this->session->data[$role . '_address'] ?? null;
-        if (!is_array($address) || (int) ($address['address_id'] ?? 0) <= 0) {
-            return $this->companyFor($role);
-        }
-        $kept = $address['custom_field'][Services::ADDRESS_CUSTOM_FIELD] ?? null;
-        if (!is_array($kept) || trim((string) ($kept['company_name'] ?? '')) === '') {
-            return null;
-        }
+        return CompanyCapture::forAddress($this->session->data[$role . '_address'] ?? null, $this->companyFor($role));
+    }
 
-        return [
-            'company_name' => (string) $kept['company_name'],
-            'organization_number' => (string) ($kept['organization_number'] ?? ''),
-            'country_code' => strtoupper((string) ($kept['country_code'] ?? '')),
-            'source' => (string) ($kept['source'] ?? 'search'),
-        ];
+    /**
+     * A pick saves before its number arrives, so OpenCart may already have
+     * stored the saved address with a numberless capture: give it the number
+     * now, so a later checkout on that address is not refused for want of one.
+     *
+     * @param array{company_name: string, organization_number: string, country_code: string, source: string} $company
+     */
+    private function topUpSavedAddress(string $role, array $company): void
+    {
+        $addressId = (int) ($this->session->data[$role . '_address']['address_id'] ?? 0);
+        if ($addressId <= 0 || !$this->customer->isLogged() || !in_array($role, ['payment', 'shipping'], true)) {
+            return;
+        }
+        $customerId = (int) $this->customer->getId();
+        $row = $this->db->query('SELECT `custom_field` FROM `' . DB_PREFIX . 'address` WHERE `address_id` = ' . $addressId . ' AND `customer_id` = ' . $customerId)->row;
+        $stored = json_decode((string) ($row['custom_field'] ?? ''), true);
+        $updated = is_array($stored) ? CompanyCapture::topUp($stored, $company) : null;
+        if ($updated === null) {
+            return;
+        }
+        $this->db->query("UPDATE `" . DB_PREFIX . "address` SET `custom_field` = '" . $this->db->escape((string) json_encode($updated)) . "' WHERE `address_id` = " . $addressId . ' AND `customer_id` = ' . $customerId);
+        $this->session->data[$role . '_address']['custom_field'] = $updated;
     }
 
     /** @return array{company_name: string, organization_number: string, country_code: string, source: string}|null */
@@ -849,9 +859,7 @@ class Two extends \Opencart\System\Engine\Controller
     {
         // The refusals are shown to the buyer, so they come from the language file.
         $this->load->language(self::ROUTE);
-        $sent = (string) (($write && !$queryToken ? $this->request->post : $this->request->get)['two_token'] ?? '');
-        $token = $this->state()['token'] ?? '';
-        if (($write && ($this->request->server['REQUEST_METHOD'] ?? '') !== 'POST') || !is_string($token) || $token === '' || !hash_equals($token, $sent)) {
+        if (!RequestToken::accepts($write, $queryToken, (string) ($this->request->server['REQUEST_METHOD'] ?? ''), $this->request->post, $this->request->get, $this->state()['token'] ?? null)) {
             $this->json(['error' => htmlspecialchars($this->language->get('error_forbidden'), ENT_QUOTES, 'UTF-8'), 'code' => 'forbidden']);
 
             return false;
@@ -868,6 +876,16 @@ class Two extends \Opencart\System\Engine\Controller
         return true;
     }
 
+
+    /**
+     * Read the stored session again. A relay call can take seconds, and
+     * OpenCart writes this request's whole session back when it ends: what a
+     * save wrote meanwhile must not be overwritten by the copy read before.
+     */
+    private function reloadSession(): void
+    {
+        $this->session->start($this->session->getId());
+    }
 
     /** @return array<string, mixed> */
     private function state(): array

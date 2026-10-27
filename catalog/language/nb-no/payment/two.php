@@ -6,10 +6,11 @@ $_['heading_title'] = 'Two';
 $_['text_title_default'] = 'Bedriftsfaktura';
 
 // Tile. %s is the brand's product name.
-$_['entry_company_name'] = 'Firmanavn';
+$_['entry_company'] = 'Firma';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Handler for %s.';
 $_['text_company_missing'] = 'For å betale med %s, søk etter firmaet ditt i firmafeltet i adressen din og velg det fra resultatene.';
+$_['text_company_missing_saved'] = 'For å betale med %s, legg til firmaet ditt i adressen du bruker.';
 $_['button_confirm'] = 'Bekreft ordre';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.

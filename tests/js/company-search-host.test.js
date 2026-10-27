@@ -135,7 +135,7 @@ describe('transport', () => {
         [{ items: [{ name: 'Jo Bloggs', organization_number: 'TWO:ST1', highlight: '', lookup_id: '' }] }, 'GB', { items: [{ text: 'Jo Bloggs', html: 'Jo Bloggs', companyId: 'TWO:ST1', lookupId: '' }] }, 'a TWO: number is never shown'],
         [{ error: 'unavailable' }, 'GB', { unavailable: true }, 'the relay failing reads as unavailable, not as no match'],
         [{ items: [], degraded: true }, 'GB', { unavailable: true }, 'a degraded answer is unavailable'],
-        [{ status: 429 }, 'GB', { unavailable: true }, 'a 429 is unavailable'],
+        [{ error: 'Too many', code: 'rate_limited' }, 'GB', { unavailable: true }, 'the shop\'s rate limit is unavailable'],
         [{ items: [] }, '', { items: [] }, 'no country: nothing sent'],
     ])('%#', async (answer, country, expected, description) => {
         document.body.innerHTML = ADDRESS('payment');
@@ -148,7 +148,7 @@ describe('transport', () => {
     test('a 429 parks this instance alone, and an answer is cached per country and term', async () => {
         document.body.innerHTML = ADDRESS('payment') + ADDRESS('shipping');
         let status = 429;
-        const { hosts, calls } = start(config(), { s: () => (status === 429 ? { status: 429 } : { items: [] }) });
+        const { hosts, calls } = start(config(), { s: () => (status === 429 ? { error: 'Too many', code: 'rate_limited' } : { items: [] }) });
         await flush();
         await term(hosts.payment, 'acme', 'GB');
         status = 200;
@@ -156,6 +156,23 @@ describe('transport', () => {
         await term(hosts.shipping, 'acme', 'GB');
         await term(hosts.shipping, 'acme', 'GB');
         expect(calls.filter(([route]) => route === 's').length).toBe(2);
+    });
+
+    test('a search in flight holds back the save a pick makes, so its write-back cannot undo the pick', async () => {
+        document.body.innerHTML = ADDRESS('payment');
+        let answer;
+        const { hosts, calls } = start(config({ address_lookup: false }), { s: () => new Promise((resolve) => { answer = resolve; }) });
+        await flush();
+        const searching = term(hosts.payment, 'acme', 'GB');
+        await flush();
+        hosts.payment.component.selectCompany({ text: 'Acme Ltd', companyId: '0123', lookupId: '' });
+        await flush();
+        const order = () => calls.map(([route]) => route).filter((route) => route === 's' || route === 'save');
+        expect(order()).toEqual(['s']);
+        answer({ items: [] });
+        await searching;
+        await hosts.payment.flush();
+        expect(order()).toEqual(['s', 'save']);
     });
 
     test.each([
@@ -265,5 +282,29 @@ describe('address autofill', () => {
         country.dispatchEvent(new Event('change', { bubbles: true }));
         await flush();
         expect([fields('payment'), hosts.payment.identity.companyName()]).toEqual([['', 'Edited', '', ''], '']);
+    });
+});
+
+describe('the tile', () => {
+    const { Checkout } = require('../../catalog/view/javascript/two_checkout.js');
+    const host = require('../../catalog/view/javascript/two/company-search-host.js');
+
+    test('tileReady saves every capture again, forced, then names the company and asks the intent once', async () => {
+        document.body.innerHTML = ADDRESS('payment') + '<form id="form-two" data-two-tile="address"><p class="text-danger" data-two-company-summary>Add your company</p></form><div id="two-intent-notice"></div>';
+        const acme = { company_name: 'Acme Ltd', organization_number: '0123', country_code: 'GB', source: 'search' };
+        const cfg = config({ companies: { payment: acme }, urls: Object.assign({}, config().urls, { intent: 'index.php?route=i' }), i18n: Object.assign({ company_from_address: 'Buying for %s.' }, I18N) });
+        const { calls, fetchImpl } = shop({ i: { outcome: 'approved', notice: 'ok' } });
+        window.TwoCompanySearchHost = host;
+        const checkout = new Checkout(cfg, document, new Api(cfg, fetchImpl), window).start();
+        live = live.concat(Object.values(checkout.instances));
+        await flush();
+        expect(calls.filter(([route]) => route === 'save').length).toBe(0);
+        await checkout.tileReady(document.getElementById('form-two'));
+        const routes = calls.map(([route]) => route).filter((route) => route === 'save' || route === 'i');
+        expect(routes).toEqual(['save', 'save', 'i']);
+        expect(calls.find(([route]) => route === 'save')[1]).toMatchObject({ role: 'payment', company_name: 'Acme Ltd', organization_number: '0123' });
+        const summary = document.querySelector('[data-two-company-summary]');
+        expect([summary.textContent, summary.classList.contains('text-danger')]).toEqual(['Buying for Acme Ltd (0123).', false]);
+        delete window.TwoCompanySearchHost;
     });
 });

@@ -4,7 +4,8 @@
 # from the one there, so a fix lands in the shared source and is re-vendored,
 # never patched in this repo. Re-vendor: dev/ci/vendored-company-search.sh --write
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+# Run from the repo root (CI runs a copy of this script from outside the tree).
+cd "$(git rev-parse --show-toplevel)"
 SOURCE_REPO="two-inc/magento-plugin"
 SOURCE_REF="staging"
 SOURCE_DIR="view/frontend/web/js/model"

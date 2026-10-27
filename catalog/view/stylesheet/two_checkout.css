@@ -20,7 +20,10 @@
     position: absolute;
     top: calc(var(--two-company-input-height, 100%) + 8px);
     left: 0;
-    width: 100%;
+    /* OpenCart puts the company field in a half-width column, too narrow for
+       the three chips in a row; at least Magento's popover width, spilling
+       over the next column, never narrower than the field. */
+    width: max(100%, min(480px, calc(100vw - 32px)));
     box-sizing: border-box;
     padding: 8px;
     border: 1px solid #ccc;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Opencart\Catalog\Controller\Extension\Two\Event;
 
+use Opencart\System\Library\Extension\Two\Core\CompanyCapture;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
@@ -20,6 +21,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Library\Log $log
  * @property-read \Opencart\System\Library\Session $session
  * @property-read \Opencart\System\Library\Request $request
+ * @property-read \Opencart\System\Library\Cart\Customer $customer
  * @property-read \Opencart\Catalog\Model\Account\Address $model_account_address
  */
 class TwoCheckout extends \Opencart\System\Engine\Controller
@@ -56,6 +58,13 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
                 return;
             }
             $config['roles'] = $pages[$route];
+            // Seeded from the edited address's own capture, or from nothing:
+            // never from a capture made on another address this session.
+            unset($this->session->data['two_checkout']['companies']['account']);
+            $config['companies'] = ['account' => $this->editedAddressCapture()];
+            if ($config['companies']['account'] === null) {
+                $config['companies'] = (object) [];
+            }
         }
         // JSON_HEX_* so no value can close the script element or open markup.
         $version = '?v=' . rawurlencode(Services::pluginVersion());
@@ -69,6 +78,24 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
         $island .= '<script src="' . self::SCRIPT . $version . '"></script>';
         $at = strripos($output, '</body>');
         $output = $at === false ? $output . $island : substr($output, 0, $at) . $island . substr($output, $at);
+    }
+
+    /**
+     * The capture the address on OpenCart's edit form keeps; null for a new
+     * address, a guest, or an address that is not the customer's.
+     *
+     * @return array{company_name: string, organization_number: string, country_code: string, source: string}|null
+     */
+    private function editedAddressCapture(): ?array
+    {
+        $addressId = (int) ($this->request->get['address_id'] ?? 0);
+        if ($addressId <= 0 || !$this->customer->isLogged()) {
+            return null;
+        }
+        $this->load->model('account/address');
+        $row = $this->model_account_address->getAddress((int) $this->customer->getId(), $addressId);
+
+        return CompanyCapture::ofAddress($row);
     }
 
     /**
@@ -88,29 +115,25 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
         if (!is_array($args[$at] ?? null)) {
             return;
         }
-        $data = $args[$at];
-        $name = trim((string) ($data['company'] ?? ''));
-        $fields = is_array($data['custom_field'] ?? null) ? $data['custom_field'] : [];
-        unset($fields[Services::ADDRESS_CUSTOM_FIELD]);
-        $captures = (array) ($this->session->data['two_checkout']['companies'] ?? []);
-        $routeRole = ['checkout/payment_address.save' => 'payment', 'checkout/shipping_address.save' => 'shipping', 'account/address.save' => 'account'][(string) ($this->request->get['route'] ?? '')] ?? '';
-        $kept = null;
-        foreach (array_unique(array_filter([$routeRole, 'payment', 'shipping', 'account'])) as $role) {
-            $capture = $captures[$role] ?? null;
-            if (is_array($capture) && $name !== '' && trim((string) ($capture['company_name'] ?? '')) === $name) {
-                $kept = $capture;
-                break;
-            }
-        }
-        if ($kept === null && $edit) {
+        $customerId = (int) ($args[0] ?? 0);
+        $stored = [];
+        if ($edit) {
             $this->load->model('account/address');
-            $stored = $this->model_account_address->getAddress((int) $args[0], (int) $args[1])['custom_field'][Services::ADDRESS_CUSTOM_FIELD] ?? null;
-            $kept = is_array($stored) && $name !== '' && trim((string) ($stored['company_name'] ?? '')) === $name ? $stored : null;
+            // Scoped to the customer by OpenCart, so another customer's address reads as none.
+            $row = $this->model_account_address->getAddress($customerId, (int) $args[1]);
+            $stored = $row === [] ? [] : ['customer_id' => $customerId] + $row;
         }
-        if ($kept !== null) {
-            $fields[Services::ADDRESS_CUSTOM_FIELD] = array_intersect_key($kept, array_flip(['company_name', 'organization_number', 'country_code', 'source']));
-        }
-        $data['custom_field'] = $fields;
+        $routeRole = ['checkout/payment_address.save' => 'payment', 'checkout/shipping_address.save' => 'shipping', 'account/address.save' => 'account'][(string) ($this->request->get['route'] ?? '')] ?? '';
+        $roles = array_values(array_unique(array_filter([$routeRole, 'payment', 'shipping', 'account'])));
+        $data = $args[$at];
+        $data['custom_field'] = CompanyCapture::keep(
+            is_array($data['custom_field'] ?? null) ? $data['custom_field'] : [],
+            (string) ($data['company'] ?? ''),
+            (array) ($this->session->data['two_checkout']['companies'] ?? []),
+            $roles,
+            $stored,
+            $customerId,
+        );
         $args[$at] = $data;
     }
 }

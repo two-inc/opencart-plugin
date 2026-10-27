@@ -3,7 +3,7 @@
   {% if in_tile %}
     {# The one company control in tile placement: the shared search mounts on this field. Its country is the billing address's. #}
     <div class="mb-3">
-      <label for="input-two-company" class="form-label">{{ entry_company_name|e }}</label>
+      <label for="input-two-company" class="form-label">{{ entry_company|e }}</label>
       <input type="text" name="two_company_name" id="input-two-company" value="{{ company.company_name|default('')|e }}" class="form-control" autocomplete="organization" data-two-capture-host="tile" data-two-country="{{ country|e }}">
     </div>
   {% elseif company %}

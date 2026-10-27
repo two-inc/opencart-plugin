@@ -6,10 +6,11 @@ $_['heading_title'] = 'Two';
 $_['text_title_default'] = 'Zakelijke factuur';
 
 // Tile. %s is the brand's product name.
-$_['entry_company_name'] = 'Bedrijfsnaam';
+$_['entry_company'] = 'Bedrijf';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Je koopt voor %s.';
 $_['text_company_missing'] = 'Om met %s te betalen, zoek je bedrijf in het bedrijfsveld van je adres en kies het uit de resultaten.';
+$_['text_company_missing_saved'] = 'Om met %s te betalen, voeg je bedrijf toe aan het adres dat je gebruikt.';
 $_['button_confirm'] = 'Bestelling bevestigen';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.

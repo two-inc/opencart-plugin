@@ -24,8 +24,6 @@
 
     const MIN_INPUT_LENGTH = 3;
     const SEARCH_DEBOUNCE_MS = 300;
-    /** The server's own retry envelope is 10 s, so a shorter client wait cuts off answers that were coming. */
-    const SEARCH_TIMEOUT_MS = 30000;
     const CACHE_TTL_MS = 5 * 60 * 1000;
     const CACHE_LIMIT = 50;
     const DEFAULT_PARK_MS = 30000;
@@ -123,6 +121,11 @@
         return true;
     };
 
+    /**
+     * Through the checkout's call queue, like every other relay call: OpenCart
+     * writes the whole session back at the end of each request, so a search
+     * must not overlap a save (TWO-26721).
+     */
     Transport.prototype.searchCompanies = function (params) {
         const country = String(params.getCountryCode() || '').toUpperCase();
         if (!country) return Promise.resolve({ items: [] });
@@ -133,25 +136,20 @@
         this.abortActiveRequest();
         const controller = typeof AbortController === 'function' ? new AbortController() : null;
         this.controller = controller;
-        const timer = setTimeout(() => controller && controller.abort(), SEARCH_TIMEOUT_MS);
-        const url = this.host.api.url('search', { q: params.term, country: country });
-        return this.host.api.fetch(url, { credentials: 'same-origin', signal: controller ? controller.signal : undefined })
-            .then((response) => {
-                if (response.status === 429) {
-                    const after = Number(response.headers && response.headers.get && response.headers.get('Retry-After'));
-                    this.parkedUntil = Date.now() + (after > 0 ? after * 1000 : DEFAULT_PARK_MS);
+        return this.host.api.get('search', { q: params.term, country: country }, controller ? controller.signal : undefined)
+            .then((json) => {
+                if (json && json.code === 'rate_limited') {
+                    // Parks this control alone; the others keep searching.
+                    this.parkedUntil = Date.now() + DEFAULT_PARK_MS;
                     return { unavailable: true };
                 }
-                return response.json().then((json) => {
-                    if (!json || !Array.isArray(json.items) || json.degraded === true) return { unavailable: true };
-                    const items = json.items.map(toItem);
-                    this.remember(key, items);
-                    return { items: items };
-                });
+                if (!json || !Array.isArray(json.items) || json.degraded === true) return { unavailable: true };
+                const items = json.items.map(toItem);
+                this.remember(key, items);
+                return { items: items };
             })
             .catch(() => (controller && controller.signal.aborted && this.controller !== controller ? { aborted: true } : { unavailable: true }))
             .finally(() => {
-                clearTimeout(timer);
                 if (this.controller === controller) this.controller = null;
             });
     };
@@ -330,12 +328,12 @@
     };
 
     /** Persist this role's capture in the session, so intent and confirm read what the buyer sees. */
-    RoleHost.prototype.persist = function () {
+    RoleHost.prototype.persist = function (force, quiet) {
         clearTimeout(this.saveTimer);
         this.saveTimer = null;
         const company = this.company();
         const key = JSON.stringify(company);
-        if (key === this.saved || (!company.country_code && company.company_name)) return this.pending;
+        if ((!force && key === this.saved) || (!company.country_code && company.company_name)) return this.pending;
         this.saved = key;
         this.pending = this.api.post('save_company', {
             role: this.role,
@@ -343,7 +341,7 @@
             organization_number: company.organization_number,
             country: company.country_code || 'XX',
             source: company.source
-        }).catch(() => null).then(() => this.onCompany(this.role, company.company_name ? company : null));
+        }).catch(() => null).then(() => (quiet ? null : this.onCompany(this.role, company.company_name ? company : null)));
         return this.pending;
     };
 

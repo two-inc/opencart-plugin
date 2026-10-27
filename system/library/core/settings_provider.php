@@ -152,6 +152,15 @@ final class SettingsProvider
     }
 
     /**
+     * Whether the payment tile holds the company control: the placement
+     * switch alone decides, never what was captured (TWO-26721).
+     */
+    public function companyControlInTile(): bool
+    {
+        return !$this->companySearchInAddressArea();
+    }
+
+    /**
      * "Autofill company address": whether a picked company's registered
      * address is written into the buyer's address form. On by default, and
      * off whenever the search is in the tile, which has no address to fill.

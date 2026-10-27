@@ -35,7 +35,7 @@
 
 
     /** How long a relay call may take before it is abandoned, by call (the shop's own calls to Two time out at 30 s). */
-    const TIMEOUTS = { intent: 40000 };
+    const TIMEOUTS = { intent: 40000, search: 30000 };
     const DEFAULT_TIMEOUT = 20000;
     /** Calls the browser never abandons: placing the order runs as long as the shop needs, as a form post would. */
     const NO_TIMEOUT = ['confirm'];
@@ -158,6 +158,7 @@
             if (!this.tile || (role !== 'tile' && role !== this.tileRole())) {
                 return Promise.resolve();
             }
+            this.showCompany();
             if (!company) {
                 this.intentSeq += 1;
                 const notice = this.doc.getElementById('two-intent-notice');
@@ -266,13 +267,30 @@
                     endOfMonth: Boolean(this.config.end_of_month)
                 }).start();
             }
-            const captured = form.getAttribute('data-two-tile') === 'search'
-                ? Boolean((this.config.companies || {}).tile)
-                : Boolean(form.querySelector('[data-two-company-summary]:not(.text-danger)'));
-            if (!captured) {
-                return Promise.resolve();
+            // Each control's capture again, forced and in the call queue, so the
+            // session the intent and confirm read is the one the buyer sees.
+            const saves = Object.keys(this.instances).map((role) => this.instances[role].persist(true, true));
+            return Promise.all(saves).then(() => {
+                this.showCompany();
+                const captured = form.getAttribute('data-two-tile') === 'search'
+                    ? Boolean((this.config.companies || {}).tile)
+                    : Boolean(form.querySelector('[data-two-company-summary]:not(.text-danger)'));
+                return captured ? this.intent() : null;
+            });
+        }
+
+        /** In address placement, the tile names the company the buyer's address form holds now. */
+        showCompany() {
+            const summary = this.tile && this.tile.querySelector('[data-two-company-summary]');
+            const company = (this.config.companies || {})[this.tileRole()];
+            const copy = (this.config.i18n || {}).company_from_address;
+            if (!summary || !company || !company.company_name || !copy) {
+                return;
             }
-            return this.intent();
+            const number = String(company.organization_number || '');
+            const label = number && !/^\s*two:/i.test(number) ? company.company_name + ' (' + number + ')' : company.company_name;
+            summary.textContent = copy.replace('%s', label);
+            summary.classList.remove('text-danger');
         }
 
         /** Asks the order intent and shows its notice; a later ask supersedes an earlier one. */

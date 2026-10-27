@@ -6,10 +6,11 @@ $_['heading_title'] = 'Two';
 $_['text_title_default'] = 'Business invoice';
 
 // Tile. %s is the brand's product name.
-$_['entry_company_name'] = 'Company name';
+$_['entry_company'] = 'Company';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Buying for %s.';
 $_['text_company_missing'] = 'To pay with %s, search for your company in the company field of your address and select it from the results.';
+$_['text_company_missing_saved'] = 'To pay with %s, add your company to the address you are using.';
 $_['button_confirm'] = 'Confirm order';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.

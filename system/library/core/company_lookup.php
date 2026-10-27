@@ -133,6 +133,18 @@ final class CompanyLookup
     }
 
     /** Whether a buyer in this country may enrol as a sole trader; null when the registry did not answer. */
+    /**
+     * The covered countries in the envelope the shared company search reads:
+     * `ok` false (and an empty list) when Two did not answer, so it fails open.
+     *
+     * @param list<string>|null $countries
+     * @return array{ok: bool, status: int, body: array{supported_countries: list<string>}}
+     */
+    public static function countriesEnvelope(?array $countries): array
+    {
+        return ['ok' => $countries !== null, 'status' => $countries !== null ? 200 : 502, 'body' => ['supported_countries' => $countries ?? []]];
+    }
+
     public function soleTraderAvailable(string $country): ?bool
     {
         $types = $this->supportedCompanyTypes($country);
@@ -190,13 +202,13 @@ final class CompanyLookup
         return $this->environment->checkoutBaseUrl($this->settings->environment()) . self::SIGNUP_PATH;
     }
 
-    /** The API host the browser asks for the enrolled buyer (it holds the buyer's own Two session). */
     /** The hosted checkout's origin, which the sole-trader signup posts its answer from. */
     public function checkoutPageUrl(): string
     {
         return $this->environment->checkoutBaseUrl($this->settings->environment());
     }
 
+    /** The API host the browser asks for the enrolled buyer (it holds the buyer's own Two session). */
     public function apiBaseUrl(): string
     {
         return $this->environment->apiBaseUrl($this->settings->environment());
