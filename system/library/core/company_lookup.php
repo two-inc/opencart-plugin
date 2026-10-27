@@ -132,7 +132,6 @@ final class CompanyLookup
         return array_values(array_unique($codes));
     }
 
-    /** Whether a buyer in this country may enrol as a sole trader; null when the registry did not answer. */
     /**
      * The covered countries in the envelope the shared company search reads:
      * `ok` false (and an empty list) when Two did not answer, so it fails open.
@@ -145,6 +144,7 @@ final class CompanyLookup
         return ['ok' => $countries !== null, 'status' => $countries !== null ? 200 : 502, 'body' => ['supported_countries' => $countries ?? []]];
     }
 
+    /** Whether a buyer in this country may enrol as a sole trader; null when the registry did not answer. */
     public function soleTraderAvailable(string $country): ?bool
     {
         $types = $this->supportedCompanyTypes($country);

@@ -7,9 +7,9 @@
       <input type="text" name="two_company_name" id="input-two-company" value="{{ company.company_name|default('')|e }}" class="form-control" autocomplete="organization" data-two-capture-host="tile" data-two-country="{{ country|e }}">
     </div>
   {% elseif company %}
-    <p data-two-company-summary>{{ text_company_from_address|format(company_label)|e }}</p>
+    <p data-two-company-summary{% if saved_address %} data-two-saved-address{% endif %}>{{ text_company_from_address|format(company_label)|e }}</p>
   {% else %}
-    <p class="text-danger" data-two-company-summary>{{ text_company_missing|e }}{% if edit_address %} <a href="{{ edit_address|e }}" data-two-edit-address>{{ text_company_edit_address|e }}</a>{% endif %}</p>
+    <p class="text-danger" data-two-company-summary{% if saved_address %} data-two-saved-address{% endif %}>{{ text_company_missing|e }}{% if edit_address %} <a href="{{ edit_address|e }}" data-two-edit-address>{{ text_company_edit_address|e }}</a>{% endif %}</p>
   {% endif %}
   {% for field in fields %}
     <div class="mb-3">

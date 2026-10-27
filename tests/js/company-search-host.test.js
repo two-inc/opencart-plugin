@@ -307,4 +307,20 @@ describe('the tile', () => {
         expect([summary.textContent, summary.classList.contains('text-danger')]).toEqual(['Buying for Acme Ltd (0123).', false]);
         delete window.TwoCompanySearchHost;
     });
+
+    test('a saved address keeps its own summary: a capture in the hidden new-address form never replaces it', async () => {
+        document.body.innerHTML = ADDRESS('payment') + '<form id="form-two" data-two-tile="address"><p class="text-danger" data-two-company-summary data-two-saved-address>Add your company to the address</p></form><div id="two-intent-notice"></div>';
+        const beta = { company_name: 'Beta AS', organization_number: '9876', country_code: 'GB', source: 'search' };
+        const cfg = config({ companies: { payment: beta }, urls: Object.assign({}, config().urls, { intent: 'index.php?route=i' }), i18n: Object.assign({ company_from_address: 'Buying for %s.' }, I18N) });
+        const { calls, fetchImpl } = shop({ i: { outcome: 'approved', notice: 'ok' } });
+        window.TwoCompanySearchHost = host;
+        const checkout = new Checkout(cfg, document, new Api(cfg, fetchImpl), window).start();
+        live = live.concat(Object.values(checkout.instances));
+        await flush();
+        await checkout.tileReady(document.getElementById('form-two'));
+        const summary = document.querySelector('[data-two-company-summary]');
+        expect([summary.textContent, summary.classList.contains('text-danger'), calls.filter(([route]) => route === 'i').length])
+            .toEqual(['Add your company to the address', true, 0]);
+        delete window.TwoCompanySearchHost;
+    });
 });

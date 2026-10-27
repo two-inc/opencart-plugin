@@ -284,7 +284,9 @@
             const summary = this.tile && this.tile.querySelector('[data-two-company-summary]');
             const company = (this.config.companies || {})[this.tileRole()];
             const copy = (this.config.i18n || {}).company_from_address;
-            if (!summary || !company || !company.company_name || !copy) {
+            // A saved address's summary is what that address keeps, which is
+            // what confirm places: the hidden new-address form never replaces it.
+            if (!summary || summary.hasAttribute('data-two-saved-address') || !company || !company.company_name || !copy) {
                 return;
             }
             const number = String(company.organization_number || '');

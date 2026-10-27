@@ -98,7 +98,8 @@ final class CompanyCapture
     public static function keep(array $customField, string $company, array $captures, array $roles, array $stored, int $customerId): array
     {
         unset($customField[self::KEY]);
-        $name = trim($company);
+        // OpenCart HTML-escapes every posted value; the capture holds the plain name.
+        $name = trim(html_entity_decode($company, ENT_QUOTES, 'UTF-8'));
         if ($name === '') {
             return $customField;
         }
@@ -115,7 +116,7 @@ final class CompanyCapture
         foreach ($candidates as $capture) {
             if ($same($capture)) {
                 $kept = $kept ?? $capture;
-                if ($kept['organization_number'] === '' && $kept['source'] !== 'manual' && $capture['organization_number'] !== '') {
+                if ($kept['organization_number'] === '' && $kept['source'] !== 'manual' && $capture['organization_number'] !== '' && self::sameCompany($kept, $capture)) {
                     $kept['organization_number'] = $capture['organization_number'];
                 }
             }
@@ -144,7 +145,7 @@ final class CompanyCapture
         }
         $kept = self::ofAddress($address);
         if ($kept !== null && $kept['organization_number'] === '' && $kept['source'] !== 'manual'
-            && $session !== null && $session['company_name'] === $kept['company_name']) {
+            && $session !== null && self::sameCompany($kept, $session)) {
             $kept['organization_number'] = $session['organization_number'];
         }
 
@@ -162,13 +163,26 @@ final class CompanyCapture
     public static function topUp(array $customField, array $capture): ?array
     {
         $held = self::normalise($customField[self::KEY] ?? null);
-        if ($held === null || $held['company_name'] !== $capture['company_name'] || $held['organization_number'] !== ''
+        if ($held === null || !self::sameCompany($held, $capture) || $held['organization_number'] !== ''
             || $held['source'] === 'manual' || $capture['organization_number'] === '') {
             return null;
         }
         $customField[self::KEY] = array_replace($held, ['organization_number' => $capture['organization_number']]);
 
         return $customField;
+    }
+
+    /**
+     * Whether two captures are one company, so one may lend the other its
+     * number: the same name, from the same country's register, by the same
+     * route (a sole trader's number is never a registered company's).
+     *
+     * @param array{company_name: string, organization_number: string, country_code: string, source: string} $a
+     * @param array{company_name: string, organization_number: string, country_code: string, source: string} $b
+     */
+    private static function sameCompany(array $a, array $b): bool
+    {
+        return $a['company_name'] === $b['company_name'] && $a['country_code'] === $b['country_code'] && $a['source'] === $b['source'];
     }
 
     /**

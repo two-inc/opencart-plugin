@@ -105,6 +105,23 @@ final class RateLimiter
         return ['stamps' => $recent, 'allowed' => true];
     }
 
+    /**
+     * The session's intent stamps after a request that reloaded the session:
+     * those stored now (other requests' too) and this request's, within the
+     * window, each once.
+     *
+     * @param list<int> $stored
+     * @param list<int> $ours
+     * @return list<int>
+     */
+    public static function keepStamps(array $stored, array $ours, int $now): array
+    {
+        $all = array_values(array_unique(array_filter(array_merge($stored, $ours), static fn (int $at): bool => $at > 0 && $now - $at < self::SESSION_INTENT_WINDOW)));
+        sort($all);
+
+        return $all;
+    }
+
     /** @param list<string> $rules */
     private static function matchesAny(string $address, array $rules): bool
     {

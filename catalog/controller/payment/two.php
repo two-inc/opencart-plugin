@@ -107,6 +107,9 @@ class Two extends \Opencart\System\Engine\Controller
             'company_label' => $company === null ? '' : CompanyLookup::displayLabel($company['company_name'], $company['organization_number']),
             'fields' => $fields,
             'edit_address' => $editAddress = $this->editAddressLink(),
+            // The summary of a saved address is what that address keeps: the
+            // script never replaces it with a capture from the new-address form.
+            'saved_address' => !$inTile && (int) ($this->session->data[$this->buyerRole(false) . '_address']['address_id'] ?? 0) > 0,
             // A saved address has no company field on the page: say where it is.
             'text_company_missing' => sprintf($this->language->get($editAddress === '' ? 'text_company_missing' : 'text_company_missing_saved'), $brand),
             'text_company_edit_address' => $this->language->get('text_company_edit_address'),
@@ -243,7 +246,17 @@ class Two extends \Opencart\System\Engine\Controller
 
             return;
         }
-        $result = $services->orderFlow($this->event)->intent($input['order'], $input['lines'], $input['totals'], $this->sessionHash(), $input['context'] + ['merchant_short_name' => $this->merchantShortName($services)]);
+        // Two can take seconds to answer: reload the stored session before this
+        // request writes it back, so a shipping or address change OpenCart
+        // saved meanwhile stands, then put this request's intent stamps back.
+        $stamps = $limit['stamps'];
+        $result = CompanyCapture::relay(
+            fn (): array => $services->orderFlow($this->event)->intent($input['order'], $input['lines'], $input['totals'], $this->sessionHash(), $input['context'] + ['merchant_short_name' => $this->merchantShortName($services)]),
+            $this->reloadSession(...),
+            function (array $result) use ($stamps): void {
+                $this->remember('intent_stamps', RateLimiter::keepStamps(array_map('intval', (array) ($this->state()['intent_stamps'] ?? [])), $stamps, time()));
+            },
+        );
         $brand = Brand::default();
         $notice = match (true) {
             $result['outcome'] === OrderFlow::APPROVED && $brand->intentApprovedNoticeEnabled => htmlspecialchars($brand->intentApprovedNotice ?? sprintf($this->language->get('text_intent_approved'), $brand->productName), ENT_QUOTES, 'UTF-8'),

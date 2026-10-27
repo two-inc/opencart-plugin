@@ -7,9 +7,10 @@ name: Vendored company search
 # nightly run catches a change there with none here. No secrets: the source
 # repo is public.
 #
-# The check itself runs from the base branch (staging on a push or the nightly
-# run), never from the PR, so a PR cannot change what it is checked against.
-# Only the PR that first adds the script, when the base has none, runs its own.
+# The script runs from the base branch's copy (staging on a push or the nightly
+# run), so a PR cannot change the script it is checked with, short of editing
+# this workflow, which a pull_request run takes from the PR itself. Only the PR
+# that first adds the script, when the base has none, runs its own.
 on:
   pull_request:
   push:

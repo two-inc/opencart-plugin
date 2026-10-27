@@ -8,6 +8,7 @@ use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
 use Opencart\System\Library\Extension\Two\Core\CustomHeaders;
 use Opencart\System\Library\Extension\Two\Core\Environment;
 use Opencart\System\Library\Extension\Two\Core\HttpResponse;
+use Opencart\System\Library\Extension\Two\Core\RateLimiter;
 use Opencart\System\Library\Extension\Two\Core\RequestToken;
 use Opencart\System\Library\Extension\Two\Core\SettingsProvider;
 
@@ -28,6 +29,7 @@ final class CompanyCaptureSpec
         self::testForAddress();
         self::testTopUp();
         self::testRelay();
+        self::testIntentRelay();
         self::testRequestToken();
         self::testShapes();
         self::testTilePlacement();
@@ -69,6 +71,14 @@ final class CompanyCaptureSpec
             [[], 'Acme Ltd', ['payment' => $numberless, 'account' => self::ACME], [], 7, [CompanyCapture::KEY => self::ACME], 'or from another role\'s capture of the same name'],
             [[], 'Acme Ltd', ['account' => array_replace(self::ACME, ['source' => 'manual', 'organization_number' => ''])], $storedAcme, 7, [CompanyCapture::KEY => array_replace(self::ACME, ['organization_number' => '', 'source' => 'manual'])], 'a manual entry stays name only'],
         ];
+        $sweden = array_replace(self::ACME, ['organization_number' => '5560001111', 'country_code' => 'SE']);
+        $soleTrader = array_replace(self::ACME, ['organization_number' => 'TWO:ST1', 'source' => 'sole_trader']);
+        foreach ([['Smith & Sons Ltd', 'Smith &amp; Sons Ltd', 'an ampersand'], ['O\'Neil "Bros" Ltd', 'O&#039;Neil &quot;Bros&quot; Ltd', 'quotes'], ['A<B>C Ltd', 'A&lt;B&gt;C Ltd', 'angle brackets']] as [$plain, $escaped, $what]) {
+            $capture = array_replace(self::ACME, ['company_name' => $plain]);
+            $cases[] = [[], $escaped, ['payment' => $capture], [], 7, [CompanyCapture::KEY => $capture], 'OpenCart posts the company HTML-escaped: ' . $what . ' still matches'];
+        }
+        $cases[] = [[], 'Acme Ltd', ['payment' => $numberless, 'account' => $sweden], [], 7, [CompanyCapture::KEY => $numberless], 'a GB capture never takes a Swedish company\'s number of the same name'];
+        $cases[] = [[], 'Acme Ltd', ['payment' => $numberless, 'account' => $soleTrader], [], 7, [CompanyCapture::KEY => $numberless], 'nor a sole trader\'s'];
         foreach ($cases as [$posted, $company, $captures, $stored, $customer, $expected, $description]) {
             TinyAssert::same($expected, CompanyCapture::keep($posted, $company, $captures, $roles, $stored, $customer), 'keep: ' . $description);
         }
@@ -84,6 +94,8 @@ final class CompanyCaptureSpec
             [$saved(null), self::ACME, null, 'a saved address that keeps nothing: never a capture made on another form'],
             [$saved(array_replace(self::ACME, ['organization_number' => ''])), self::ACME, self::ACME, 'its missing number from the same-named session capture'],
             [$saved(array_replace(self::ACME, ['organization_number' => ''])), array_replace(self::ACME, ['company_name' => 'Other']), array_replace(self::ACME, ['organization_number' => '']), 'but not from another company'],
+            [$saved(array_replace(self::ACME, ['organization_number' => ''])), array_replace(self::ACME, ['organization_number' => '5560001111', 'country_code' => 'SE']), array_replace(self::ACME, ['organization_number' => '']), 'nor from a same-named company in another country'],
+            [$saved(array_replace(self::ACME, ['organization_number' => ''])), array_replace(self::ACME, ['organization_number' => 'TWO:ST1', 'source' => 'sole_trader']), array_replace(self::ACME, ['organization_number' => '']), 'nor from a sole trader of the same name'],
         ];
         foreach ($cases as [$address, $session, $expected, $description]) {
             TinyAssert::same($expected, CompanyCapture::forAddress($address, $session), 'forAddress: ' . $description);
@@ -108,6 +120,8 @@ final class CompanyCaptureSpec
             [[CompanyCapture::KEY => self::ACME], array_replace(self::ACME, ['organization_number' => '999']), null, 'a number already held is never replaced'],
             [$numberless, array_replace(self::ACME, ['company_name' => 'Other']), null, 'another company'],
             [[], self::ACME, null, 'an address that keeps nothing'],
+            [$numberless, array_replace(self::ACME, ['organization_number' => '5560001111', 'country_code' => 'SE']), null, 'a GB capture with an SE number: never written onto the GB address'],
+            [[CompanyCapture::KEY => array_replace(self::ACME, ['organization_number' => '', 'source' => 'sole_trader'])], self::ACME, null, 'a numberless sole trader never takes a registered company\'s number'],
         ];
         foreach ($cases as [$stored, $capture, $expected, $description]) {
             TinyAssert::same($expected, CompanyCapture::topUp($stored, $capture), 'topUp: ' . $description);
@@ -146,6 +160,35 @@ final class CompanyCaptureSpec
             $expected = $key === null ? $saved : $saved + [$key => $kept];
             TinyAssert::same(['answer', $expected], [$answer, $store], 'relay: ' . $description);
         }
+    }
+
+    /**
+     * The order intent can wait on Two for seconds while OpenCart saves a
+     * shipping or address change: that change stands, and this request's
+     * intent stamp is kept beside any another request stored.
+     */
+    private static function testIntentRelay(): void
+    {
+        $store = ['shipping_method' => 'flat', 'two_checkout' => ['intent_stamps' => [100]]];
+        $request = $store;
+        $ours = [100, 160];
+        $request['two_checkout']['intent_stamps'] = $ours;
+        $answer = CompanyCapture::relay(
+            static function () use (&$store): string {
+                $store['shipping_method'] = 'pickup';
+                $store['two_checkout']['intent_stamps'] = [100, 150];
+
+                return 'approved';
+            },
+            static function () use (&$request, &$store): void {
+                $request = $store;
+            },
+            static function (string $answer) use (&$request, $ours): void {
+                $request['two_checkout']['intent_stamps'] = RateLimiter::keepStamps($request['two_checkout']['intent_stamps'], $ours, 120);
+            },
+        );
+        TinyAssert::same(['approved', 'pickup', [100, 150, 160]], [$answer, $request['shipping_method'], $request['two_checkout']['intent_stamps']], 'intent: the change saved meanwhile stands, and both stamps count');
+        TinyAssert::same([150, 160], RateLimiter::keepStamps([10, 150], [160, 160], 170), 'intent stamps: once each, the window applied');
     }
 
     private static function testRequestToken(): void
