@@ -487,9 +487,12 @@
         this.identity = parts.createIdentity();
         this.restore();
         this.component = new parts.Component(this.options(parts));
+        // A pick or an adoption is saved at once, so the tile the shop renders
+        // next already has it; only typing in manual entry waits for a pause.
         this.identity.subscribe(() => {
             this.syncBusy();
-            this.schedulePersist();
+            if (this.identity.captureMode() === 'manual') this.schedulePersist();
+            else this.persist();
         });
         this.component.start();
         return this;
