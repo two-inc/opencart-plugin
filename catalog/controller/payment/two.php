@@ -58,7 +58,7 @@ class Two extends \Opencart\System\Engine\Controller
     private ?string $lock = null;
 
     /** The address roles a company is captured for, and the tile's own. */
-    public const ROLES = ['payment', 'shipping', 'tile'];
+    public const ROLES = ['payment', 'shipping', 'tile', 'account'];
     private const SESSION_KEY = 'two_checkout';
     /** How long the registry's per-country answers are kept in the session. */
     private const CACHE_SECONDS = 3600;
@@ -76,7 +76,7 @@ class Two extends \Opencart\System\Engine\Controller
         // Only the placement setting decides whether the tile holds the company
         // control: never what the address forms captured (TWO-26721).
         $inTile = !$services->settings->companySearchInAddressArea();
-        $company = $this->companyFor($this->buyerRole($inTile));
+        $company = $inTile ? $this->companyFor('tile') : $this->addressCompany($this->buyerRole(false));
         $this->load->model(self::ROUTE);
         $fields = [];
         foreach ($services->settings->optionalFields() as $field) {
@@ -708,7 +708,7 @@ class Two extends \Opencart\System\Engine\Controller
      */
     private function buyerCompany(bool $inAddress): array
     {
-        $captured = $inAddress ? $this->companyFor($this->buyerRole(false)) : null;
+        $captured = $inAddress ? $this->addressCompany($this->buyerRole(false)) : null;
         if ($captured !== null) {
             $company = $captured;
         } else {
@@ -743,6 +743,32 @@ class Two extends \Opencart\System\Engine\Controller
         }
 
         return $this->url->link('account/address.form', 'language=' . $this->config->get('config_language') . '&address_id=' . $addressId);
+    }
+
+    /**
+     * The company for an address role: on a saved address, what that address
+     * keeps (captured with it, or on OpenCart's own edit form); on a new one,
+     * what the buyer captured in its form this session.
+     *
+     * @return array{company_name: string, organization_number: string, country_code: string, source: string}|null
+     */
+    private function addressCompany(string $role): ?array
+    {
+        $address = $this->session->data[$role . '_address'] ?? null;
+        if (!is_array($address) || (int) ($address['address_id'] ?? 0) <= 0) {
+            return $this->companyFor($role);
+        }
+        $kept = $address['custom_field'][Services::ADDRESS_CUSTOM_FIELD] ?? null;
+        if (!is_array($kept) || trim((string) ($kept['company_name'] ?? '')) === '') {
+            return null;
+        }
+
+        return [
+            'company_name' => (string) $kept['company_name'],
+            'organization_number' => (string) ($kept['organization_number'] ?? ''),
+            'country_code' => strtoupper((string) ($kept['country_code'] ?? '')),
+            'source' => (string) ($kept['source'] ?? 'search'),
+        ];
     }
 
     /** @return array{company_name: string, organization_number: string, country_code: string, source: string}|null */

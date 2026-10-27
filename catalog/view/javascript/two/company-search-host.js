@@ -79,6 +79,12 @@
         }
     };
 
+    Observer.prototype.disconnect = function () {
+        if (this.observer) this.observer.disconnect();
+        this.observer = null;
+        this.entries = [];
+    };
+
     Observer.prototype.check = function (entry) {
         const node = this.doc.querySelector(entry.selector);
         if (!node || node === entry.last) return;
@@ -201,12 +207,21 @@
         return key === 'results_many' ? copy.replace('%d', '%1') : copy;
     };
 
+    /** OpenCart's field ids: `input-<role>-<field>` in the checkout, bare `input-<field>` on the address edit form. */
+    RoleHost.prototype.idPrefix = function () {
+        return this.role === 'account' ? 'input-' : 'input-' + this.role + '-';
+    };
+
     RoleHost.prototype.field = function (suffix) {
-        return this.doc.getElementById('input-' + this.role + '-' + suffix);
+        return this.doc.getElementById(this.idPrefix() + suffix);
     };
 
     RoleHost.prototype.fieldSelector = function () {
-        return this.placement === 'tile' ? TILE_SELECTOR : '#input-' + this.role + '-company';
+        return this.placement === 'tile' ? TILE_SELECTOR : '#' + this.idPrefix() + 'company';
+    };
+
+    RoleHost.prototype.formRootSelector = function () {
+        return this.role === 'account' ? '#form-address' : '#form-' + this.role + '-address, #form-register';
     };
 
     /** The ISO code of this role's own country select, lower cased; null where the role has no select. */
@@ -362,11 +377,11 @@
             const input = this.doc.getElementById(id);
             return input ? String(input.value || '').trim() : '';
         };
-        const prefix = this.placement === 'tile' ? 'payment' : this.role;
+        const prefix = this.placement === 'tile' ? 'input-payment-' : this.idPrefix();
         return {
             company_name: this.identity.companyName(),
-            first_name: value('input-' + prefix + '-firstname') || value('input-firstname'),
-            last_name: value('input-' + prefix + '-lastname') || value('input-lastname'),
+            first_name: value(prefix + 'firstname') || value('input-firstname'),
+            last_name: value(prefix + 'lastname') || value('input-lastname'),
             email: value('input-email'),
             phone_number: value('input-telephone'),
             country_code: this.country()
@@ -417,7 +432,7 @@
             translate: (text) => self.translate(text),
             observe: (selector, onNode) => self.observer.watch(selector, onNode),
             addressFieldSelector: tile ? '' : this.fieldSelector(),
-            addressFormRootSelector: tile ? '' : '#form-' + this.role + '-address, #form-register',
+            addressFormRootSelector: tile ? '' : this.formRootSelector(),
             tileFieldSelector: tile ? TILE_SELECTOR : '',
             fieldExists: (selector) => !!selector && !!self.doc.querySelector(selector),
             isVirtualCart: () => false,
@@ -430,7 +445,7 @@
                     return;
                 }
                 self.doc.addEventListener('change', (event) => {
-                    if (event.target && event.target.id === 'input-' + self.role + '-country') onChange(self.adjacentCountry() || '');
+                    if (event.target && event.target.id === self.idPrefix() + 'country') onChange(self.adjacentCountry() || '');
                 }, true);
             },
             supportedCompanyTypesUrl: (country) => self.api.url('sole_trader', { country: String(country).toUpperCase() }),
@@ -479,6 +494,16 @@
         return this;
     };
 
+    /** Take this role's control down: its observer, its sole-trader listeners and timers, its panel. */
+    RoleHost.prototype.stop = function () {
+        clearTimeout(this.saveTimer);
+        this.observer.disconnect();
+        const soleTrader = this.component && this.component.soleTrader();
+        if (soleTrader) soleTrader.dispose();
+        const panel = this.component && this.component.panel();
+        if (panel) panel.unmount();
+    };
+
     /** The spinner in the field across a sole-trader flight. */
     RoleHost.prototype.syncBusy = function () {
         const input = this.doc.querySelector(this.fieldSelector());
@@ -491,11 +516,13 @@
 
     /**
      * Mount the page's controls: one per address role in address placement,
-     * the tile's one otherwise. Never both.
+     * the tile's one otherwise. Never both. The address edit form names its
+     * one role (`account`) in the config.
      */
     function mount(options) {
         const placement = options.config.in_address ? 'address' : 'tile';
-        const roles = placement === 'tile' ? ['tile'] : ['payment', 'shipping'];
+        const roles = Array.isArray(options.config.roles) ? options.config.roles
+            : (placement === 'tile' ? ['tile'] : ['payment', 'shipping']);
         const observer = new Observer(options.doc);
         const hosts = {};
         roles.forEach((role) => {

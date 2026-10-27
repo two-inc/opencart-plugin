@@ -59,6 +59,23 @@ final class Services
     public const CHECKOUT_EVENT_ACTION = 'extension/two/event/two_checkout';
     public const CHECKOUT_EVENT_DESCRIPTION = 'Adds the Two company search and order intent script to the checkout page.';
 
+    /**
+     * The saved-address capture (TWO-26721): the company search on OpenCart's
+     * own address edit form, and the company a buyer captured kept in the
+     * saved address's `custom_field`, so a later checkout on that address
+     * reuses it. Code => [trigger, action, description].
+     *
+     * @var array<string, array{0: string, 1: string, 2: string}>
+     */
+    /** The key a saved address's `custom_field` keeps the capture under. */
+    public const ADDRESS_CUSTOM_FIELD = 'two_company';
+
+    public const ADDRESS_EVENTS = [
+        'two_address_form' => ['catalog/view/account/address_form/after', 'extension/two/event/two_checkout', 'Adds the Two company search to the address edit form.'],
+        'two_address_add' => ['catalog/model/account/address.addAddress/before', 'extension/two/event/two_checkout.address', 'Keeps the company captured by the Two company search with a new saved address.'],
+        'two_address_edit' => ['catalog/model/account/address.editAddress/before', 'extension/two/event/two_checkout.address', 'Keeps the company captured by the Two company search with an edited saved address.'],
+    ];
+
     /** The payment terms fee order total, and its default sort order: before core's Taxes total (5), so its tax is listed and charged. */
     public const FEE_TOTAL_CODE = 'two_fee';
     public const FEE_TOTAL_SORT_ORDER = '4';

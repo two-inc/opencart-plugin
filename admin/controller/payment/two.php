@@ -326,6 +326,10 @@ class Two extends \Opencart\System\Engine\Controller
         $this->model_setting_event->addEvent(['code' => Services::EVENT_CODE, 'description' => Services::EVENT_DESCRIPTION, 'trigger' => Services::EVENT_TRIGGER, 'action' => Services::EVENT_ACTION, 'status' => true, 'sort_order' => 0]);
         $this->model_setting_event->deleteEventByCode(Services::CHECKOUT_EVENT_CODE);
         $this->model_setting_event->addEvent(['code' => Services::CHECKOUT_EVENT_CODE, 'description' => Services::CHECKOUT_EVENT_DESCRIPTION, 'trigger' => Services::CHECKOUT_EVENT_TRIGGER, 'action' => Services::CHECKOUT_EVENT_ACTION, 'status' => true, 'sort_order' => 0]);
+        foreach (Services::ADDRESS_EVENTS as $code => [$trigger, $action, $description]) {
+            $this->model_setting_event->deleteEventByCode($code);
+            $this->model_setting_event->addEvent(['code' => $code, 'description' => $description, 'trigger' => $trigger, 'action' => $action, 'status' => true, 'sort_order' => 0]);
+        }
 
         // The order-scoped table. Kept on uninstall: it holds the Two order ids of placed orders.
         DbOrderRecords::install(function (string $sql): array {
@@ -370,6 +374,9 @@ class Two extends \Opencart\System\Engine\Controller
         $this->load->model('setting/event');
         $this->model_setting_event->deleteEventByCode(Services::EVENT_CODE);
         $this->model_setting_event->deleteEventByCode(Services::CHECKOUT_EVENT_CODE);
+        foreach (array_keys(Services::ADDRESS_EVENTS) as $code) {
+            $this->model_setting_event->deleteEventByCode($code);
+        }
 
         $this->load->model('setting/extension');
         $this->model_setting_extension->uninstall('total', 'two_fee');
