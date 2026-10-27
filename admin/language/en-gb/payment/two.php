@@ -94,6 +94,8 @@ $_['error_invoice'] = 'The invoice could not be retrieved. Please try again late
 // Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
 $_['entry_company_search_in_address'] = 'Enable company search in address entry';
 $_['help_company_search_in_address'] = 'When enabled, the buyer may search for their company within the address entry section of the checkout. Otherwise, company search will be visible within the payment method.';
+$_['entry_address_lookup'] = 'Autofill company address';
+$_['help_address_lookup'] = 'Enables automatically filling in the registered address from the national registry.';
 $_['entry_enable_invoice_email'] = 'Show invoice email field';
 $_['help_enable_invoice_email'] = 'If you choose Yes then customers will see an invoice email field in the %s payment section at checkout. It sits with the payment method rather than the address so the buyer is prompted to consider a dedicated invoicing address even when their billing and shipping addresses match.';
 $_['entry_enable_po_number'] = 'Show PO number field';

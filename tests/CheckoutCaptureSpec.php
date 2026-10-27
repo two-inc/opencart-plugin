@@ -193,7 +193,7 @@ final class CheckoutCaptureSpec
             TinyAssert::same($paths, self::paths($transport), 'company search: ' . $description . ' (requests)');
         }
         $details = [
-            [[self::json(200, ['national_identifier' => ['type' => 'GB_CRN', 'id' => '07844329'], 'addresses' => [['type' => 'BUSINESS_ADDRESS', 'street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'region' => null, 'country' => 'GB']]])], 'bEB0d2', ['organization_number' => '07844329', 'addresses' => [['street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'country' => 'GB']]], 1, 'the number and addresses a search result left out'],
+            [[self::json(200, ['national_identifier' => ['type' => 'GB_CRN', 'id' => '07844329'], 'addresses' => [['type' => 'BUSINESS_ADDRESS', 'street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'region' => null, 'country' => 'GB']]])], 'bEB0d2', ['organization_number' => '07844329', 'addresses' => [['type' => 'BUSINESS_ADDRESS', 'street_address' => '1 High St', 'postal_code' => 'TW9 1AA', 'city' => 'Richmond', 'country' => 'GB']]], 1, 'the number and addresses a search result left out'],
             [[self::json(404, [])], 'bEB0d2', null, 1, 'a failed lookup'],
             [[], '../v1/merchant', null, 0, 'a lookup id that is not one: nothing asked'],
             [[], '..', null, 0, 'two dots, which a path would normalise away: nothing asked'],

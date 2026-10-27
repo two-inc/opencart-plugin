@@ -94,6 +94,8 @@ $_['error_invoice'] = 'De factuur kon niet worden opgehaald. Probeer het later o
 // Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
 $_['entry_company_search_in_address'] = 'Bedrijfszoekfunctie in adresinvoer inschakelen';
 $_['help_company_search_in_address'] = 'Indien ingeschakeld, kan de koper zijn bedrijf opzoeken binnen het adresinvoergedeelte van het afrekenen. Zo niet, dan is de bedrijfszoekfunctie zichtbaar binnen de betaalmethode.';
+$_['entry_address_lookup'] = 'Bedrijfsadres automatisch invullen';
+$_['help_address_lookup'] = 'Vult automatisch het geregistreerde adres in vanuit het nationale register.';
 $_['entry_enable_invoice_email'] = 'Veld E-mailadres factuur weergeven';
 $_['help_enable_invoice_email'] = 'Als je Ja kiest, zien klanten een veld voor het e-mailadres van de factuur in het %s-betaalgedeelte tijdens het afrekenen. Het staat bij de betaalmethode in plaats van bij het adres, zodat de koper wordt aangezet om een apart factuuradres te overwegen, ook als het factuur- en verzendadres hetzelfde zijn.';
 $_['entry_enable_po_number'] = 'Veld PO-nummer weergeven';

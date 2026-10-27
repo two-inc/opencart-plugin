@@ -107,6 +107,17 @@
                   <div class="form-text">{{ help_company_search_in_address }}</div>
                 </div>
               </div>
+              <div class="row mb-3">
+                <label class="col-sm-2 col-form-label">{{ entry_address_lookup }}</label>
+                <div class="col-sm-10">
+                  <div class="form-check form-switch form-switch-lg">
+                    <input type="hidden" name="payment_two_address_lookup" value="0"/>
+                    <input type="checkbox" name="payment_two_address_lookup" value="1" id="input-address-lookup" class="form-check-input"{% if address_lookup and company_search_in_address %} checked{% endif %}{% if not company_search_in_address %} disabled{% endif %}/>
+                  </div>
+                  <div id="error-address-lookup" class="invalid-feedback"></div>
+                  <div class="form-text">{{ help_address_lookup }}</div>
+                </div>
+              </div>
               {% for field in optional_fields %}
                 <div class="row mb-3">
                   <label class="col-sm-2 col-form-label">{{ field.label|e }}</label>

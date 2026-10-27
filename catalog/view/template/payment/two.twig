@@ -1,25 +1,15 @@
 {# OpenCart 4.1 renders Twig with autoescape off: every value is escaped here. #}
 <form id="form-two" class="mb-3" data-two-tile="{{ in_tile ? 'search' : 'address' }}">
   {% if in_tile %}
-    <p>{{ text_company_intro|e }}</p>
+    {# The one company control in tile placement: the shared search mounts on this field. Its country is the billing address's. #}
     <div class="mb-3">
-      <label for="input-two-country" class="form-label">{{ entry_country|e }}</label>
-      <select name="two_country" id="input-two-country" class="form-select" required data-two-country>
-        {% for item in countries %}
-          <option value="{{ item.code|e }}"{% if item.code == country %} selected{% endif %}>{{ item.name|e }}</option>
-        {% endfor %}
-      </select>
+      <label for="input-two-company" class="form-label">{{ entry_company|e }}</label>
+      <input type="text" name="two_company_name" id="input-two-company" value="{{ company.company_name|default('')|e }}" class="form-control" autocomplete="organization" data-two-capture-host="tile" data-two-country="{{ country|e }}">
     </div>
-    <div class="mb-3">
-      <label for="input-two-company-name" class="form-label">{{ entry_company_name|e }}</label>
-      <input type="text" name="two_company_name" id="input-two-company-name" value="{{ company.company_name|default('')|e }}" class="form-control" autocomplete="organization" required data-two-company>
-    </div>
-    <div class="mb-3" data-two-organization>
-      <label for="input-two-organization-number" class="form-label">{{ entry_organization_number|e }}</label>
-      <input type="text" name="two_organization_number" id="input-two-organization-number" value="{{ company.organization_number|default('')|e }}" class="form-control" required>
-    </div>
+  {% elseif company %}
+    <p data-two-company-summary{% if saved_address %} data-two-saved-address{% endif %}>{{ text_company_from_address|format(company_label)|e }}</p>
   {% else %}
-    <p data-two-company-summary>{{ text_company_from_address|format(company_label)|e }}</p>
+    <p class="text-danger" data-two-company-summary{% if saved_address %} data-two-saved-address{% endif %}>{{ text_company_missing|e }}{% if edit_address %} <a href="{{ edit_address|e }}" data-two-edit-address>{{ text_company_edit_address|e }}</a>{% endif %}</p>
   {% endif %}
   {% for field in fields %}
     <div class="mb-3">

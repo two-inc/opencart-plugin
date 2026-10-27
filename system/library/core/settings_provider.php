@@ -34,6 +34,7 @@ final class SettingsProvider
         'debug_mode' => '0',
         'custom_headers' => '[]',
         'company_search_in_address' => '1',
+        'address_lookup' => '1',
         'enable_invoice_email' => '1',
         'enable_po_number' => '1',
         'enable_project' => '1',
@@ -148,6 +149,31 @@ final class SettingsProvider
     public function companySearchInAddressArea(): bool
     {
         return trim((string) ($this->store->get('company_search_in_address') ?? '1')) !== '0';
+    }
+
+    /**
+     * Whether the payment tile holds the company control: the placement
+     * switch alone decides, never what was captured (TWO-26721).
+     */
+    public function companyControlInTile(): bool
+    {
+        return !$this->companySearchInAddressArea();
+    }
+
+    /**
+     * "Autofill company address": whether a picked company's registered
+     * address is written into the buyer's address form. On by default, and
+     * off whenever the search is in the tile, which has no address to fill.
+     */
+    public function addressLookup(): bool
+    {
+        return $this->companySearchInAddressArea() && $this->addressLookupSwitch();
+    }
+
+    /** The merchant's own switch, as the admin page shows it. */
+    public function addressLookupSwitch(): bool
+    {
+        return trim((string) ($this->store->get('address_lookup') ?? '1')) !== '0';
     }
 
     /**

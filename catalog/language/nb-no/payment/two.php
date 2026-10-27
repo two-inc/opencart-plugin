@@ -6,13 +6,11 @@ $_['heading_title'] = 'Two';
 $_['text_title_default'] = 'Bedriftsfaktura';
 
 // Tile. %s is the brand's product name.
-$_['entry_company_name'] = 'Firmanavn';
-$_['entry_organization_number'] = 'Organisasjonsnummer';
-$_['entry_country'] = 'Firmaets land';
-$_['text_company_intro'] = 'Søk etter firmaet du handler for.';
+$_['entry_company'] = 'Firma';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Handler for %s.';
-$_['text_company_missing'] = 'For å betale med %s, søk etter firmanavnet ditt og velg firmaet ditt i resultatene for å bekrefte virksomheten.';
+$_['text_company_missing'] = 'For å betale med %s, søk etter firmaet ditt i firmafeltet i adressen din og velg det fra resultatene.';
+$_['text_company_missing_saved'] = 'For å betale med %s, legg til firmaet ditt i adressen du bruker.';
 $_['button_confirm'] = 'Bekreft ordre';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.
@@ -29,27 +27,28 @@ $_['text_intent_declined'] = 'Fakturaen din hos %s kan ikke godkjennes nå. Velg
 
 // Company search and sole trader, read by the checkout script. %1$s is the
 // brand's product name, %2$d the shortest search term.
-$_['js_search_label'] = 'Søk etter et firma';
-$_['js_search_hint'] = 'Skriv inn %2$d eller flere tegn';
-$_['js_searching'] = 'Søker ...';
+$_['js_search_too_short'] = 'Skriv inn %2$d eller flere tegn';
 $_['js_no_matches'] = 'Ingen treff funnet';
 $_['js_search_unavailable'] = 'Firmasøket er midlertidig utilgjengelig. Prøv igjen.';
 $_['js_select_country'] = 'Velg land ovenfor for å søke opp firmaet ditt.';
-$_['js_country_not_covered'] = 'Firmasøket dekker ikke dette landet. Legg inn firmaet ditt manuelt.';
-$_['js_manual_entry'] = 'Angi manuelt';
 $_['js_back_to_search'] = 'Søk etter selskap';
-$_['js_sole_trader_entry'] = 'Jeg har enkeltpersonforetak';
-$_['js_sole_trader_error'] = 'Registreringen for enkeltpersonforetak kunne ikke startes. Prøv igjen.';
-$_['js_sole_trader_popup_blocked'] = 'Nettleseren din blokkerte vinduet for registrering av enkeltpersonforetak. Tillat popup-vinduer for dette nettstedet og prøv igjen.';
-$_['js_change_company'] = 'Søk etter et annet firma';
-$_['js_organization_number'] = 'Organisasjonsnummer';
+$_['js_chip_registered'] = 'Registrert firma';
+$_['js_chip_sole_trader'] = 'Enkeltpersonforetak';
+$_['js_chip_manual'] = 'Skriv inn manuelt';
+$_['js_search_aria'] = 'Søk etter firma';
+$_['js_results_one'] = '1 resultat er tilgjengelig, bruk pil opp og pil ned for å navigere.';
+$_['js_results_many'] = '%d resultater er tilgjengelige, bruk pil opp og pil ned for å navigere.';
+$_['js_company_number'] = 'Organisasjonsnummer';
+$_['js_select_different_sole_trader'] = 'Velg et annet enkeltpersonforetak';
+$_['js_sole_trader_prompt'] = 'Klikk her for å logge inn eller registrere deg som enkeltpersonforetak.';
+$_['js_address_unavailable'] = 'Vi kunne ikke hente adressen til dette firmaet. Skriv den inn nedenfor.';
+$_['text_company_edit_address'] = 'Rediger adresse';
+$_['js_sole_trader_error'] = 'Noe gikk galt under oppsettet av betaling som enkeltpersonforetak. Prøv igjen.';
 $_['js_checking'] = 'Sjekker om %1$s-betaling er tilgjengelig ...';
-$_['js_selected'] = 'Valgt';
 $_['js_settle_timeout'] = 'Vi lagrer fortsatt firmaopplysningene dine. Prøv igjen om et øyeblikk.';
 $_['js_confirm_failed'] = 'Vi fikk ikke svar om ordren din. Den kan fortsatt være under behandling: vent litt og sjekk ordrehistorikken før du prøver igjen.';
 $_['error_order_in_progress'] = 'Ordren din blir fortsatt lagt inn. Vent litt og sjekk ordrehistorikken før du prøver igjen.';
 $_['js_totals_failed'] = 'Betalingsvilkåret ditt er lagret, men ordretotalen kunne ikke oppdateres. Last inn siden på nytt før du bekrefter.';
-$_['js_number_missing'] = 'Skriv inn organisasjonsnummeret ditt for å fortsette.';
 $_['error_too_many'] = 'For mange forespørsler. Vent litt og prøv igjen.';
 $_['error_forbidden'] = 'Utsjekkingsøkten din er endret. Last inn siden på nytt og prøv igjen.';
 

@@ -94,6 +94,8 @@ $_['error_invoice'] = 'Fakturan kunde inte hämtas. Försök igen senare.';
 // Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
 $_['entry_company_search_in_address'] = 'Aktivera företagssökning i adressregistrering';
 $_['help_company_search_in_address'] = 'Om aktiverad kan köparen söka efter sitt företag inom adressregistreringsdelen av kassan. Annars kommer företagssökningen att visas inom betalningsmetoden.';
+$_['entry_address_lookup'] = 'Fyll i företagsadress automatiskt';
+$_['help_address_lookup'] = 'Fyller automatiskt i den registrerade adressen från det nationella registret.';
 $_['entry_enable_invoice_email'] = 'Visa fältet E-postadress för faktura';
 $_['help_enable_invoice_email'] = 'Om du väljer Ja ser kunderna ett fält för fakturamejladress i %s-avsnittet i kassan. Det ligger tillsammans med betalningsmetoden i stället för adressen, så att köparen uppmanas att överväga en särskild faktureringsadress även när faktura- och leveransadressen är samma.';
 $_['entry_enable_po_number'] = 'Visa fältet PO-nummer';

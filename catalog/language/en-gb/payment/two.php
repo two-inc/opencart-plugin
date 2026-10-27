@@ -6,13 +6,11 @@ $_['heading_title'] = 'Two';
 $_['text_title_default'] = 'Business invoice';
 
 // Tile. %s is the brand's product name.
-$_['entry_company_name'] = 'Company name';
-$_['entry_organization_number'] = 'Organisation number';
-$_['entry_country'] = 'Company country';
-$_['text_company_intro'] = 'Search for the company you are buying for.';
+$_['entry_company'] = 'Company';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Buying for %s.';
-$_['text_company_missing'] = 'To pay with %s, search for your company name and select your company from the results to verify your business.';
+$_['text_company_missing'] = 'To pay with %s, search for your company in the company field of your address and select it from the results.';
+$_['text_company_missing_saved'] = 'To pay with %s, add your company to the address you are using.';
 $_['button_confirm'] = 'Confirm order';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.
@@ -29,27 +27,28 @@ $_['text_intent_declined'] = 'Your invoice with %s cannot be approved at this ti
 
 // Company search and sole trader, read by the checkout script. %1$s is the
 // brand's product name, %2$d the shortest search term.
-$_['js_search_label'] = 'Search for a company';
-$_['js_search_hint'] = 'Enter %2$d or more characters';
-$_['js_searching'] = 'Searching...';
+$_['js_search_too_short'] = 'Enter %2$d or more characters';
 $_['js_no_matches'] = 'No matches found';
 $_['js_search_unavailable'] = 'Company search is temporarily unavailable. Please try again.';
 $_['js_select_country'] = 'Select your country above to search for your company.';
-$_['js_country_not_covered'] = 'Company search does not cover this country. Enter your company manually.';
-$_['js_manual_entry'] = 'Enter manually';
 $_['js_back_to_search'] = 'Search for company';
-$_['js_sole_trader_entry'] = 'I\'m a sole trader';
-$_['js_sole_trader_error'] = 'The sole trader sign-up could not be started. Please try again.';
-$_['js_sole_trader_popup_blocked'] = 'Your browser blocked the sole trader sign-up window. Allow pop-ups for this site and try again.';
-$_['js_change_company'] = 'Search for a different company';
-$_['js_organization_number'] = 'Organisation number';
+$_['js_chip_registered'] = 'Registered company';
+$_['js_chip_sole_trader'] = 'Sole trader';
+$_['js_chip_manual'] = 'Enter manually';
+$_['js_search_aria'] = 'Search for company';
+$_['js_results_one'] = '1 result is available, use up and down arrow keys to navigate.';
+$_['js_results_many'] = '%d results are available, use up and down arrow keys to navigate.';
+$_['js_company_number'] = 'Company Number';
+$_['js_select_different_sole_trader'] = 'Select a different sole trader';
+$_['js_sole_trader_prompt'] = 'Click here to login or sign up as a sole trader.';
+$_['js_address_unavailable'] = 'We could not fetch this company\'s address. Please enter it below.';
+$_['text_company_edit_address'] = 'Edit address';
+$_['js_sole_trader_error'] = 'Something went wrong setting up sole trader checkout. Please try again.';
 $_['js_checking'] = 'Checking %1$s payment eligibility...';
-$_['js_selected'] = 'Selected';
 $_['js_settle_timeout'] = 'We are still saving your company details. Please try again in a moment.';
 $_['js_confirm_failed'] = 'We could not hear back about your order. It may still be processing: please wait a moment and check your order history before trying again.';
 $_['error_order_in_progress'] = 'Your order is still being placed. Please wait a moment and check your order history before trying again.';
 $_['js_totals_failed'] = 'Your payment term is saved, but the order total could not be updated. Please reload the page before you confirm.';
-$_['js_number_missing'] = 'Enter your organisation number to continue.';
 $_['error_too_many'] = 'Too many requests. Please wait and try again.';
 $_['error_forbidden'] = 'Your checkout session has changed. Please reload the page and try again.';
 

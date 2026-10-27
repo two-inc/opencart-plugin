@@ -16,7 +16,7 @@ test("a whole checkout against Two's sandbox", async ({ page }) => {
   test.skip(!SANDBOX_API_KEY, "no sandbox API key: the sandbox leg runs with TWO_SANDBOX_API_KEY only");
 
   await addToCart(page, 1);
-  const company = await guestDetails(page, SEARCH);
+  const company = await guestDetails(page, SEARCH, false);
   await chooseTwo(page, company);
   await page.click("#button-two-confirm");
   await page.waitForURL((url) => url.hostname.endsWith("two.inc"), { timeout: 60_000 });

@@ -3,6 +3,9 @@
  * or changes the environment, the admin asks Two about the pair (the typed
  * key, or the saved one when the field is empty) and shows the verdict under
  * the key field. Nothing is saved or cached by the check; the save re-checks.
+ *
+ * Also: "Autofill company address" is unavailable, and off, while the company
+ * search sits in the payment tile, as on the reference plugin (TWO-26721).
  */
 (function () {
     'use strict';
@@ -62,9 +65,32 @@
         });
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
+    function initAutofill() {
+        var placement = document.getElementById('input-company-search-in-address');
+        var autofill = document.getElementById('input-address-lookup');
+        if (!placement || !autofill) {
+            return;
+        }
+        var wanted = autofill.checked || autofill.disabled;
+        autofill.addEventListener('change', function () {
+            wanted = autofill.checked;
+        });
+        function sync() {
+            autofill.disabled = !placement.checked;
+            autofill.checked = placement.checked && wanted;
+        }
+        placement.addEventListener('change', sync);
+        sync();
+    }
+
+    function boot() {
         init();
+        initAutofill();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot);
+    } else {
+        boot();
     }
 })();
