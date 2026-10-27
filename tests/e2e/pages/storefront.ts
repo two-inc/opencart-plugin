@@ -13,8 +13,8 @@ export async function addToCart(page: Page, quantity: number): Promise<void> {
   await expect(page.locator("#alert")).toContainText("Success");
 }
 
-/** Fills the guest form, finding the company with Two's search. */
-export async function guestDetails(page: Page, search: string): Promise<string> {
+/** Fills the guest form, finding the company with Two's shared company search. */
+export async function guestDetails(page: Page, search: string, stubbed = true): Promise<string> {
   await page.goto("/index.php?route=checkout/checkout");
   await page.check("#input-guest");
   await page.fill("#input-firstname", "Ada");
@@ -24,12 +24,23 @@ export async function guestDetails(page: Page, search: string): Promise<string> 
   await expect(page.locator("#input-shipping-zone option").nth(1)).toBeAttached();
   await page.selectOption("#input-shipping-zone", { index: 1 });
   // The company is searched in the country chosen, so it comes after the country.
-  await page.locator("#input-shipping-company").pressSequentially(search, { delay: 40 });
-  const result = page.locator(".two-company-results [role=option]").first();
+  // The field opens the shared popover; the buyer types into its own query input.
+  const field = page.locator("#input-shipping-company");
+  await field.click();
+  const panel = page.locator(".two-company-field-wrap:has(#input-shipping-company) .two-company-dropdown");
+  await expect(panel).toBeVisible();
+  await expect(panel.locator(".two-company-mode-chip:not(.two-hidden)").first()).toHaveText("Registered company");
+  await panel.locator(".two-company-dropdown__query").pressSequentially(search, { delay: 40 });
+  const result = panel.locator(".two-company-dropdown__row").first();
   await expect(result).toBeVisible();
-  const company = (await result.locator("span").first().innerText()).trim();
   await result.click();
-  await expect(page.locator(".two-company-status").first()).toContainText(company);
+  await expect(panel).toBeHidden();
+  const company = (await field.inputValue()).trim();
+  expect(company, "the pick fills the company field").not.toBe("");
+  if (stubbed) {
+    await expect(page.locator(".two-company-id-text"), "the number shows under the field, as text").toHaveText("12345678");
+    await expect(page.locator("#input-shipping-address-1"), "the registered address is filled in").toHaveValue("1 Registry Road");
+  }
   await page.fill("#input-shipping-address-1", "1 Test Street");
   await page.fill("#input-shipping-city", "London");
   await page.fill("#input-shipping-postcode", "EC1A 1BB");

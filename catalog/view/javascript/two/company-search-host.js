@@ -286,7 +286,8 @@
 
     function preferredAddress(addresses) {
         const list = Array.isArray(addresses) ? addresses : [];
-        const typed = list.find((each) => PREFERRED_ADDRESS_TYPES.indexOf(String(each.type || '').toUpperCase()) !== -1);
+        // The registry's types read BUSINESS_ADDRESS, REGISTERED_ADDRESS and so on.
+        const typed = list.find((each) => PREFERRED_ADDRESS_TYPES.some((type) => String(each.type || '').toUpperCase().indexOf(type) === 0));
         return typed || list[0] || null;
     }
 

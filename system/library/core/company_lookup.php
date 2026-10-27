@@ -100,7 +100,7 @@ final class CompanyLookup
         $addresses = [];
         foreach (is_array($body['addresses'] ?? null) ? $body['addresses'] : [] as $address) {
             if (is_array($address)) {
-                $addresses[] = array_map('strval', array_filter(array_intersect_key($address, array_flip(['street_address', 'postal_code', 'city', 'region', 'country'])), 'is_scalar'));
+                $addresses[] = array_map('strval', array_filter(array_intersect_key($address, array_flip(['type', 'street_address', 'street', 'building', 'apartment', 'postal_code', 'city', 'region', 'country'])), 'is_scalar'));
             }
         }
 
