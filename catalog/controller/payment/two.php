@@ -858,7 +858,7 @@ class Two extends \Opencart\System\Engine\Controller
         $this->session->data[self::SESSION_KEY] = $state;
     }
 
-    /** @param array<string, mixed> $json */
+    /** @param array<string, mixed>|list<string> $json an object, or the bare list the shared company search reads for company types */
     private function json(array $json): void
     {
         $this->response->addHeader('Content-Type: application/json');
