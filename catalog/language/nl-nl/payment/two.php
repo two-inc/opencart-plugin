@@ -7,12 +7,9 @@ $_['text_title_default'] = 'Zakelijke factuur';
 
 // Tile. %s is the brand's product name.
 $_['entry_company_name'] = 'Bedrijfsnaam';
-$_['entry_organization_number'] = 'Organisatienummer';
-$_['entry_country'] = 'Land van het bedrijf';
-$_['text_company_intro'] = 'Zoek het bedrijf waarvoor je koopt.';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Je koopt voor %s.';
-$_['text_company_missing'] = 'Om met %s te betalen, zoek je je bedrijfsnaam en kies je je bedrijf uit de resultaten om je bedrijf te verifiëren.';
+$_['text_company_missing'] = 'Om met %s te betalen, zoek je bedrijf in het bedrijfsveld van je adres en kies het uit de resultaten.';
 $_['button_confirm'] = 'Bestelling bevestigen';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.
@@ -29,27 +26,28 @@ $_['text_intent_declined'] = 'Je factuur bij %s kan op dit moment niet worden go
 
 // Company search and sole trader, read by the checkout script. %1$s is the
 // brand's product name, %2$d the shortest search term.
-$_['js_search_label'] = 'Zoek naar een bedrijf';
-$_['js_search_hint'] = 'Voer %2$d of meer tekens in';
-$_['js_searching'] = 'Zoeken...';
+$_['js_search_too_short'] = 'Voer %2$d of meer tekens in';
 $_['js_no_matches'] = 'Geen overeenkomsten gevonden';
 $_['js_search_unavailable'] = 'Zoeken naar bedrijven is tijdelijk niet beschikbaar. Probeer het opnieuw.';
 $_['js_select_country'] = 'Selecteer hierboven je land om je bedrijf te zoeken.';
-$_['js_country_not_covered'] = 'Zoeken naar bedrijven is niet beschikbaar voor dit land. Vul je bedrijf handmatig in.';
-$_['js_manual_entry'] = 'Handmatig invoeren';
 $_['js_back_to_search'] = 'Zoek naar bedrijf';
-$_['js_sole_trader_entry'] = 'Ik heb een eenmanszaak';
-$_['js_sole_trader_error'] = 'De aanmelding voor eenmanszaken kon niet worden gestart. Probeer het opnieuw.';
-$_['js_sole_trader_popup_blocked'] = 'Je browser heeft het aanmeldvenster voor eenmanszaken geblokkeerd. Sta pop-ups toe voor deze site en probeer het opnieuw.';
-$_['js_change_company'] = 'Zoek naar een ander bedrijf';
-$_['js_organization_number'] = 'Organisatienummer';
+$_['js_chip_registered'] = 'Geregistreerd bedrijf';
+$_['js_chip_sole_trader'] = 'Eenmanszaak';
+$_['js_chip_manual'] = 'Handmatig invoeren';
+$_['js_search_aria'] = 'Zoek naar bedrijf';
+$_['js_results_one'] = '1 resultaat beschikbaar, gebruik de pijltjestoetsen omhoog en omlaag om te navigeren.';
+$_['js_results_many'] = '%d resultaten beschikbaar, gebruik de pijltjestoetsen omhoog en omlaag om te navigeren.';
+$_['js_company_number'] = 'Bedrijfsnummer';
+$_['js_select_different_sole_trader'] = 'Kies een andere eenmanszaak';
+$_['js_sole_trader_prompt'] = 'Klik hier om in te loggen of je aan te melden als eenmanszaak.';
+$_['js_address_unavailable'] = 'We konden het adres van dit bedrijf niet ophalen. Vul het hieronder in.';
+$_['text_company_edit_address'] = 'Adres bewerken';
+$_['js_sole_trader_error'] = 'Er is iets misgegaan bij het instellen van afrekenen als eenmanszaak. Probeer het opnieuw.';
 $_['js_checking'] = 'Geschiktheid voor %1$s-betaling controleren...';
-$_['js_selected'] = 'Geselecteerd';
 $_['js_settle_timeout'] = 'We zijn je bedrijfsgegevens nog aan het opslaan. Probeer het zo opnieuw.';
 $_['js_confirm_failed'] = 'We hebben niets teruggehoord over je bestelling. Die wordt mogelijk nog verwerkt: wacht even en controleer je bestelgeschiedenis voordat je het opnieuw probeert.';
 $_['error_order_in_progress'] = 'Je bestelling wordt nog geplaatst. Wacht even en controleer je bestelgeschiedenis voordat je het opnieuw probeert.';
 $_['js_totals_failed'] = 'Je betaaltermijn is opgeslagen, maar het totaalbedrag kon niet worden bijgewerkt. Laad de pagina opnieuw voordat je bevestigt.';
-$_['js_number_missing'] = 'Vul je organisatienummer in om verder te gaan.';
 $_['error_too_many'] = 'Te veel verzoeken. Wacht even en probeer het opnieuw.';
 $_['error_forbidden'] = 'Je afrekensessie is gewijzigd. Laad de pagina opnieuw en probeer het nog eens.';
 

@@ -94,6 +94,8 @@ $_['error_invoice'] = 'No se ha podido obtener la factura. Inténtalo de nuevo m
 // Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
 $_['entry_company_search_in_address'] = 'Activar la búsqueda de empresa en la introducción de la dirección';
 $_['help_company_search_in_address'] = 'Cuando está activado, el comprador puede buscar su empresa dentro de la sección de introducción de la dirección del proceso de pago. De lo contrario, la búsqueda de empresa se mostrará dentro del método de pago.';
+$_['entry_address_lookup'] = 'Autocompletar la dirección de la empresa';
+$_['help_address_lookup'] = 'Rellena automáticamente la dirección registrada a partir del registro nacional.';
 $_['entry_enable_invoice_email'] = 'Mostrar el campo de correo electrónico para la factura';
 $_['help_enable_invoice_email'] = 'Si eliges Sí, los clientes verán un campo de correo electrónico de facturación en la sección de pago de %s del proceso de pago. Se sitúa junto al método de pago y no junto a la dirección, de modo que se invita al comprador a considerar una dirección de facturación específica incluso cuando sus direcciones de facturación y envío coinciden.';
 $_['entry_enable_po_number'] = 'Mostrar el campo de número de pedido de compra';

@@ -7,12 +7,9 @@ $_['text_title_default'] = 'Factura para empresas';
 
 // Tile. %s is the brand's product name.
 $_['entry_company_name'] = 'Nombre de la empresa';
-$_['entry_organization_number'] = 'Número de organización';
-$_['entry_country'] = 'País de la empresa';
-$_['text_company_intro'] = 'Busca la empresa para la que compras.';
 // %s here is the company as the buyer reads it.
 $_['text_company_from_address'] = 'Compras para %s.';
-$_['text_company_missing'] = 'Para pagar con %s, busca el nombre de tu empresa y selecciónala en los resultados para verificar tu negocio.';
+$_['text_company_missing'] = 'Para pagar con %s, busca tu empresa en el campo de empresa de tu dirección y selecciónala en los resultados.';
 $_['button_confirm'] = 'Confirmar pedido';
 
 // Optional fields (Build Guide section 6.1), in the order the tile shows them.
@@ -29,27 +26,28 @@ $_['text_intent_declined'] = 'Tu factura con %s no puede ser aprobada en este mo
 
 // Company search and sole trader, read by the checkout script. %1$s is the
 // brand's product name, %2$d the shortest search term.
-$_['js_search_label'] = 'Buscar una empresa';
-$_['js_search_hint'] = 'Introduce %2$d o más caracteres';
-$_['js_searching'] = 'Buscando...';
+$_['js_search_too_short'] = 'Introduce %2$d o más caracteres';
 $_['js_no_matches'] = 'No se han encontrado coincidencias';
 $_['js_search_unavailable'] = 'La búsqueda de empresas no está disponible temporalmente. Por favor, inténtalo de nuevo.';
 $_['js_select_country'] = 'Selecciona tu país arriba para buscar tu empresa.';
-$_['js_country_not_covered'] = 'La búsqueda de empresas no cubre este país. Introduce tu empresa manualmente.';
-$_['js_manual_entry'] = 'Introducir manualmente';
 $_['js_back_to_search'] = 'Buscar empresa';
-$_['js_sole_trader_entry'] = 'Soy autónomo';
-$_['js_sole_trader_error'] = 'No se ha podido iniciar el registro de autónomos. Inténtalo de nuevo.';
-$_['js_sole_trader_popup_blocked'] = 'Tu navegador ha bloqueado la ventana de registro de autónomos. Permite las ventanas emergentes en este sitio e inténtalo de nuevo.';
-$_['js_change_company'] = 'Buscar otra empresa';
-$_['js_organization_number'] = 'Número de organización';
+$_['js_chip_registered'] = 'Empresa registrada';
+$_['js_chip_sole_trader'] = 'Autónomo';
+$_['js_chip_manual'] = 'Introducir manualmente';
+$_['js_search_aria'] = 'Buscar empresa';
+$_['js_results_one'] = 'Hay 1 resultado disponible, usa las flechas arriba y abajo para navegar.';
+$_['js_results_many'] = 'Hay %d resultados disponibles, usa las flechas arriba y abajo para navegar.';
+$_['js_company_number'] = 'Número de empresa';
+$_['js_select_different_sole_trader'] = 'Seleccionar otro autónomo';
+$_['js_sole_trader_prompt'] = 'Haz clic aquí para iniciar sesión o registrarte como autónomo.';
+$_['js_address_unavailable'] = 'No pudimos obtener la dirección de esta empresa. Introdúcela a continuación.';
+$_['text_company_edit_address'] = 'Editar dirección';
+$_['js_sole_trader_error'] = 'Algo salió mal al configurar el pago como autónomo. Inténtalo de nuevo.';
 $_['js_checking'] = 'Comprobando la elegibilidad para el pago con %1$s...';
-$_['js_selected'] = 'Seleccionado';
 $_['js_settle_timeout'] = 'Todavía estamos guardando los datos de tu empresa. Inténtalo de nuevo en un momento.';
 $_['js_confirm_failed'] = 'No hemos recibido respuesta sobre tu pedido. Puede que todavía se esté procesando: espera un momento y revisa tu historial de pedidos antes de volver a intentarlo.';
 $_['error_order_in_progress'] = 'Tu pedido todavía se está realizando. Espera un momento y revisa tu historial de pedidos antes de volver a intentarlo.';
 $_['js_totals_failed'] = 'Tu plazo de pago se ha guardado, pero no se ha podido actualizar el total del pedido. Vuelve a cargar la página antes de confirmar.';
-$_['js_number_missing'] = 'Introduce tu número de organización para continuar.';
 $_['error_too_many'] = 'Demasiadas solicitudes. Espera un momento y vuelve a intentarlo.';
 $_['error_forbidden'] = 'Tu sesión de pago ha cambiado. Vuelve a cargar la página e inténtalo de nuevo.';
 

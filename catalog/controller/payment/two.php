@@ -73,21 +73,11 @@ class Two extends \Opencart\System\Engine\Controller
     {
         $this->load->language(self::ROUTE);
         $services = $this->services();
-        $inAddress = $services->settings->companySearchInAddressArea();
-        $captured = $this->companyFor($this->buyerRole(!$inAddress));
-        // A buyer on a saved address has no company field to search in (OpenCart
-        // shows it only for a new address), so the tile searches when the
-        // address forms captured nothing, keeping what the tile captured.
-        $inTile = !$inAddress || $captured === null;
-        $company = $inTile ? $this->companyFor('tile') : $captured;
+        // Only the placement setting decides whether the tile holds the company
+        // control: never what the address forms captured (TWO-26721).
+        $inTile = !$services->settings->companySearchInAddressArea();
+        $company = $this->companyFor($this->buyerRole($inTile));
         $this->load->model(self::ROUTE);
-        $this->load->model('localisation/country');
-        $countries = [];
-        foreach ($this->model_localisation_country->getCountries() as $country) {
-            if ((string) $country['iso_code_2'] !== '') {
-                $countries[] = ['code' => (string) $country['iso_code_2'], 'name' => (string) $country['name']];
-            }
-        }
         $fields = [];
         foreach ($services->settings->optionalFields() as $field) {
             $fields[] = ['name' => $field, 'label' => $this->language->get('entry_' . $field), 'type' => $field === 'invoice_email' ? 'email' : 'text'];
@@ -111,16 +101,15 @@ class Two extends \Opencart\System\Engine\Controller
             'text_pay_in' => $selected === null ? '' : sprintf($this->language->get($eom ? 'text_pay_in_eom' : 'text_pay_in'), $selected),
             'language' => $this->config->get('config_language'),
             'in_tile' => $inTile,
-            'countries' => $countries,
-            'country' => $company['country_code'] ?? $this->model_extension_two_payment_two->buyerCountry() ?? '',
+            'country' => $this->model_extension_two_payment_two->buyerCountry() ?? '',
             'company' => $company,
             'company_label' => $company === null ? '' : CompanyLookup::displayLabel($company['company_name'], $company['organization_number']),
             'fields' => $fields,
-            'text_company_intro' => sprintf($this->language->get($inAddress ? 'text_company_missing' : 'text_company_intro'), $brand),
+            'text_company_missing' => sprintf($this->language->get('text_company_missing'), $brand),
+            'edit_address' => $this->editAddressLink(),
+            'text_company_edit_address' => $this->language->get('text_company_edit_address'),
             'text_company_from_address' => $this->language->get('text_company_from_address'),
             'entry_company_name' => $this->language->get('entry_company_name'),
-            'entry_organization_number' => $this->language->get('entry_organization_number'),
-            'entry_country' => $this->language->get('entry_country'),
             'text_optional' => $this->language->get('text_optional'),
             'button_confirm' => $this->language->get('button_confirm'),
         ]);
@@ -342,7 +331,8 @@ class Two extends \Opencart\System\Engine\Controller
                 $this->remember('countries', $cached);
             }
         }
-        $this->json(['countries' => $cached['list'] ?? null]);
+        $list = $cached['list'] ?? null;
+        $this->json(['ok' => $list !== null, 'status' => $list !== null ? 200 : 502, 'body' => ['supported_countries' => $list ?? []]]);
     }
 
     /** Whether a buyer in a country may enrol as a sole trader; one country kept in the session. */
@@ -353,27 +343,33 @@ class Two extends \Opencart\System\Engine\Controller
         }
         $country = strtoupper(trim((string) ($this->request->get['country'] ?? '')));
         $cached = $this->state()['sole_trader'] ?? null;
-        if (is_array($cached) && ($cached['country'] ?? '') === $country && ($cached['at'] ?? 0) >= time() - self::CACHE_SECONDS) {
-            $this->json(['available' => (bool) $cached['available']]);
+        if (is_array($cached) && ($cached['country'] ?? '') === $country && is_array($cached['types'] ?? null) && ($cached['at'] ?? 0) >= time() - self::CACHE_SECONDS) {
+            $this->json($cached['types']);
 
             return;
         }
-        $available = $this->services()->companies->soleTraderAvailable($country);
-        if ($available !== null) {
-            // One slot, so a caller cannot grow the session one country at a time.
-            $this->remember('sole_trader', ['country' => $country, 'available' => $available, 'at' => time()]);
+        $types = $this->services()->companies->supportedCompanyTypes($country);
+        if ($types === null) {
+            $this->response->addHeader(($this->request->server['SERVER_PROTOCOL'] ?? 'HTTP/1.1') . ' 502 Bad Gateway');
+            $this->json(['error' => 'unavailable']);
+
+            return;
         }
-        $this->json(['available' => $available]);
+        // One slot, so a caller cannot grow the session one country at a time.
+        $this->remember('sole_trader', ['country' => $country, 'types' => $types, 'at' => time()]);
+        $this->json($types);
     }
 
     /** Mints the hosted sole-trader signup's tokens for this buyer's enrolment attempt. */
     public function soleTraderTokens(): void
     {
         $this->load->language(self::ROUTE);
-        if (!$this->guarded(true, 'soleTraderTokens')) {
+        // The shared sole-trader module posts a JSON body of its own, so the
+        // token and country ride on the query string.
+        if (!$this->guarded(true, 'soleTraderTokens', true)) {
             return;
         }
-        $country = strtoupper(trim((string) ($this->request->post['country'] ?? '')));
+        $country = strtoupper(trim((string) ($this->request->get['country'] ?? '')));
         if (preg_match('~^[A-Z]{2}\z~', $country) !== 1) {
             $this->json(['error' => $this->language->get('error_sole_trader')]);
 
@@ -448,13 +444,21 @@ class Two extends \Opencart\System\Engine\Controller
         foreach (['pay_in', 'pay_in_eom'] as $key) {
             $copy[$key] = $this->language->get('text_' . $key);
         }
-        foreach (['search_label', 'search_hint', 'searching', 'no_matches', 'search_unavailable', 'select_country', 'country_not_covered', 'manual_entry', 'back_to_search', 'sole_trader_entry', 'sole_trader_error', 'sole_trader_popup_blocked', 'change_company', 'organization_number', 'checking', 'selected', 'number_missing', 'settle_timeout', 'confirm_failed', 'totals_failed'] as $key) {
+        foreach (['chip_registered', 'chip_sole_trader', 'chip_manual', 'search_aria', 'search_too_short', 'no_matches', 'search_unavailable', 'select_country', 'back_to_search', 'company_number', 'select_different_sole_trader', 'sole_trader_prompt', 'sole_trader_error', 'address_unavailable', 'checking', 'settle_timeout', 'confirm_failed', 'totals_failed'] as $key) {
             $copy[$key] = sprintf($this->language->get('js_' . $key), $brand, CompanyLookup::MIN_TERM_LENGTH);
         }
+        // The panel fills in the count itself, so these two are not formatted here.
+        foreach (['results_one', 'results_many'] as $key) {
+            $copy[$key] = $this->language->get('js_' . $key);
+        }
+        $companies = $services->companies;
 
         return [
             'token' => $this->csrfToken(),
             'in_address' => $services->settings->companySearchInAddressArea(),
+            'address_lookup' => $services->settings->addressLookup(),
+            'checkout_api_url' => $companies->apiBaseUrl(),
+            'checkout_page_url' => $companies->checkoutPageUrl(),
             'urls' => ['search' => $link('search'), 'countries' => $link('countries'), 'sole_trader' => $link('soleTrader'), 'sole_trader_tokens' => $link('soleTraderTokens'), 'save_company' => $link('saveCompany'), 'intent' => $link('intent'), 'company_details' => $link('companyDetails'), 'confirm' => $link('confirm'), 'term' => $link('term'), 'fees' => $link('fees'), 'totals' => str_replace('&amp;', '&', $this->url->link('checkout/confirm.confirm', 'language=' . $this->config->get('config_language')))],
             'countries' => $isoById,
             'companies' => $this->state()['companies'] ?? (object) [],
@@ -708,8 +712,14 @@ class Two extends \Opencart\System\Engine\Controller
         if ($captured !== null) {
             $company = $captured;
         } else {
-            $post = fn (string $key): string => trim(html_entity_decode((string) ($this->request->post[$key] ?? ''), ENT_QUOTES, 'UTF-8'));
-            $company = ['company_name' => $post('two_company_name'), 'organization_number' => $post('two_organization_number'), 'country_code' => strtoupper($post('two_country'))];
+            // The tile's control saves its capture as the session's `tile` role.
+            // A name with no capture behind it has no company id, so placement
+            // refuses it, as the sibling plugins do.
+            $company = $this->companyFor('tile') ?? [
+                'company_name' => trim(html_entity_decode((string) ($this->request->post['two_company_name'] ?? ''), ENT_QUOTES, 'UTF-8')),
+                'organization_number' => '',
+                'country_code' => '',
+            ];
         }
         $country = $company['country_code'];
 
@@ -718,6 +728,21 @@ class Two extends \Opencart\System\Engine\Controller
             'organization_number' => $company['organization_number'],
             'country_code' => preg_match('~^[A-Z]{2}\z~', $country) === 1 ? $country : '',
         ];
+    }
+
+    /**
+     * OpenCart's own edit form for the saved address the checkout is using,
+     * where its company field is; '' for a new address or a guest.
+     */
+    private function editAddressLink(): string
+    {
+        $role = $this->buyerRole(false);
+        $addressId = (int) ($this->session->data[$role . '_address']['address_id'] ?? 0);
+        if ($addressId <= 0 || !$this->customer->isLogged()) {
+            return '';
+        }
+
+        return $this->url->link('account/address.form', 'language=' . $this->config->get('config_language') . '&address_id=' . $addressId);
     }
 
     /** @return array{company_name: string, organization_number: string, country_code: string, source: string}|null */
@@ -794,11 +819,11 @@ class Two extends \Opencart\System\Engine\Controller
      * a POST) and is within the caller's rate limit for the action
      * (RateLimiter); answers the refusal itself, a 429 for the limit.
      */
-    private function guarded(bool $write, string $action): bool
+    private function guarded(bool $write, string $action, bool $queryToken = false): bool
     {
         // The refusals are shown to the buyer, so they come from the language file.
         $this->load->language(self::ROUTE);
-        $sent = (string) (($write ? $this->request->post : $this->request->get)['two_token'] ?? '');
+        $sent = (string) (($write && !$queryToken ? $this->request->post : $this->request->get)['two_token'] ?? '');
         $token = $this->state()['token'] ?? '';
         if (($write && ($this->request->server['REQUEST_METHOD'] ?? '') !== 'POST') || !is_string($token) || $token === '' || !hash_equals($token, $sent)) {
             $this->json(['error' => htmlspecialchars($this->language->get('error_forbidden'), ENT_QUOTES, 'UTF-8'), 'code' => 'forbidden']);

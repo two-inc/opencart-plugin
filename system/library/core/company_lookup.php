@@ -25,7 +25,7 @@ final class CompanyLookup
     public const SEARCH_LIMIT = 50;
     public const MIN_TERM_LENGTH = 3;
     public const MAX_TERM_LENGTH = 100;
-    public const TIMEOUT_SECONDS = 10;
+    public const TIMEOUT_SECONDS = 30;
     public const SOLE_TRADER = 'SOLE_TRADER';
     public const TOKEN_HEADER = 'two-delegated-authority-token';
     public const SIGNUP_PATH = '/soletrader/signup';
@@ -135,9 +135,22 @@ final class CompanyLookup
     /** Whether a buyer in this country may enrol as a sole trader; null when the registry did not answer. */
     public function soleTraderAvailable(string $country): ?bool
     {
+        $types = $this->supportedCompanyTypes($country);
+
+        return $types === null ? null : in_array(self::SOLE_TRADER, $types, true);
+    }
+
+    /**
+     * The registry's company types for a country, upper cased; [] for a
+     * malformed country, null when the registry did not answer.
+     *
+     * @return list<string>|null
+     */
+    public function supportedCompanyTypes(string $country): ?array
+    {
         $country = strtoupper(trim($country));
         if (preg_match('~^[A-Z]{2}\z~', $country) !== 1) {
-            return false;
+            return [];
         }
         $response = $this->client->request('GET', '/registry/v1/supported-company-types/' . $country, null, self::TIMEOUT_SECONDS);
         $body = $response->json();
@@ -146,7 +159,7 @@ final class CompanyLookup
             return null;
         }
 
-        return in_array(self::SOLE_TRADER, array_map(static fn (mixed $type): string => is_string($type) ? strtoupper($type) : '', $types), true);
+        return array_values(array_filter(array_map(static fn (mixed $type): string => is_string($type) ? strtoupper(trim($type)) : '', $types), static fn (string $type): bool => $type !== ''));
     }
 
     /**
@@ -178,6 +191,12 @@ final class CompanyLookup
     }
 
     /** The API host the browser asks for the enrolled buyer (it holds the buyer's own Two session). */
+    /** The hosted checkout's origin, which the sole-trader signup posts its answer from. */
+    public function checkoutPageUrl(): string
+    {
+        return $this->environment->checkoutBaseUrl($this->settings->environment());
+    }
+
     public function apiBaseUrl(): string
     {
         return $this->environment->apiBaseUrl($this->settings->environment());

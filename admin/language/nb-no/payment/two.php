@@ -94,6 +94,8 @@ $_['error_invoice'] = 'Fakturaen kunne ikke hentes. Prøv igjen senere.';
 // Checkout fields: placement switch, optional fields, minimum order. %s is the brand's product name.
 $_['entry_company_search_in_address'] = 'Aktiver bedriftssøk i adresseregistrering';
 $_['help_company_search_in_address'] = 'Når aktivert kan kjøperen søke etter bedriften sin i adresseregistreringsdelen av kassen. Hvis ikke, vil bedriftssøket vises i betalingsmetoden.';
+$_['entry_address_lookup'] = 'Fyll ut firmaadresse automatisk';
+$_['help_address_lookup'] = 'Fyller automatisk inn den registrerte adressen fra det nasjonale registeret.';
 $_['entry_enable_invoice_email'] = 'Vis feltet E-postadresse for faktura';
 $_['help_enable_invoice_email'] = 'Hvis du velger Ja, ser kundene et felt for faktura-e-post i %s-delen av utsjekken. Det ligger sammen med betalingsmåten framfor adressen, slik at kjøperen blir oppfordret til å vurdere en egen fakturaadresse selv når fakturaadressen og leveringsadressen er like.';
 $_['entry_enable_po_number'] = 'Vis feltet PO-nummer';

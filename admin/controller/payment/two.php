@@ -119,6 +119,7 @@ class Two extends \Opencart\System\Engine\Controller
 
         // Checkout fields: the placement switch, the optional fields and the minimum order.
         $data['company_search_in_address'] = $settings->companySearchInAddressArea();
+        $data['address_lookup'] = $settings->addressLookupSwitch();
         $data['optional_fields'] = [];
         foreach (SettingsProvider::OPTIONAL_FIELDS as $field => $key) {
             $data['optional_fields'][] = ['key' => $key, 'on' => in_array($field, $settings->optionalFields(), true), 'label' => $this->language->get('entry_' . $key), 'help' => sprintf($this->language->get('help_' . $key), $brand)];
@@ -181,7 +182,7 @@ class Two extends \Opencart\System\Engine\Controller
         $data['cancel_status_id'] = $settings->cancelStatusId();
         $data['refund_status_id'] = $settings->refundStatusId();
 
-        foreach (['help_company_search_in_address', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro', 'text_default_fulfil', 'text_default_cancel', 'text_default_refund'] as $key) {
+        foreach (['help_company_search_in_address', 'help_address_lookup', 'help_api_key', 'help_fulfil', 'help_cancel', 'help_refund', 'entry_fulfil', 'entry_cancel', 'entry_refund', 'text_status_mapping_intro', 'text_default_fulfil', 'text_default_cancel', 'text_default_refund'] as $key) {
             $data[$key] = sprintf($this->language->get($key), $brand);
         }
         $data['help_environment'] = $this->language->get('help_environment');
@@ -682,7 +683,7 @@ class Two extends \Opencart\System\Engine\Controller
      * decoded here and escaped again when rendered.
      *
      * @param array<string, mixed> $post
-     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string}
+     * @return array{api_key?: string, environment?: string, title?: array<int, string>, fulfil_status_ids?: list<string>, cancel_status_id?: string, refund_status_id?: string, company_search_in_address?: string, address_lookup?: string, enable_invoice_email?: string, enable_po_number?: string, enable_project?: string, enable_department?: string, min_order_amount?: string, min_order_basis?: string, trusted_proxies?: string, disable_rate_limit?: string}
      */
     private function submitted(array $post): array
     {

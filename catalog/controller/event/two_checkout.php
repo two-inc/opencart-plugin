@@ -23,6 +23,15 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
 {
     public const SCRIPT = 'extension/two/catalog/view/javascript/two_checkout.js';
 
+    /**
+     * The shared company search, loaded before the checkout script: the four
+     * vendored modules (byte for byte the sibling plugins', checked in CI),
+     * then this extension's host for them.
+     */
+    public const COMPANY_SEARCH = ['company-identity', 'company-search-panel', 'sole-trader', 'company-capture-component', 'company-search-host'];
+
+    public const STYLESHEET = 'extension/two/catalog/view/stylesheet/two_checkout.css';
+
     /** @param array<int, mixed> $args the view's data */
     public function index(string &$route = '', array &$args = [], mixed &$output = null): void
     {
@@ -37,9 +46,15 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
             return;
         }
         // JSON_HEX_* so no value can close the script element or open markup.
-        $island = '<script type="application/json" id="two-checkout-config">'
+        $version = '?v=' . rawurlencode(Services::pluginVersion());
+        $island = '<link rel="stylesheet" href="' . self::STYLESHEET . $version . '">'
+            . '<script type="application/json" id="two-checkout-config">'
             . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES)
-            . '</script><script src="' . self::SCRIPT . '?v=' . rawurlencode(Services::pluginVersion()) . '"></script>';
+            . '</script>';
+        foreach (self::COMPANY_SEARCH as $module) {
+            $island .= '<script src="extension/two/catalog/view/javascript/two/' . $module . '.js' . $version . '"></script>';
+        }
+        $island .= '<script src="' . self::SCRIPT . $version . '"></script>';
         $at = strripos($output, '</body>');
         $output = $at === false ? $output . $island : substr($output, 0, $at) . $island . substr($output, $at);
     }
