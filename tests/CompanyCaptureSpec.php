@@ -87,18 +87,24 @@ final class CompanyCaptureSpec
     private static function testForAddress(): void
     {
         $saved = static fn (?array $capture): array => ['address_id' => 5, 'custom_field' => $capture === null ? [] : [CompanyCapture::KEY => $capture]];
+        $row = static fn (?array $capture): array => $capture === null ? ['1' => 'x'] : ['1' => 'x', CompanyCapture::KEY => $capture];
+        $numberless = array_replace(self::ACME, ['organization_number' => '']);
+        // OpenCart's session copy of a saved address: what was posted, so no capture.
+        $posted = ['address_id' => 5, 'custom_field' => ['1' => 'x']];
         $cases = [
-            [['address_id' => 0], self::ACME, self::ACME, 'a new address: the session\'s capture'],
-            [null, null, null, 'nothing anywhere'],
-            [$saved(self::ACME), null, self::ACME, 'a saved address: what it keeps'],
-            [$saved(null), self::ACME, null, 'a saved address that keeps nothing: never a capture made on another form'],
-            [$saved(array_replace(self::ACME, ['organization_number' => ''])), self::ACME, self::ACME, 'its missing number from the same-named session capture'],
-            [$saved(array_replace(self::ACME, ['organization_number' => ''])), array_replace(self::ACME, ['company_name' => 'Other']), array_replace(self::ACME, ['organization_number' => '']), 'but not from another company'],
-            [$saved(array_replace(self::ACME, ['organization_number' => ''])), array_replace(self::ACME, ['organization_number' => '5560001111', 'country_code' => 'SE']), array_replace(self::ACME, ['organization_number' => '']), 'nor from a same-named company in another country'],
-            [$saved(array_replace(self::ACME, ['organization_number' => ''])), array_replace(self::ACME, ['organization_number' => 'TWO:ST1', 'source' => 'sole_trader']), array_replace(self::ACME, ['organization_number' => '']), 'nor from a sole trader of the same name'],
+            [['address_id' => 0], self::ACME, null, self::ACME, 'a new address: the session\'s capture'],
+            [null, null, null, null, 'nothing anywhere'],
+            [$posted, null, $row(self::ACME), self::ACME, 'registered at checkout: the stored row has the capture the session copy lacks'],
+            [$saved(self::ACME), null, $row(null), null, 'the stored row is the truth: a session copy is never read'],
+            [$saved(self::ACME), self::ACME, null, null, 'no row for this customer: no capture at all'],
+            [$posted, self::ACME, $row(null), null, 'a saved address that keeps nothing: never a capture made on another form'],
+            [$posted, self::ACME, $row($numberless), self::ACME, 'its missing number from the same-named session capture'],
+            [$posted, array_replace(self::ACME, ['company_name' => 'Other']), $row($numberless), $numberless, 'but not from another company'],
+            [$posted, array_replace(self::ACME, ['organization_number' => '5560001111', 'country_code' => 'SE']), $row($numberless), $numberless, 'nor from a same-named company in another country'],
+            [$posted, array_replace(self::ACME, ['organization_number' => 'TWO:ST1', 'source' => 'sole_trader']), $row($numberless), $numberless, 'nor from a sole trader of the same name'],
         ];
-        foreach ($cases as [$address, $session, $expected, $description]) {
-            TinyAssert::same($expected, CompanyCapture::forAddress($address, $session), 'forAddress: ' . $description);
+        foreach ($cases as [$address, $session, $stored, $expected, $description]) {
+            TinyAssert::same($expected, CompanyCapture::forAddress($address, $session, $stored), 'forAddress: ' . $description);
         }
         // The address edit form: the edited address's own capture, or none.
         $form = [

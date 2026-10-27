@@ -767,7 +767,28 @@ class Two extends \Opencart\System\Engine\Controller
      */
     private function addressCompany(string $role): ?array
     {
-        return CompanyCapture::forAddress($this->session->data[$role . '_address'] ?? null, $this->companyFor($role));
+        return CompanyCapture::forAddress($this->session->data[$role . '_address'] ?? null, $this->companyFor($role), $this->storedAddressFields($role));
+    }
+
+    /**
+     * The stored `custom_field` of the saved address the role uses, read for
+     * the signed-in customer only; null with no such address or row.
+     *
+     * @return array<mixed>|null
+     */
+    private function storedAddressFields(string $role): ?array
+    {
+        $addressId = (int) ($this->session->data[$role . '_address']['address_id'] ?? 0);
+        if ($addressId <= 0 || !$this->customer->isLogged()) {
+            return null;
+        }
+        $row = $this->db->query('SELECT `custom_field` FROM `' . DB_PREFIX . 'address` WHERE `address_id` = ' . $addressId . ' AND `customer_id` = ' . (int) $this->customer->getId())->row;
+        if (!$row) {
+            return null;
+        }
+        $fields = json_decode((string) ($row['custom_field'] ?? ''), true);
+
+        return is_array($fields) ? $fields : [];
     }
 
     /**
@@ -779,18 +800,13 @@ class Two extends \Opencart\System\Engine\Controller
      */
     private function topUpSavedAddress(string $role, array $company): void
     {
-        $addressId = (int) ($this->session->data[$role . '_address']['address_id'] ?? 0);
-        if ($addressId <= 0 || !$this->customer->isLogged() || !in_array($role, ['payment', 'shipping'], true)) {
-            return;
-        }
-        $customerId = (int) $this->customer->getId();
-        $row = $this->db->query('SELECT `custom_field` FROM `' . DB_PREFIX . 'address` WHERE `address_id` = ' . $addressId . ' AND `customer_id` = ' . $customerId)->row;
-        $stored = json_decode((string) ($row['custom_field'] ?? ''), true);
-        $updated = is_array($stored) ? CompanyCapture::topUp($stored, $company) : null;
+        $stored = in_array($role, ['payment', 'shipping'], true) ? $this->storedAddressFields($role) : null;
+        $updated = $stored === null ? null : CompanyCapture::topUp($stored, $company);
         if ($updated === null) {
             return;
         }
-        $this->db->query("UPDATE `" . DB_PREFIX . "address` SET `custom_field` = '" . $this->db->escape((string) json_encode($updated)) . "' WHERE `address_id` = " . $addressId . ' AND `customer_id` = ' . $customerId);
+        $addressId = (int) $this->session->data[$role . '_address']['address_id'];
+        $this->db->query("UPDATE `" . DB_PREFIX . "address` SET `custom_field` = '" . $this->db->escape((string) json_encode($updated)) . "' WHERE `address_id` = " . $addressId . ' AND `customer_id` = ' . (int) $this->customer->getId());
         $this->session->data[$role . '_address']['custom_field'] = $updated;
     }
 

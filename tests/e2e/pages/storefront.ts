@@ -13,10 +13,15 @@ export async function addToCart(page: Page, quantity: number): Promise<void> {
   await expect(page.locator("#alert")).toContainText("Success");
 }
 
-/** Fills the guest form, finding the company with Two's shared company search. */
-export async function guestDetails(page: Page, search: string, stubbed = true): Promise<string> {
+/** Fills the guest form (or registers an account with it), finding the company with Two's shared company search. */
+export async function guestDetails(page: Page, search: string, stubbed = true, register = false): Promise<string> {
   await page.goto("/index.php?route=checkout/checkout");
-  await page.check("#input-guest");
+  await page.check(register ? "#input-register" : "#input-guest");
+  if (register) {
+    await page.fill("#input-password", "E2e-pass-12345");
+    const agree = page.locator("#input-register-agree");
+    if (await agree.isVisible()) await agree.check();
+  }
   await page.fill("#input-firstname", "Ada");
   await page.fill("#input-lastname", "Buyer");
   await page.fill("#input-email", `e2e-${Date.now()}@two.inc`);

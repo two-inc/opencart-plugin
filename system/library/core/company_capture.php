@@ -130,20 +130,25 @@ final class CompanyCapture
 
     /**
      * The company for an address role: on a saved address, what that address
-     * keeps, its number topped up from the session's same-named capture where
+     * keeps as stored (its row, read for the signed-in customer only; null
+     * when there is no such row), its number topped up from the session's same-named capture where
      * it has none (the number lands a moment after the pick); on a new
      * address, what the buyer captured in its form this session.
      *
      * @param mixed $address the session's address for the role
+     * @param array<mixed>|null $storedCustomField the stored row's `custom_field`, null when there is no row
      * @return array{company_name: string, organization_number: string, country_code: string, source: string}|null
      */
-    public static function forAddress(mixed $address, mixed $sessionCapture): ?array
+    public static function forAddress(mixed $address, mixed $sessionCapture, ?array $storedCustomField): ?array
     {
         $session = self::normalise($sessionCapture);
         if (!is_array($address) || (int) ($address['address_id'] ?? 0) <= 0) {
             return $session;
         }
-        $kept = self::ofAddress($address);
+        // The stored row, never the session's copy of the address: OpenCart
+        // keeps the posted form there when it registers an account at checkout,
+        // without what the address-saving event added.
+        $kept = $storedCustomField === null ? null : self::ofAddress(['custom_field' => $storedCustomField]);
         if ($kept !== null && $kept['organization_number'] === '' && $kept['source'] !== 'manual'
             && $session !== null && self::sameCompany($kept, $session)) {
             $kept['organization_number'] = $session['organization_number'];

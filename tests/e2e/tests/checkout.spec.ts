@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { orderStatusId, twoOrderId } from "../pages/shop";
-import { placeOrder } from "../pages/storefront";
+import { addToCart, chooseTwo, confirmAndReturn, guestDetails, placeOrder } from "../pages/storefront";
 import { expectState, requests, stubOrder } from "../pages/stub";
 
 test("a buyer finds their company, places the order with Two and sees the confirmation", async ({ page }) => {
@@ -33,4 +33,17 @@ test("a coupon reaches Two as a negative discount line, and Two accepts the orde
   expect(lines.filter((l) => Number(l.net_amount) < 0 && Number(l.tax_amount) < 0), "one discount line, net and tax below zero").toHaveLength(1);
   const sent = (await requests("")).slice(seen);
   expect(sent.filter((r) => r.status !== 200 && r.status !== 201), "Two accepts every call the shop makes").toEqual([]);
+});
+
+test("a buyer who registers an account at checkout pays with Two, the company kept with the new saved address", async ({ page }) => {
+  await addToCart(page, 1);
+  const company = await guestDetails(page, "E2E Trad", true, true);
+  // The tile reads the company from the address OpenCart just stored for the new account.
+  await chooseTwo(page, company);
+  const orderId = await confirmAndReturn(page);
+
+  const twoId = twoOrderId(orderId);
+  expect(twoId, "the shop order is linked to a Two order").not.toBe("");
+  await expectState(twoId, "CONFIRMED");
+  expect((await stubOrder(twoId) as any).buyer.company.organization_number, "the searched company's number is sent").toBe("12345678");
 });
