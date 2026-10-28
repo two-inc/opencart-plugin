@@ -66,15 +66,16 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
                 $config['companies'] = (object) [];
             }
         }
+        $version = Services::pluginVersion();
         // JSON_HEX_* so no value can close the script element or open markup.
-        $island = '<link rel="stylesheet" href="' . self::versioned(self::STYLESHEET) . '">'
+        $island = '<link rel="stylesheet" href="' . self::versioned(self::STYLESHEET, $version) . '">'
             . '<script type="application/json" id="two-checkout-config">'
             . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES)
             . '</script>';
         foreach (self::COMPANY_SEARCH as $module) {
-            $island .= '<script src="' . self::versioned('extension/two/catalog/view/javascript/two/' . $module . '.js') . '"></script>';
+            $island .= '<script src="' . self::versioned('extension/two/catalog/view/javascript/two/' . $module . '.js', $version) . '"></script>';
         }
-        $island .= '<script src="' . self::versioned(self::SCRIPT) . '"></script>';
+        $island .= '<script src="' . self::versioned(self::SCRIPT, $version) . '"></script>';
         $at = strripos($output, '</body>');
         $output = $at === false ? $output . $island : substr($output, 0, $at) . $island . substr($output, $at);
     }
@@ -83,13 +84,15 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
      * An asset's URL, versioned by the plugin version and the file's own
      * modification time, so a changed file gets a new URL even when the
      * version stays the same (a shop that tracks a branch) and no cache in
-     * front of the shop keeps serving the old copy.
+     * front of the shop keeps serving the old copy. is_file() first, as
+     * OpenCart's error handler acts on a warning even under `@`.
      */
-    private static function versioned(string $path): string
+    private static function versioned(string $path, string $version): string
     {
-        $modified = @filemtime(DIR_EXTENSION . substr($path, strlen('extension/')));
+        $file = DIR_EXTENSION . substr($path, strlen('extension/'));
+        $modified = is_file($file) ? filemtime($file) : false;
 
-        return $path . '?v=' . rawurlencode(Services::pluginVersion() . ($modified === false ? '' : '.' . $modified));
+        return $path . '?v=' . rawurlencode($version . ($modified === false ? '' : '.' . $modified));
     }
 
     /**

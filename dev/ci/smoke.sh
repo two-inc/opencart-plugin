@@ -182,6 +182,9 @@ curl -s -c "$shopper" -b "$shopper" -o /dev/null -X POST -d 'product_id=40&quant
 checkout_page=$(curl -s -c "$shopper" -b "$shopper" "$base/index.php?route=checkout/checkout&language=en-gb")
 contains "the checkout page carries the capture settings" "$checkout_page" 'id="two-checkout-config"'
 contains "the checkout page loads the capture script" "$checkout_page" 'two_checkout.js?v='
+# Versioned by the file's own time too, so a shop tracking a branch never serves a stale copy.
+grep -qE 'two_checkout\.js\?v=[0-9][0-9.]*\.[0-9]{10}"' <<<"$checkout_page" || fail "the capture script's URL carries no file time"
+ok "the capture script's URL carries the file time"
 contains "the company search refuses a request without the session's token" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.search&language=en-gb&q=acme&country=GB&two_token=wrong")" '"code":"forbidden"'
 contains "the token mint refuses a GET" "$(curl -s -b "$shopper" "$base/index.php?route=extension/two/payment/two.soleTraderTokens&language=en-gb")" '"code":"forbidden"'
 two_token=$(printf '%s' "$checkout_page" | grep -o '"token":"[0-9a-f]*"' | head -1 | cut -d'"' -f4)
