@@ -491,9 +491,6 @@
         // next already has it; only typing in manual entry waits for a pause.
         this.identity.subscribe(() => {
             this.syncBusy();
-            // The blocked-signup fallback belongs to sole-trader mode alone,
-            // so any other chip takes it down with it.
-            if (!this.identity.isSoleTrader()) this.renderSignupPrompt(false);
             if (this.identity.captureMode() === 'manual') this.schedulePersist();
             else this.persist();
         });
