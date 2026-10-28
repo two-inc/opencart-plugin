@@ -379,14 +379,9 @@ class Two extends \Opencart\System\Engine\Controller
     {
         $this->load->language(self::ROUTE);
         // The shared sole-trader module posts a JSON body of its own, so the
-        // token and country ride on the query string.
+        // token rides on the query string. No country: the tokens are the
+        // buyer's, minted at checkout load before any country is chosen.
         if (!$this->guarded(true, 'soleTraderTokens', true)) {
-            return;
-        }
-        $country = strtoupper(trim((string) ($this->request->get['country'] ?? '')));
-        if (preg_match('~^[A-Z]{2}\z~', $country) !== 1) {
-            $this->json(['error' => $this->language->get('error_sole_trader')]);
-
             return;
         }
         $attempt = (int) ($this->state()['sole_trader_attempt'] ?? 0) + 1;
@@ -401,7 +396,7 @@ class Two extends \Opencart\System\Engine\Controller
         );
         $this->json($tokens === null
             ? ['error' => $this->language->get('error_sole_trader')]
-            : $tokens + ['signup_url' => $companies->signupUrl(), 'api_base' => $companies->apiBaseUrl(), 'country' => $country]);
+            : $tokens + ['signup_url' => $companies->signupUrl(), 'api_base' => $companies->apiBaseUrl()]);
     }
 
     /**

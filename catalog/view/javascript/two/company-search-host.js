@@ -458,7 +458,9 @@
                 input.dispatchEvent(new Event('change', { bubbles: true }));
                 input.focus();
             },
-            tokensUrl: () => self.api.url('sole_trader_tokens', { country: self.country() }),
+            // No country: the tokens are the buyer's, minted once at boot for
+            // every panel on the page, before any panel may know its country.
+            tokensUrl: () => self.api.url('sole_trader_tokens'),
             quoteId: () => '',
             apiClientParams: () => ({}),
             signupPrefill: () => self.signupPrefill(),
@@ -489,6 +491,9 @@
         // next already has it; only typing in manual entry waits for a pause.
         this.identity.subscribe(() => {
             this.syncBusy();
+            // The blocked-signup fallback belongs to sole-trader mode alone,
+            // so any other chip takes it down with it.
+            if (!this.identity.isSoleTrader()) this.renderSignupPrompt(false);
             if (this.identity.captureMode() === 'manual') this.schedulePersist();
             else this.persist();
         });
