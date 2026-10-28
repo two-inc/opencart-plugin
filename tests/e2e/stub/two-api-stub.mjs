@@ -15,7 +15,8 @@
 //     and the payment_url built from it cannot drift apart. The browser does
 //     not trust the throwaway CA, so the suite ignores certificate errors.
 //
-// It keeps orders in memory and answers with the fields the extension reads:
+// It mints the sole-trader signup's tokens, which every checkout asks for at
+// load, and keeps orders in memory and answers with the fields the extension reads:
 // state, the totals and lines it was sent, and the refunds it holds. It
 // refuses what Two refuses, with Two's status and error codes: a merchant call
 // without the shop's API key (TWO_API_STUB_KEY) is 401, and an order, edit or
@@ -218,6 +219,13 @@ function api(method, path, body, key) {
   if (path.startsWith("/v1/") && key !== API_KEY) {
     return error(401, "AUTHENTICATION_INVALID", "Authentication headers invalid", "X-API-Key is incorrect or has expired");
   }
+  // The sole-trader signup's two tokens, which the checkout mints at load.
+  // Two answers each in a header, and only with the merchant's key.
+  const mint = { "/registry/v1/delegation": "delegation", "/autofill/v1/delegation": "autofill" }[path];
+  if (method === "POST" && mint) {
+    if (key !== API_KEY) return error(401, "AUTHENTICATION_INVALID", "Authentication headers invalid", "X-API-Key is incorrect or has expired");
+    return [200, {}, { "two-delegated-authority-token": `e2e-${mint}-${randomUUID()}` }];
+  }
   if (method === "GET" && path === "/v1/merchant/verify_api_key") {
     return [200, { id: MERCHANT_ID, short_name: "e2e" }];
   }
@@ -301,8 +309,8 @@ function control(method, path, body, query, res) {
   return send(res, 404, { error: `no control route ${method} ${path}` });
 }
 
-function send(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" }).end(JSON.stringify(body));
+function send(res, status, body, headers) {
+  res.writeHead(status, { "Content-Type": "application/json", ...headers }).end(JSON.stringify(body));
 }
 
 // One API request, logged with its answer: `status` is the HTTP status sent,
@@ -324,7 +332,7 @@ function answer(req, res, path, body) {
     entry.replayed = true;
   } else {
     reply = api(req.method, path, body, req.headers["x-api-key"]);
-    if (key && req.method !== "GET" && reply[0] < 500) replies.set(key, [reply[0], structuredClone(reply[1])]);
+    if (key && req.method !== "GET" && reply[0] < 500) replies.set(key, [reply[0], structuredClone(reply[1]), reply[2]]);
   }
   if (reply[0] >= 400) console.log(`two-api stub: ${req.method} ${path} answered ${reply[0]} ${JSON.stringify(reply[1])}`);
   if (injected?.mode === "drop") {
@@ -333,7 +341,7 @@ function answer(req, res, path, body) {
     return;
   }
   entry.status = reply[0];
-  return send(res, reply[0], reply[1]);
+  return send(res, reply[0], reply[1], reply[2]);
 }
 
 function handler(isPublic) {

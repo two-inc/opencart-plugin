@@ -324,3 +324,59 @@ describe('the tile', () => {
         delete window.TwoCompanySearchHost;
     });
 });
+
+describe('sole trader', () => {
+    const TOKENS = { delegation_token: 'D1', autofill_token: 'A1' };
+    const POPUP = { closed: false, close() {}, focus() {} };
+    // A country select with nothing chosen yet, as a guest first sees it.
+    const UNCHOSEN = (role) => ADDRESS(role).replace('<option value="222">', '<option value="" selected>Select</option><option value="222">');
+    const tokenCalls = (calls) => calls.filter(([route]) => route === 'stt').map(([, params]) => params);
+    const prompt = () => document.querySelector('.two-sole-trader-prompt');
+
+    // The tokens are page-level in the vendored module, so each test starts with none.
+    beforeEach(() => {
+        Object.assign(window.TwoSoleTrader.prototype, { delegationToken: '', autofillToken: '', _prefetch: null, _autofillBuyer: null, _prefetchOwed: false });
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    const choose = (role, value) => {
+        const select = document.getElementById('input-' + role + '-country');
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    test.each([
+        [ADDRESS('shipping'), () => {}, 'guest: the shipping form alone, fresh'],
+        [ADDRESS('shipping'), (hosts) => hosts.shipping.component.selectCompany({ text: 'Acme Ltd', companyId: '0123', lookupId: '' }), 'guest: after a registered pick'],
+        [UNCHOSEN('shipping'), () => choose('shipping', '222'), 'guest: no country chosen at load, then the UK'],
+        [UNCHOSEN('payment') + ADDRESS('shipping'), () => {}, 'a payment form with no country beside a UK shipping form'],
+    ])('the first click opens the popup, case %#', async (dom, before, description) => {
+        document.body.innerHTML = dom;
+        const open = jest.spyOn(window, 'open').mockReturnValue(POPUP);
+        const { hosts, calls } = start(config({ address_lookup: false }), { stt: TOKENS, st: ['LIMITED_COMPANY', 'SOLE_TRADER'] });
+        await flush();
+        before(hosts);
+        await flush();
+        hosts.shipping.component.soleTraderMode();
+        const opened = open.mock.calls.map(([url]) => /businessToken=D1&autofillToken=A1/.test(url));
+        // The token route takes no country: the boot mint runs before any panel has one.
+        expect([opened, prompt(), tokenCalls(calls), description]).toEqual([[true], null, [{ two_token: 'tok' }], description]);
+    });
+
+    test.each([
+        [(host) => host.component.registeredMode({ openDropdown: true }), false, 'Registered company hides it'],
+        [(host) => host.component.manualEntryMode(), false, 'Enter manually hides it'],
+        [(host) => { window.open.mockReturnValue(POPUP); host.component.soleTraderMode(); }, false, 'Sole trader, now allowed, hides it'],
+        [(host) => host.component.soleTraderMode(), true, 'Sole trader, still blocked, keeps it'],
+    ])('the blocked-popup fallback after a chip switch, case %#', async (chip, shown, description) => {
+        document.body.innerHTML = ADDRESS('shipping');
+        jest.spyOn(window, 'open').mockReturnValue(null);
+        const { hosts } = start(config({ address_lookup: false }), { stt: TOKENS, st: ['LIMITED_COMPANY', 'SOLE_TRADER'] });
+        await flush();
+        hosts.shipping.component.soleTraderMode();
+        const blocked = !!prompt();
+        chip(hosts.shipping);
+        expect([blocked, !!prompt(), description]).toEqual([true, shown, description]);
+    });
+});
