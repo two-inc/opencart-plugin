@@ -230,7 +230,7 @@ function api(method, path, body, key) {
     return [200, { id: MERCHANT_ID, short_name: "e2e" }];
   }
   if (method === "GET" && path === `/v1/merchant/${MERCHANT_ID}`) {
-    return [200, { id: MERCHANT_ID, short_name: "e2e", available_terms: [30, 60], due_in_days: 30, invoice_distributed_by_merchant: false }];
+    return [200, { id: MERCHANT_ID, short_name: "e2e", available_terms: [30, 60, 90], due_in_days: 30, invoice_distributed_by_merchant: false }];
   }
   if (method === "GET" && path === "/refdata/v1/fx-rates") {
     return [200, { base: "EUR", as_of: new Date().toISOString().slice(0, 10), rates: { EUR: 1, GBP: 0.85, USD: 1.08, NOK: 11.6, SEK: 11.3, DKK: 7.46 } }];
