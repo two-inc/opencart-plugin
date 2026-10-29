@@ -48,7 +48,7 @@ final class OrderFlow
     public const INTENT_UNPROCESSABLE = 'error_intent_unprocessable';
 
     /** What the order intent asks about: the create payload without what only an order needs. */
-    public const INTENT_KEYS = ['gross_amount', 'net_amount', 'tax_amount', 'discount_amount', 'currency', 'invoice_type', 'buyer', 'billing_address', 'shipping_address', 'line_items'];
+    public const INTENT_KEYS = ['gross_amount', 'net_amount', 'tax_amount', 'discount_amount', 'currency', 'buyer', 'billing_address', 'shipping_address', 'line_items'];
 
     public const CALLBACK_CONFIRM = 'confirmation';
     public const CALLBACK_CANCEL = 'cancel';

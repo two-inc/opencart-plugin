@@ -92,6 +92,7 @@ final class OrderEditSpec
             if (in_array($put, self::calls($transport), true)) {
                 $body = json_decode((string) $transport->calls[1]['body'], true);
                 TinyAssert::true(!isset($body['merchant_urls']) && !isset($body['buyer']), $d . ': the edit carries no callback URLs or buyer');
+                TinyAssert::true(!array_key_exists('invoice_type', $body), $d . ': the edit carries no invoice type');
                 TinyAssert::same(3, $body['line_items'][0]['quantity'] ?? null, $d . ': the edited line');
                 TinyAssert::same(IdempotencyKey::edit(self::ID, IdempotencyKey::orderCreate(42, self::TOKEN_HASH), OrderFlow::payloadHash($body)), $transport->calls[1]['headers']['Idempotency-Key'] ?? null, $d . ': the first edit chains on the create key');
             }

@@ -119,7 +119,7 @@ final class OrderEdit
             }
             $payload = $this->builder->build($input['order'], $input['lines'], $input['totals']);
             $failures = OrderBuilder::shopMatchFailures($payload, $input['order']);
-            unset($payload['merchant_urls'], $payload['buyer'], $payload['invoice_type']);
+            unset($payload['merchant_urls'], $payload['buyer']);
             $body = $this->postprocessing->apply(Postprocessing::ORDER_UPDATE, 'order_edit', $path, $payload, ($input['context'] ?? []) + ['order_id' => $orderId], $failures);
         } catch (OrderRefused $refused) {
             return $this->refused($orderId, Message::of('note_edit_not_built', $refused->note));

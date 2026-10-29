@@ -80,6 +80,11 @@ final class OrderFlowSpec
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');
             TinyAssert::same($case['state'], $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
             self::assertKeys($transport, $d);
+            foreach ($transport->calls as $call) {
+                if ($call['method'] === 'POST' && parse_url($call['url'], PHP_URL_PATH) === '/v1/order') {
+                    TinyAssert::true(!array_key_exists('invoice_type', json_decode((string) $call['body'], true) ?? []), $d . ': the create body carries no invoice type');
+                }
+            }
             if ($case['state'] !== null && empty($case['lossy'])) {
                 TinyAssert::same(OrderFlow::tokenHash(self::TOKEN), $records->rows[42]['token_hash'], $d . ': the token hash is stored, not the token');
             }
