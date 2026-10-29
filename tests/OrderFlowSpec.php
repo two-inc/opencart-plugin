@@ -82,7 +82,9 @@ final class OrderFlowSpec
             self::assertKeys($transport, $d);
             foreach ($transport->calls as $call) {
                 if ($call['method'] === 'POST' && parse_url($call['url'], PHP_URL_PATH) === '/v1/order') {
-                    TinyAssert::true(!array_key_exists('invoice_type', json_decode((string) $call['body'], true) ?? []), $d . ': the create body carries no invoice type');
+                    $body = json_decode((string) $call['body'], true) ?? [];
+                    TinyAssert::true(!array_key_exists('invoice_type', $body), $d . ': the create body carries no invoice type');
+                    TinyAssert::same([true, true], [array_key_exists('discount_amount', $body), array_key_exists('billing_address', $body)], $d . ': the create body still carries the order-level discount_amount and billing_address');
                 }
             }
             if ($case['state'] !== null && empty($case['lossy'])) {
