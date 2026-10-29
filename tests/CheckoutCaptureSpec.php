@@ -70,6 +70,8 @@ final class CheckoutCaptureSpec
         TinyAssert::same('/v1/order_intent', parse_url($transport->calls[0]['url'], PHP_URL_PATH), 'order intent: sent to the intent endpoint');
         TinyAssert::same([], array_diff(array_keys($sent), array_merge(OrderFlow::INTENT_KEYS, ['merchant_short_name'])), 'order intent: carries only what the intent asks about');
         TinyAssert::true(!array_key_exists('invoice_type', $sent), 'order intent: carries no invoice type');
+        TinyAssert::same([false, false], [array_key_exists('discount_amount', $sent), array_key_exists('billing_address', $sent)], 'order intent: carries no order-level discount_amount or billing_address');
+        TinyAssert::true(array_key_exists('discount_amount', $sent['line_items'][0] ?? []), 'order intent: a line keeps its own discount_amount');
         TinyAssert::same(['acme', '123456789'], [$sent['merchant_short_name'], $sent['buyer']['company']['organization_number']], 'order intent: names the merchant and the buyer company');
         $flow->intent(self::order(), self::lines(), [], self::SESSION, ['merchant_short_name' => 'acme']);
         $flow->intent(['company' => ['company_name' => 'Other AS', 'organization_number' => '987654321', 'country_code' => 'NO']] + self::order(), self::lines(), [], self::SESSION, ['merchant_short_name' => 'acme']);

@@ -25,6 +25,12 @@ test("a buyer finds their company, places the order with Two and sees the confir
   const bodies = sent.filter((r) => r.method === "POST" && (r.path === "/v1/order" || r.path === "/v1/order_intent"));
   expect(bodies.map((r) => r.path), "the order intent and the order were both captured").toEqual(expect.arrayContaining(["/v1/order_intent", "/v1/order"]));
   expect(bodies.filter((r) => "invoice_type" in r.body), "no intent or create body carries an invoice type").toEqual([]);
+  // Two's API does not define an order-level discount_amount or billing_address on the intent, so only the create carries them (a line keeps its own discount_amount).
+  const intent = bodies.find((r) => r.path === "/v1/order_intent")!.body;
+  const create = bodies.find((r) => r.path === "/v1/order")!.body;
+  expect(["discount_amount", "billing_address"].filter((k) => k in intent), "the intent carries no order-level discount_amount or billing_address").toEqual([]);
+  expect(["discount_amount", "billing_address"].filter((k) => !(k in create)), "the create still carries both").toEqual([]);
+  expect(intent.line_items.every((l: any) => "discount_amount" in l), "intent lines keep their own discount_amount").toBe(true);
 });
 
 test("a coupon reaches Two as a negative discount line, and Two accepts the order", async ({ page }) => {
