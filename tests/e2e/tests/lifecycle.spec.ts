@@ -17,7 +17,9 @@ test("an order edit before fulfilment is sent to Two, then Shipped fulfils it", 
   await addOneMore(page, "iPhone", 2);
   await expect.poll(async () => (await stubOrder(twoId)).line_items[0].quantity, { message: "Two holds the edited quantity" }).toBe(2);
   expect(cents((await stubOrder(twoId)).gross_amount)).toBeGreaterThan(cents(before.gross_amount));
-  expect((await requests(`/v1/order/${twoId}`)).filter((r) => r.method === "PUT")).toHaveLength(1);
+  const puts = (await requests(`/v1/order/${twoId}`)).filter((r) => r.method === "PUT");
+  expect(puts).toHaveLength(1);
+  expect("invoice_type" in puts[0].body, "the edit body carries no invoice type").toBe(false);
 
   await addHistory(page, "Shipped");
   await expectState(twoId, "FULFILLED");

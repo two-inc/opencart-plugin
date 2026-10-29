@@ -134,7 +134,6 @@ final class OrderBuilderSpec
             ['path' => 'merchant_order_id', 'expected' => '42', 'description' => 'the shop order id'],
             ['path' => 'merchant_reference', 'expected' => '42', 'description' => 'a deterministic reference'],
             ['path' => 'currency', 'expected' => 'NOK', 'description' => 'the order currency'],
-            ['path' => 'invoice_type', 'expected' => 'FUNDED_INVOICE', 'description' => 'the invoice type'],
             ['path' => 'order_note', 'expected' => 'Leave at door', 'description' => 'the buyer comment'],
             ['path' => 'buyer.company.organization_number', 'expected' => '123456789', 'description' => 'the organisation number entered'],
             ['path' => 'buyer.company.country_prefix', 'expected' => 'NO', 'description' => 'the company country'],
@@ -153,6 +152,8 @@ final class OrderBuilderSpec
             }
             TinyAssert::same($case['expected'], $value, 'header: ' . $case['description']);
         }
+        // Two decides the invoice type from the merchant account and ignores a value sent, so none is sent.
+        TinyAssert::true(!array_key_exists('invoice_type', $payload), 'header: no invoice type is sent');
     }
 
     private static function testDeterministic(): void

@@ -21,6 +21,10 @@ test("a buyer finds their company, places the order with Two and sees the confir
   expect(writes.filter((r) => !r.key), "every write carries an Idempotency-Key").toEqual([]);
   // The stub refuses a wrong API key and amounts that do not add up as Two does.
   expect(sent.filter((r) => r.status !== 200 && r.status !== 201), "Two accepts every call the shop makes").toEqual([]);
+  // Two decides the invoice type from the merchant account, so the shop sends none: not on the intent, not on the order.
+  const bodies = sent.filter((r) => r.method === "POST" && (r.path === "/v1/order" || r.path === "/v1/order_intent"));
+  expect(bodies.map((r) => r.path), "the order intent and the order were both captured").toEqual(expect.arrayContaining(["/v1/order_intent", "/v1/order"]));
+  expect(bodies.filter((r) => "invoice_type" in r.body), "no intent or create body carries an invoice type").toEqual([]);
 });
 
 test("a coupon reaches Two as a negative discount line, and Two accepts the order", async ({ page }) => {
