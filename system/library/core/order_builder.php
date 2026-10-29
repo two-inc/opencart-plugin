@@ -127,7 +127,6 @@ final class OrderBuilder
             'tax_amount' => '0.00',
             'discount_amount' => '0.00',
             'discount_rate' => '0',
-            'invoice_type' => 'FUNDED_INVOICE',
             'merchant_order_id' => (string) $order['order_id'],
             'merchant_reference' => (string) $order['order_id'],
             'merchant_additional_info' => '',
