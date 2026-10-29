@@ -47,8 +47,12 @@ final class OrderFlow
     public const INTENT_UNAVAILABLE = 'error_intent_unavailable';
     public const INTENT_UNPROCESSABLE = 'error_intent_unprocessable';
 
-    /** What the order intent asks about: the create payload without what only an order needs. */
-    public const INTENT_KEYS = ['gross_amount', 'net_amount', 'tax_amount', 'discount_amount', 'currency', 'buyer', 'billing_address', 'shipping_address', 'line_items'];
+    /**
+     * What the order intent asks about: the create payload without what only an order needs.
+     * Two's API does not define an order-level discount_amount or billing_address on the intent
+     * request and ignores them, so they are not sent (a line's own discount_amount stays).
+     */
+    public const INTENT_KEYS = ['gross_amount', 'net_amount', 'tax_amount', 'currency', 'buyer', 'shipping_address', 'line_items'];
 
     public const CALLBACK_CONFIRM = 'confirmation';
     public const CALLBACK_CANCEL = 'cancel';
