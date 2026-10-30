@@ -450,7 +450,7 @@ class Two extends \Opencart\System\Engine\Controller
         foreach (['pay_in', 'pay_in_eom'] as $key) {
             $copy[$key] = $this->language->get('text_' . $key);
         }
-        foreach (['chip_registered', 'chip_sole_trader', 'chip_manual', 'search_aria', 'search_too_short', 'no_matches', 'search_unavailable', 'select_country', 'back_to_search', 'company_number', 'select_different_sole_trader', 'sole_trader_prompt', 'sole_trader_error', 'address_unavailable', 'checking', 'settle_timeout', 'confirm_failed', 'totals_failed'] as $key) {
+        foreach (['chip_registered', 'chip_sole_trader', 'chip_manual', 'search_aria', 'search_too_short', 'no_matches', 'search_unavailable', 'select_country', 'back_to_search', 'company_number', 'select_different_sole_trader', 'sole_trader_signup', 'sole_trader_error', 'address_unavailable', 'checking', 'settle_timeout', 'confirm_failed', 'totals_failed'] as $key) {
             $copy[$key] = sprintf($this->language->get('js_' . $key), $brand, CompanyLookup::MIN_TERM_LENGTH);
         }
         // The tile's line for the company the address form holds, kept current by the script.
