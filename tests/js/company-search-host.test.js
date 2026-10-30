@@ -253,6 +253,32 @@ describe('selection, saved captures and manual entry', () => {
     });
 
     test.each([
+        ['the buyer keeps the name', ''],
+        ['the buyer types a new name first', 'Typed Ltd'],
+    ])('a details answer landing after Enter manually writes no number, even back in search (TWO-26775): %s', async (why, typed) => {
+        document.body.innerHTML = ADDRESS('payment');
+        let answer;
+        const pending = new Promise((resolve) => { answer = resolve; });
+        const { hosts, calls } = start(config(), { d: () => pending });
+        await flush();
+        pick(hosts.payment, { companyId: '', lookupId: 'L1' });
+        await flush();
+        hosts.payment.component.manualEntryMode();
+        if (typed) {
+            const field = document.getElementById('input-payment-company');
+            field.value = typed;
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        answer({ organization_number: '999', addresses: [] });
+        await flush();
+        hosts.payment.component.registeredMode();
+        await hosts.payment.flush();
+        await flush();
+        expect([why, hosts.payment.identity.companyId(), calls.filter(([route]) => route === 'save').pop()[1].organization_number])
+            .toEqual([why, '', '']);
+    });
+
+    test.each([
         [{ company_name: 'Acme Ltd', organization_number: '0123', source: 'manual' }, ['Acme Ltd', '', 'manual', false], 'a manual capture never brings a number back'],
         [{ company_name: 'Acme Ltd', organization_number: '0123', source: 'search' }, ['Acme Ltd', '0123', 'registered', false], 'a registered capture keeps its number'],
         [{ company_name: 'Ola Trader', organization_number: '777', source: 'sole_trader' }, ['Ola Trader', '777', 'soletrader', true], 'only a saved sole trader is restored as adopted'],

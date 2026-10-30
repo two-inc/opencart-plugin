@@ -132,8 +132,9 @@ final class CompanyCapture
      * The company for an address role: on a saved address, what that address
      * keeps as stored (its row, read for the signed-in customer only; null
      * when there is no such row), its number topped up from the session's same-named capture where
-     * it has none (the number lands a moment after the pick); on a new
-     * address, what the buyer captured in its form this session.
+     * it has none (the number lands a moment after the pick), and with none
+     * at all where the session's capture is a manual entry of that name; on a
+     * new address, what the buyer captured in its form this session.
      *
      * @param mixed $address the session's address for the role
      * @param array<mixed>|null $storedCustomField the stored row's `custom_field`, null when there is no row
@@ -149,6 +150,11 @@ final class CompanyCapture
         // keeps the posted form there when it registers an account at checkout,
         // without what the address-saving event added.
         $kept = $storedCustomField === null ? null : self::ofAddress(['custom_field' => $storedCustomField]);
+        // Enter manually on the address's own company disowns the number the row
+        // kept, including one an address save racing the manual save stored (TWO-26775).
+        if ($kept !== null && $session !== null && $session['source'] === 'manual' && $session['company_name'] === $kept['company_name']) {
+            return $session;
+        }
         if ($kept !== null && $kept['organization_number'] === '' && $kept['source'] !== 'manual'
             && $session !== null && self::sameCompany($kept, $session)) {
             $kept['organization_number'] = $session['organization_number'];

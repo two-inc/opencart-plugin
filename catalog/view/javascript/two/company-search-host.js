@@ -357,9 +357,13 @@
         identity.addressNotice('');
         this.revertAddress();
         if (!item.lookupId || (!autofill && item.companyId)) return Promise.resolve();
+        // The answer belongs to this pick alone: a later pick, Enter manually or a
+        // new name since has set it aside, and its number must not reach that capture (TWO-26775).
+        const superseded = () => seq !== this.lookupSeq || identity.captureMode() !== 'registered'
+            || identity.companyName() !== item.text;
         return this.api.get('company_details', { lookup_id: item.lookupId })
             .then((json) => {
-                if (seq !== this.lookupSeq) return;
+                if (superseded()) return;
                 if (!json || json.error) throw new Error('unavailable');
                 if (!identity.companyId() && json.organization_number) {
                     identity.write({ companyId: json.organization_number, companyIdSource: 'registry' });
@@ -369,7 +373,7 @@
                 if (autofill) this.writeAddress(address);
             })
             .catch(() => {
-                if (seq === this.lookupSeq && autofill) identity.addressNotice(this.copy('address_unavailable'));
+                if (!superseded() && autofill) identity.addressNotice(this.copy('address_unavailable'));
             });
     };
 
