@@ -102,6 +102,8 @@ final class CompanyCaptureSpec
             [$posted, array_replace(self::ACME, ['company_name' => 'Other']), $row($numberless), $numberless, 'but not from another company'],
             [$posted, array_replace(self::ACME, ['organization_number' => '5560001111', 'country_code' => 'SE']), $row($numberless), $numberless, 'nor from a same-named company in another country'],
             [$posted, array_replace(self::ACME, ['organization_number' => 'TWO:ST1', 'source' => 'sole_trader']), $row($numberless), $numberless, 'nor from a sole trader of the same name'],
+            [$posted, array_replace($numberless, ['source' => 'manual']), $row(self::ACME), array_replace($numberless, ['source' => 'manual']), 'Enter manually on the same name disowns the number the row kept (TWO-26775)'],
+            [$posted, array_replace($numberless, ['company_name' => 'Other', 'source' => 'manual']), $row(self::ACME), self::ACME, 'a manual capture of another name leaves the row alone'],
         ];
         foreach ($cases as [$address, $session, $stored, $expected, $description]) {
             TinyAssert::same($expected, CompanyCapture::forAddress($address, $session, $stored), 'forAddress: ' . $description);

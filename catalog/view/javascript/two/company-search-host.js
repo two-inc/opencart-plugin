@@ -44,8 +44,11 @@
         '1 result is available, use up and down arrow keys to navigate.': 'results_one',
         '%1 results are available, use up and down arrow keys to navigate.': 'results_many',
         'Company Number': 'company_number',
-        'Select a different sole trader': 'select_different_sole_trader'
+        'Select a different sole trader': 'select_different_sole_trader',
+        'Sign up or log in as a sole trader': 'sole_trader_signup'
     };
+    /** Every address field an autofill writes, in the order a write fires `change`. */
+    const ADDRESS_FIELDS = ['address-1', 'address-2', 'city', 'postcode', 'zone'];
 
     function modules() {
         return {
@@ -236,6 +239,11 @@
         return String((input && input.getAttribute('data-two-country')) || '').toLowerCase();
     };
 
+    /** Whether a field holds exactly what an autofill put there. */
+    function holdsOurs(input) {
+        return input.hasAttribute(AUTOFILLED) && input.getAttribute(AUTOFILLED) === input.value;
+    }
+
     RoleHost.prototype.writeField = function (suffix, value, written) {
         const input = this.field(suffix);
         if (!input || value === undefined || value === null) return;
@@ -252,26 +260,78 @@
         written.push(input);
     };
 
-    /** Write every value first, then fire change on each, so no handler sees a half-written address. */
-    RoleHost.prototype.writeAddress = function (address) {
+    /**
+     * Write every value first, then fire change on each, so no handler sees a
+     * half-written address.
+     *
+     * A sole trader's record (`buyerRules`) is written by PrestaShop's rules
+     * (TWO-26775): a blank writes nothing, a field the record leaves out is
+     * cleared only where it still holds what was written there, and the zone
+     * is filled only where it is empty or holds that write.
+     *
+     * @param {object} address
+     * @param {object} [options] `{ buyerRules: true }`
+     */
+    RoleHost.prototype.writeAddress = function (address, options) {
         if (this.placement === 'tile' || !address) return;
+        const buyerRules = !!(options && options.buyerRules);
         const street = address.street_address || address.street || '';
         const building = [address.building, address.apartment].filter(Boolean).join(' ');
-        const written = [];
+        const values = { city: address.city, postcode: address.postal_code, zone: address.region };
         if (building) {
-            this.writeField('address-1', building, written);
-            this.writeField('address-2', street, written);
+            values['address-1'] = building;
+            values['address-2'] = street;
         } else if (street) {
-            this.writeField('address-1', street, written);
+            values['address-1'] = street;
         }
-        this.writeField('city', address.city, written);
-        this.writeField('postcode', address.postal_code, written);
-        this.writeField('zone', address.region, written);
+        if (buyerRules) {
+            Object.keys(values).forEach((suffix) => {
+                if (values[suffix] === undefined || values[suffix] === null || String(values[suffix]).trim() === '') delete values[suffix];
+            });
+            const zone = this.field('zone');
+            if ('zone' in values && zone && zone.value && zone.value !== '0' && !holdsOurs(zone)) delete values.zone;
+        }
+        const written = [];
+        ADDRESS_FIELDS.forEach((suffix) => {
+            if (suffix in values) {
+                this.writeField(suffix, values[suffix], written);
+                return;
+            }
+            if (!buyerRules) return;
+            const input = this.field(suffix);
+            if (!input || !input.hasAttribute(AUTOFILLED)) return;
+            const ours = holdsOurs(input);
+            input.removeAttribute(AUTOFILLED);
+            if (!ours || !input.value) return;
+            input.value = '';
+            written.push(input);
+        });
         written.forEach((input) => input.dispatchEvent(new Event('change', { bubbles: true })));
     };
 
+    /**
+     * The buyer's own verified phone, on the billing form only. A blank clears
+     * only a number this wrote (TWO-26775, as PrestaShop).
+     *
+     * @param {string} phone
+     */
+    RoleHost.prototype.writeTelephone = function (phone) {
+        const input = this.doc.getElementById('input-telephone');
+        if (!input || this.role !== 'payment') return;
+        const value = typeof phone === 'string' ? phone.trim() : '';
+        if (!value) {
+            if (!input.value || !holdsOurs(input)) return;
+            input.value = '';
+            input.removeAttribute(AUTOFILLED);
+        } else {
+            input.value = value;
+            input.setAttribute(AUTOFILLED, value);
+        }
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
     RoleHost.prototype.revertAddress = function () {
-        ['address-1', 'address-2', 'city', 'postcode', 'zone'].forEach((suffix) => {
+        ADDRESS_FIELDS.forEach((suffix) => {
             const input = this.field(suffix);
             if (!input || !input.hasAttribute(AUTOFILLED)) return;
             const ours = input.getAttribute(AUTOFILLED) === input.value;
@@ -297,9 +357,14 @@
         identity.addressNotice('');
         this.revertAddress();
         if (!item.lookupId || (!autofill && item.companyId)) return Promise.resolve();
+        // The answer belongs to this pick alone: a later pick, Enter manually or a
+        // new name since has set it aside, and its number must not reach that capture.
+        // A Sole trader click nobody was adopted from has not: the pick still stands (TWO-26775).
+        const superseded = () => seq !== this.lookupSeq || this.restingMode() !== 'registered'
+            || identity.companyName() !== item.text;
         return this.api.get('company_details', { lookup_id: item.lookupId })
             .then((json) => {
-                if (seq !== this.lookupSeq) return;
+                if (superseded()) return;
                 if (!json || json.error) throw new Error('unavailable');
                 if (!identity.companyId() && json.organization_number) {
                     identity.write({ companyId: json.organization_number, companyIdSource: 'registry' });
@@ -309,7 +374,7 @@
                 if (autofill) this.writeAddress(address);
             })
             .catch(() => {
-                if (seq === this.lookupSeq && autofill) identity.addressNotice(this.copy('address_unavailable'));
+                if (!superseded() && autofill) identity.addressNotice(this.copy('address_unavailable'));
             });
     };
 
@@ -317,13 +382,27 @@
         return String((this.component && this.component.countryCode()) || '').toUpperCase();
     };
 
+    /** @returns {string} the mode of the capture held, a pending Sole trader click looked through */
+    RoleHost.prototype.restingMode = function () {
+        const mode = this.identity.captureMode();
+        if (mode !== 'soletrader' || this.identity.soleTraderAdopted()) return mode;
+        return this.component ? this.component.restingMode() : 'registered';
+    };
+
+    /**
+     * The capture as the session keeps it. Sole-trader mode with nobody adopted
+     * has captured nothing of its own: the company in it is still the one the
+     * chip click left, and goes out under that capture's source, never as a
+     * sole trader a reload would restore as adopted (TWO-26775).
+     */
     RoleHost.prototype.company = function () {
         const identity = this.identity;
+        const mode = this.restingMode();
         return {
             company_name: identity.companyName().trim(),
-            organization_number: identity.companyId().trim(),
+            organization_number: mode === 'manual' ? '' : identity.companyId().trim(),
             country_code: this.country(),
-            source: SOURCES[identity.captureMode()] || 'search'
+            source: SOURCES[mode] || 'search'
         };
     };
 
@@ -335,6 +414,7 @@
         const key = JSON.stringify(company);
         if ((!force && key === this.saved) || (!company.country_code && company.company_name)) return this.pending;
         this.saved = key;
+        this.savedSource = company.source;
         this.pending = this.api.post('save_company', {
             role: this.role,
             company_name: company.company_name,
@@ -360,15 +440,17 @@
         if (!saved || !saved.company_name) return;
         const mode = { manual: 'manual', sole_trader: 'soletrader' }[saved.source] || 'registered';
         this.identity.captureMode(mode);
+        // A manual capture is a name alone, whatever the session holds beside it.
         this.identity.write({
             companyName: saved.company_name,
-            companyId: saved.organization_number,
+            companyId: mode === 'manual' ? '' : saved.organization_number,
             companyIdSource: mode === 'manual' ? '' : 'registry'
         }, { authoritative: true });
         if (mode === 'soletrader') this.identity.soleTraderAdopted(true);
         const input = this.doc.querySelector(this.fieldSelector());
         if (input) input.value = saved.company_name;
         this.saved = JSON.stringify(this.company());
+        this.savedSource = this.company().source;
     };
 
     RoleHost.prototype.signupPrefill = function () {
@@ -385,30 +467,6 @@
             phone_number: value('input-telephone'),
             country_code: this.country()
         };
-    };
-
-    RoleHost.prototype.renderSignupPrompt = function (show, onRetry) {
-        const input = this.doc.querySelector(this.fieldSelector());
-        const anchor = input && input.parentElement;
-        let prompt = this.prompt;
-        if (!show || !anchor) {
-            if (prompt) prompt.remove();
-            this.prompt = null;
-            return;
-        }
-        if (!prompt) {
-            prompt = this.doc.createElement('button');
-            prompt.type = 'button';
-            prompt.className = 'two-sole-trader-prompt two-field-action-link';
-            prompt.textContent = this.copy('sole_trader_prompt');
-            prompt.addEventListener('click', (event) => {
-                event.preventDefault();
-                this.retrySignup();
-            });
-            this.prompt = prompt;
-        }
-        this.retrySignup = onRetry;
-        if (prompt.parentNode !== anchor.parentNode) anchor.insertAdjacentElement('afterend', prompt);
     };
 
     /** The component's host contract, over this role. */
@@ -451,13 +509,6 @@
             supportedCountriesUrl: () => self.api.url('countries'),
             applyCompanyAddress: (item) => self.lookUp(item),
             revertAutofilledAddress: () => self.revertAddress(),
-            clearField: (selector) => {
-                const input = self.doc.querySelector(selector);
-                if (!input) return;
-                input.value = '';
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.focus();
-            },
             // No country: the tokens are the buyer's, minted once at boot for
             // every panel on the page, before any panel may know its country.
             tokensUrl: () => self.api.url('sole_trader_tokens'),
@@ -465,15 +516,9 @@
             apiClientParams: () => ({}),
             signupPrefill: () => self.signupPrefill(),
             signupCountry: () => self.country(),
-            applyBuyerAddress: (address) => self.writeAddress(address),
-            applyTelephone: (phone) => {
-                const input = self.doc.getElementById('input-telephone');
-                if (!input || !phone || self.role !== 'payment') return;
-                input.value = String(phone);
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-            },
-            showError: (message) => self.alert(message || self.copy('sole_trader_error')),
-            renderSignupPrompt: (show, onRetry) => self.renderSignupPrompt(show, onRetry)
+            applyBuyerAddress: (address) => self.writeAddress(address, { buyerRules: true }),
+            applyTelephone: (phone) => self.writeTelephone(phone),
+            showError: (message) => self.alert(message || self.copy('sole_trader_error'))
         };
     };
 
@@ -487,11 +532,14 @@
         this.identity = parts.createIdentity();
         this.restore();
         this.component = new parts.Component(this.options(parts));
-        // A pick or an adoption is saved at once, so the tile the shop renders
-        // next already has it; only typing in manual entry waits for a pause.
+        // A pick, an adoption and the move into manual entry are saved at once,
+        // so the tile the shop renders next, and an address saved straight
+        // after, already have them; only typing in manual entry waits for a
+        // pause. Entering manual entry late would let an address save keep the
+        // number it drops (TWO-26775).
         this.identity.subscribe(() => {
             this.syncBusy();
-            if (this.identity.captureMode() === 'manual') this.schedulePersist();
+            if (this.identity.captureMode() === 'manual' && this.savedSource === 'manual') this.schedulePersist();
             else this.persist();
         });
         this.component.start();

@@ -14,7 +14,7 @@ const I18N = {
     chip_registered: 'Registrert firma', chip_sole_trader: 'Enkeltpersonforetak', chip_manual: 'Skriv inn manuelt',
     search_aria: 'Søk', search_too_short: 'Minst 3', no_matches: 'Ingen treff', search_unavailable: 'Nede',
     select_country: 'Velg land', results_one: '1 treff', results_many: '%d treff', company_number: 'Org.nr',
-    select_different_sole_trader: 'Velg en annen', sole_trader_prompt: 'Klikk her', sole_trader_error: 'Feil',
+    select_different_sole_trader: 'Velg en annen', sole_trader_signup: 'Registrer deg', sole_trader_error: 'Feil',
     address_unavailable: 'Fant ikke adressen'
 };
 
@@ -238,6 +238,80 @@ describe('selection, saved captures and manual entry', () => {
         expect(field.getAttribute('role')).toBe(null);
         expect(calls.filter(([route]) => route === 'save').pop()[1]).toMatchObject({ company_name: 'Typed Ltd', organization_number: '', source: 'manual' });
     });
+
+    test('Enter manually after a pick keeps the name on screen and saves it at once, with no number (TWO-26775)', async () => {
+        document.body.innerHTML = ADDRESS('payment');
+        const { hosts, calls } = start(config({ address_lookup: false }));
+        await flush();
+        pick(hosts.payment);
+        await hosts.payment.flush();
+        hosts.payment.component.manualEntryMode();
+        // No flush of the debounce: an address saved straight after must already see the manual capture.
+        await flush();
+        expect([document.getElementById('input-payment-company').value, calls.filter(([route]) => route === 'save').pop()[1]])
+            .toEqual(['Acme Ltd', expect.objectContaining({ company_name: 'Acme Ltd', organization_number: '', source: 'manual' })]);
+    });
+
+    test.each([
+        ['the buyer keeps the name', ''],
+        ['the buyer types a new name first', 'Typed Ltd'],
+    ])('a details answer landing after Enter manually writes no number, even back in search (TWO-26775): %s', async (why, typed) => {
+        document.body.innerHTML = ADDRESS('payment');
+        let answer;
+        const pending = new Promise((resolve) => { answer = resolve; });
+        const { hosts, calls } = start(config(), { d: () => pending });
+        await flush();
+        pick(hosts.payment, { companyId: '', lookupId: 'L1' });
+        await flush();
+        hosts.payment.component.manualEntryMode();
+        if (typed) {
+            const field = document.getElementById('input-payment-company');
+            field.value = typed;
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        answer({ organization_number: '999', addresses: [] });
+        await flush();
+        hosts.payment.component.registeredMode();
+        await hosts.payment.flush();
+        await flush();
+        expect([why, hosts.payment.identity.companyId(), calls.filter(([route]) => route === 'save').pop()[1].organization_number])
+            .toEqual([why, '', '']);
+    });
+
+    test.each([
+        ['from the pick, the answer still writes its number', [], '999'],
+        ['from Enter manually, the answer writes nothing', [(host) => host.component.manualEntryMode()], ''],
+    ])('a details answer landing while a Sole trader click is pending, then a hand-close (TWO-26775): %s', async (why, before, expectedId) => {
+        document.body.innerHTML = ADDRESS('payment');
+        let answer;
+        const pending = new Promise((resolve) => { answer = resolve; });
+        const { hosts, calls } = start(config(), { d: () => pending });
+        await flush();
+        pick(hosts.payment, { companyId: '', lookupId: 'L1' });
+        await flush();
+        before.forEach((act) => act(hosts.payment));
+        hosts.payment.component.soleTraderMode();
+        answer({ organization_number: '999', addresses: [] });
+        await flush();
+        hosts.payment.component.abandonSoleTrader({ handClosed: true });
+        await hosts.payment.flush();
+        await flush();
+        expect([why, hosts.payment.identity.companyId(), calls.filter(([route]) => route === 'save').pop()[1].organization_number])
+            .toEqual([why, expectedId, expectedId]);
+    });
+
+    test.each([
+        [{ company_name: 'Acme Ltd', organization_number: '0123', source: 'manual' }, ['Acme Ltd', '', 'manual', false], 'a manual capture never brings a number back'],
+        [{ company_name: 'Acme Ltd', organization_number: '0123', source: 'search' }, ['Acme Ltd', '0123', 'registered', false], 'a registered capture keeps its number'],
+        [{ company_name: 'Ola Trader', organization_number: '777', source: 'sole_trader' }, ['Ola Trader', '777', 'soletrader', true], 'only a saved sole trader is restored as adopted'],
+    ])('a reload restores, case %#', async (saved, expected, description) => {
+        document.body.innerHTML = ADDRESS('payment');
+        const { hosts } = start(config({ companies: { payment: Object.assign({ country_code: 'GB' }, saved) } }), { st: ['LIMITED_COMPANY', 'SOLE_TRADER'] });
+        await flush();
+        const identity = hosts.payment.identity;
+        expect([[document.getElementById('input-payment-company').value, identity.companyId(), identity.captureMode(), identity.soleTraderAdopted()], description])
+            .toEqual([expected, description]);
+    });
 });
 
 describe('address autofill', () => {
@@ -258,6 +332,46 @@ describe('address autofill', () => {
         expect([expected ? fields('payment') : fields('payment').concat(fields('shipping')), description])
             .toEqual([expected || ['', '', '', '1', '', '', '', '1'], description]);
         expect(fields('shipping')).toEqual(['', '', '', '1']);
+    });
+
+    // PrestaShop's rules for a sole trader's record (TWO-26775). Each row starts from a field holding `before`, written by the plugin or not.
+    test.each([
+        ['city', 'Old Town', true, { city: 'Bergen' }, 'Bergen', 'a value overwrites the plugin\'s'],
+        ['city', 'Typed Town', false, { city: 'Bergen' }, 'Bergen', 'a value overwrites the buyer\'s'],
+        ['city', 'Old Town', true, { city: '   ' }, '', 'a blank clears the plugin\'s value'],
+        ['city', 'Typed Town', false, { city: '   ' }, 'Typed Town', 'a blank keeps the buyer\'s value'],
+        ['city', 'Old Town', true, { postal_code: '5003' }, '', 'left out: the plugin\'s value is cleared'],
+        ['city', 'Typed Town', false, { postal_code: '5003' }, 'Typed Town', 'left out: the buyer\'s value stays'],
+        ['zone', '', false, { region: 'greater london' }, '2', 'zone unanswered: filled'],
+        ['zone', '2', false, { region: 'select' }, '2', 'zone the buyer chose: kept'],
+        ['zone', '1', true, { region: 'greater london' }, '2', 'zone the plugin wrote: overwritten'],
+    ])('a sole trader\'s address, %s case %#', async (suffix, before, ours, address, after, description) => {
+        document.body.innerHTML = ADDRESS('payment');
+        const { hosts } = start(config());
+        await flush();
+        const input = document.getElementById('input-payment-' + suffix);
+        // OpenCart's own unanswered zone option.
+        if (input.tagName === 'SELECT') input.insertAdjacentHTML('afterbegin', '<option value="">--- Please Select ---</option>');
+        input.value = before;
+        if (ours) input.setAttribute('data-two-autofilled-value', before);
+        // As the sole-trader flow hands it over: blanks already dropped.
+        hosts.payment.component.host().applyBuyerAddress(Object.fromEntries(Object.entries(address).filter(([, value]) => value.trim())));
+        expect([input.value, description]).toEqual([after, description]);
+    });
+
+    test.each([
+        ['+47 1', false, '+47 2', '+47 2', 'a number overwrites'],
+        ['+47 1', true, '', '', 'a blank clears the plugin\'s number'],
+        ['+47 1', false, '', '+47 1', 'a blank keeps the buyer\'s number'],
+    ])('a sole trader\'s phone, case %#', async (before, ours, phone, after, description) => {
+        document.body.innerHTML = ADDRESS('payment') + '<input id="input-telephone">';
+        const { hosts } = start(config());
+        await flush();
+        const input = document.getElementById('input-telephone');
+        input.value = before;
+        if (ours) input.setAttribute('data-two-autofilled-value', before);
+        hosts.payment.component.host().applyTelephone(phone);
+        expect([input.value, description]).toEqual([after, description]);
     });
 
     test('a details failure shows the address notice under the field', async () => {
@@ -331,7 +445,8 @@ describe('sole trader', () => {
     // A country select with nothing chosen yet, as a guest first sees it.
     const UNCHOSEN = (role) => ADDRESS(role).replace('<option value="222">', '<option value="" selected>Select</option><option value="222">');
     const tokenCalls = (calls) => calls.filter(([route]) => route === 'stt').map(([, params]) => params);
-    const prompt = () => document.querySelector('.two-sole-trader-prompt');
+    // The blocked-popup panel over the popover (TWO-26775).
+    const prompt = () => document.querySelector('.two-company-dropdown__signup');
 
     // The tokens are page-level in the vendored module, so each test starts with none.
     beforeEach(() => {
@@ -369,14 +484,30 @@ describe('sole trader', () => {
         [(host) => host.component.manualEntryMode(), false, 'Enter manually hides it'],
         [(host) => { window.open.mockReturnValue(POPUP); host.component.soleTraderMode(); }, false, 'Sole trader, now allowed, hides it'],
         [(host) => host.component.soleTraderMode(), true, 'Sole trader, still blocked, keeps it'],
-    ])('the blocked-popup fallback after a chip switch, case %#', async (chip, shown, description) => {
+    ])('the blocked-popup panel after a chip switch, case %#', async (chip, shown, description) => {
         document.body.innerHTML = ADDRESS('shipping');
         jest.spyOn(window, 'open').mockReturnValue(null);
         const { hosts } = start(config({ address_lookup: false }), { stt: TOKENS, st: ['LIMITED_COMPANY', 'SOLE_TRADER'] });
         await flush();
         hosts.shipping.component.soleTraderMode();
-        const blocked = !!prompt();
+        const blocked = prompt() && prompt().textContent;
         chip(hosts.shipping);
-        expect([blocked, !!prompt(), description]).toEqual([true, shown, description]);
+        expect([blocked, !!prompt(), description]).toEqual(['Registrer deg', shown, description]);
+    });
+
+    test.each([
+        [false, { company_name: 'Acme Ltd', organization_number: '0123', source: 'search' }, 'nobody adopted: the registered pick is saved as it was'],
+        [true, { company_name: 'Ola Trader', organization_number: '777', source: 'sole_trader' }, 'adopted: saved as the sole trader'],
+    ])('what a Sole trader click saves, case %#', async (adopt, saved, description) => {
+        document.body.innerHTML = ADDRESS('shipping');
+        jest.spyOn(window, 'open').mockReturnValue(POPUP);
+        const { hosts, calls } = start(config({ address_lookup: false }), { stt: TOKENS, st: ['LIMITED_COMPANY', 'SOLE_TRADER'] });
+        await flush();
+        hosts.shipping.component.selectCompany({ text: 'Acme Ltd', companyId: '0123', lookupId: '' });
+        hosts.shipping.component.soleTraderMode();
+        if (adopt) hosts.shipping.component.soleTrader().adoptBuyer({ company_name: 'Ola Trader', organization_number: '777' });
+        await hosts.shipping.flush();
+        await flush();
+        expect([calls.filter(([route]) => route === 'save').pop()[1], description]).toEqual([expect.objectContaining(saved), description]);
     });
 });
