@@ -358,8 +358,9 @@
         this.revertAddress();
         if (!item.lookupId || (!autofill && item.companyId)) return Promise.resolve();
         // The answer belongs to this pick alone: a later pick, Enter manually or a
-        // new name since has set it aside, and its number must not reach that capture (TWO-26775).
-        const superseded = () => seq !== this.lookupSeq || identity.captureMode() !== 'registered'
+        // new name since has set it aside, and its number must not reach that capture.
+        // A Sole trader click nobody was adopted from has not: the pick still stands (TWO-26775).
+        const superseded = () => seq !== this.lookupSeq || this.restingMode() !== 'registered'
             || identity.companyName() !== item.text;
         return this.api.get('company_details', { lookup_id: item.lookupId })
             .then((json) => {
@@ -381,6 +382,13 @@
         return String((this.component && this.component.countryCode()) || '').toUpperCase();
     };
 
+    /** @returns {string} the mode of the capture held, a pending Sole trader click looked through */
+    RoleHost.prototype.restingMode = function () {
+        const mode = this.identity.captureMode();
+        if (mode !== 'soletrader' || this.identity.soleTraderAdopted()) return mode;
+        return this.component ? this.component.restingMode() : 'registered';
+    };
+
     /**
      * The capture as the session keeps it. Sole-trader mode with nobody adopted
      * has captured nothing of its own: the company in it is still the one the
@@ -389,10 +397,7 @@
      */
     RoleHost.prototype.company = function () {
         const identity = this.identity;
-        let mode = identity.captureMode();
-        if (mode === 'soletrader' && !identity.soleTraderAdopted()) {
-            mode = this.component ? this.component.restingMode() : 'registered';
-        }
+        const mode = this.restingMode();
         return {
             company_name: identity.companyName().trim(),
             organization_number: mode === 'manual' ? '' : identity.companyId().trim(),
