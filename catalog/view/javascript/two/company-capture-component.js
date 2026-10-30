@@ -959,7 +959,7 @@
     CompanyCaptureComponent.prototype.manualEntryMode = function () {
         // First, and by rule: the release below focuses the field the popup
         // parked focus on, which the popup's own focus rule ignores (TWO-26775).
-        this._soleTrader.closeSignupPopup({ byRule: true });
+        if (this._soleTrader) this._soleTrader.closeSignupPopup({ byRule: true });
         this.leaveSoleTraderMode();
         this._identity.captureMode('manual');
         this._identity.clearNumber();

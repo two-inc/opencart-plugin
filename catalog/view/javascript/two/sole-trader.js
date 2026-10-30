@@ -17,7 +17,7 @@
  *
  * FRAMEWORK-FREE, with a UMD tail, for the reason `company-search-panel.js` is:
  * Luma and Hyvä run this one file. Everything platform-shaped — the REST entry
- * point, the quote, the address write-back and the error surface — arrives
+ * point, the quote, the address write-back and the error surface, arrives
  * through `host`, which the capture component assembles from
  * its own options.
  *
@@ -418,7 +418,7 @@
     };
 
     /**
-     * "Select a different sole trader" — offer a choice, not what is on screen.
+     * "Select a different sole trader": offer a choice, not what is on screen.
      *
      * @param {Element} [launcher] the link the buyer used
      */

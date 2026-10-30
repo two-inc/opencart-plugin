@@ -387,7 +387,7 @@
         const identity = this.identity;
         let mode = identity.captureMode();
         if (mode === 'soletrader' && !identity.soleTraderAdopted()) {
-            mode = this.component && typeof this.component.restingMode === 'function' ? this.component.restingMode() : 'registered';
+            mode = this.component ? this.component.restingMode() : 'registered';
         }
         return {
             company_name: identity.companyName().trim(),
