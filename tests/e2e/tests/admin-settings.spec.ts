@@ -68,4 +68,6 @@ test("the Diagnostics tab's OpenCart version row is ok on the release CI runs, w
   const row = page.locator("#two-opencart-version");
   await expect(row, "the row is in the ok state").toHaveAttribute("data-state", "ok");
   await expect(row, "the row names the running release as supported").toHaveText(`OpenCart ${version} is supported.`);
+  // The seed shows and requires the telephone, which Two needs (TWO-27369).
+  await expect(page.locator("#two-telephone"), "the buyer telephone row is ok").toHaveAttribute("data-state", "ok");
 });

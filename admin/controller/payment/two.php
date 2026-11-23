@@ -29,6 +29,7 @@ use Opencart\System\Library\Extension\Two\Opencart\LogLogger;
 use Opencart\System\Library\Extension\Two\Opencart\NoteText;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 use Opencart\System\Library\Extension\Two\Opencart\SupportedVersion;
+use Opencart\System\Library\Extension\Two\Opencart\TelephoneSetting;
 
 /**
  * Admin adapter for the Two payment extension (Extensions > Payments > Two).
@@ -180,6 +181,8 @@ class Two extends \Opencart\System\Engine\Controller
         $data['health'] = $this->healthRow($services, $shopCurrency);
         // The running OpenCart release: an unsupported one gets a banner and a failing Diagnostics row, and nothing is blocked (TWO-27238).
         $data['opencart_version'] = SupportedVersion::row(VERSION, fn (string $key): string => $this->language->get($key));
+        // Two needs the buyer's phone number: warn unless checkout requires one (TWO-27369).
+        $data['telephone'] = TelephoneSetting::row((bool) $this->config->get('config_telephone_display'), (bool) $this->config->get('config_telephone_required'), $brand, fn (string $key): string => $this->language->get($key));
 
         // Payment terms: the record's terms, the merchant's narrowing, and the surcharge.
         $terms = $services->paymentTerms();
@@ -1194,10 +1197,6 @@ class Two extends \Opencart\System\Engine\Controller
         }
         if ($health['refused_currencies'] !== []) {
             $clauses[] = sprintf($this->language->get('text_health_currencies'), implode(', ', $health['refused_currencies']));
-        }
-        // Two needs the buyer's phone number (TWO-27369).
-        if (!$this->config->get('config_telephone_display') || !$this->config->get('config_telephone_required')) {
-            $clauses[] = sprintf($this->language->get('text_health_telephone'), $brand->productName);
         }
         $fx = $services->fx->table();
         if ($fx !== null && $fx['fetched_at'] > 0) {

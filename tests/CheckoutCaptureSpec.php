@@ -80,6 +80,25 @@ final class CheckoutCaptureSpec
         $keys = array_map(static fn (array $call): ?string => IdempotencyKey::in($call['headers']), $transport->calls);
         TinyAssert::true(str_starts_with((string) $keys[0], 'intent_0123456789abcdef_'), 'order intent: keyed on the buyer\'s session');
         TinyAssert::same([true, false], [$keys[0] === $keys[1], $keys[1] === $keys[2]], 'order intent: the same question repeats its key, another company asks a new one');
+
+        // The phone is judged after the order postprocessing hook, which may supply or remove it (TWO-27369).
+        $phone = static fn (string $value): \Closure => static function (array $payload) use ($value): array {
+            $payload['buyer']['representative']['phone_number'] = $value;
+
+            return $payload;
+        };
+        $hooked = [
+            ['', $phone('+44 20 7946 0000'), OrderFlow::APPROVED, [], 1, 'the hook supplies a phone the order lacks: Two is asked'],
+            ['+4799999999', $phone(' '), OrderFlow::REFUSED, [OrderFlow::INTENT_PHONE_REQUIRED], 0, 'the hook blanks the phone: asked for, nothing sent'],
+            ['+4799999999', static fn (array $payload): array => $payload, OrderFlow::APPROVED, [], 1, 'a hook that leaves the phone: Two is asked'],
+        ];
+        foreach ($hooked as [$orderPhone, $hook, $outcome, $buyer, $calls, $description]) {
+            [$flow, $transport] = self::flow([self::json(200, ['approved' => true])], null, ['phone' => $hook]);
+            $order = self::order();
+            $order['buyer']['phone_number'] = $orderPhone;
+            $result = $flow->intent($order, self::lines(), [], self::SESSION, ['merchant_short_name' => 'acme']);
+            TinyAssert::same([$outcome, $buyer, $calls], [$result['outcome'], $result['buyer'], count($transport->calls)], 'TWO-27369: order intent after the hook: ' . $description);
+        }
     }
 
     /**
@@ -401,13 +420,14 @@ final class CheckoutCaptureSpec
 
     /**
      * @param list<HttpResponse> $responses
+     * @param array<string, \Closure(array<string, mixed>, array<string, mixed>): mixed> $hooks the order postprocessing subscribers, by name
      * @return array{0: OrderFlow, 1: ScriptedTransport}
      */
-    private static function flow(array $responses, ?MemoryRecords $records = null): array
+    private static function flow(array $responses, ?MemoryRecords $records = null, array $hooks = []): array
     {
         $transport = new ScriptedTransport($responses);
         $logger = new RecordingLogger();
-        $flow = new OrderFlow(self::client($transport, $logger), new OrderBuilder(), new Postprocessing(new ScriptedSubscribers([]), $logger), new ErrorMapper(), $records ?? new MemoryRecords(), $logger);
+        $flow = new OrderFlow(self::client($transport, $logger), new OrderBuilder(), new Postprocessing(new ScriptedSubscribers($hooks), $logger), new ErrorMapper(), $records ?? new MemoryRecords(), $logger);
 
         return [$flow, $transport];
     }

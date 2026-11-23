@@ -131,7 +131,6 @@ $_['text_basis_gross'] = 'con impuestos';
 $_['text_basis_net'] = 'sin impuestos';
 $_['text_or'] = 'o';
 $_['text_health_countries'] = 'se ofrece solo a compradores en %s';
-$_['text_health_telephone'] = 'rechazado si el comprador no indica un número de teléfono, ya que %s lo necesita: activa Mostrar teléfono y Teléfono obligatorio en Sistema > Configuración > Opción';
 $_['text_health_currencies'] = 'oculto para carritos en %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Descargar nota de crédito';
@@ -330,6 +329,9 @@ $_['text_pending_stale'] = '%d pedidos de Two esperan a que el comprador vuelva,
 $_['entry_opencart_version'] = 'Versión de OpenCart';
 $_['text_opencart_supported'] = 'OpenCart %s es compatible.';
 $_['text_opencart_untested'] = 'OpenCart %s no se ha probado con esta extensión.';
+$_['entry_telephone'] = 'Teléfono del comprador';
+$_['text_telephone_required'] = 'El pago pide un número de teléfono a cada comprador.';
+$_['text_telephone_missing'] = 'El pago no exige un número de teléfono y %s lo necesita: a un comprador que no lo indique se le pide que elija otro método de pago. Activa Mostrar teléfono y Teléfono obligatorio en Sistema > Configuración > Opción.';
 $_['text_opencart_unsupported'] = 'OpenCart %1$s no es compatible. Un error conocido de esta versión de OpenCart puede romper los pedidos, sea cual sea el método de pago: %2$s. Actualiza OpenCart a la versión %3$s o posterior.';
 $_['text_opencart_bug_guest_checkout'] = 'los invitados no pueden completar la compra';
 $_['text_opencart_bug_order_edit'] = 'al editar un pedido en la administración, pasa a ser un pedido perdido';

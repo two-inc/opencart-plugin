@@ -572,6 +572,12 @@
                   <p id="two-opencart-version" class="form-control-plaintext {% if opencart_version.state == 'ok' %}text-success{% elseif opencart_version.state == 'unsupported' %}text-danger{% else %}text-warning{% endif %}" data-state="{{ opencart_version.state|e }}">{{ opencart_version.text|e }}</p>
                 </div>
               </div>
+              <div class="row mb-3">
+                <label class="col-sm-2 col-form-label">{{ entry_telephone|e }}</label>
+                <div class="col-sm-10">
+                  <p id="two-telephone" class="form-control-plaintext {% if telephone.state == 'ok' %}text-success{% else %}text-warning{% endif %}" data-state="{{ telephone.state|e }}">{{ telephone.text|e }}</p>
+                </div>
+              </div>
             </div>
 
           </div>

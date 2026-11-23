@@ -131,7 +131,6 @@ $_['text_basis_gross'] = 'inklusiv mva.';
 $_['text_basis_net'] = 'eksklusiv mva.';
 $_['text_or'] = 'eller';
 $_['text_health_countries'] = 'tilbys bare kjøpere i %s';
-$_['text_health_telephone'] = 'avvist for en kjøper som ikke oppgir telefonnummer, siden %s trenger et: slå på Vis telefon og Telefon påkrevd under System > Innstillinger > Alternativ';
 $_['text_health_currencies'] = 'skjult for handlekorger i %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Last ned kreditnota';
@@ -330,6 +329,9 @@ $_['text_pending_stale'] = '%d Two-ordrer venter på at kjøperen skal komme til
 $_['entry_opencart_version'] = 'OpenCart-versjon';
 $_['text_opencart_supported'] = 'OpenCart %s støttes.';
 $_['text_opencart_untested'] = 'OpenCart %s er ikke testet med denne utvidelsen.';
+$_['entry_telephone'] = 'Kjøperens telefon';
+$_['text_telephone_required'] = 'Kassen ber hver kjøper om et telefonnummer.';
+$_['text_telephone_missing'] = 'Kassen krever ikke telefonnummer, og %s trenger et: en kjøper som ikke oppgir det, blir bedt om å velge en annen betalingsmåte. Slå på Vis telefon og Telefon påkrevd under System > Innstillinger > Alternativ.';
 $_['text_opencart_unsupported'] = 'OpenCart %1$s støttes ikke. En kjent feil i denne OpenCart-versjonen kan ødelegge ordrer, uansett betalingsmåte: %2$s. Oppgrader OpenCart til %3$s eller nyere.';
 $_['text_opencart_bug_guest_checkout'] = 'gjester kan ikke fullføre kjøpet i kassen';
 $_['text_opencart_bug_order_edit'] = 'en ordre som redigeres i administrasjonen, blir en manglende ordre';
