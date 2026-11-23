@@ -160,12 +160,15 @@
             }
             this.showCompany();
             if (!company) {
+                // No company, nothing to ask: Confirm is offered again and
+                // tells the buyer what is missing if pressed.
                 this.intentSeq += 1;
                 const notice = this.doc.getElementById('two-intent-notice');
                 if (notice) {
                     notice.className = '';
                     notice.textContent = '';
                 }
+                this.offer(true);
                 return Promise.resolve();
             }
             return this.intent();
@@ -200,7 +203,8 @@
             button.setAttribute('aria-busy', 'true');
             const reset = (message) => {
                 this.confirming = false;
-                button.disabled = false;
+                // An intent that withdrew the tile meanwhile keeps Confirm off; its notice says why.
+                button.disabled = this.offered === false;
                 button.removeAttribute('aria-busy');
                 if (message) {
                     this.alert(message);
@@ -299,8 +303,10 @@
          * Offers the payment terms and the confirm button, or withdraws both
          * when the intent rules Two out of this checkout (TWO-27369): its
          * notice then tells the buyer to choose another payment method.
+         * Every state that withdraws them shows a notice.
          */
         offer(on) {
+            this.offered = on;
             const terms = this.tile && this.tile.querySelector('[data-two-terms]');
             if (terms) {
                 terms.hidden = !on;
@@ -311,7 +317,12 @@
             }
         }
 
-        /** Asks the order intent and shows its notice; a later ask supersedes an earlier one. */
+        /**
+         * Asks the order intent and shows its notice; a later ask supersedes
+         * an earlier one. The terms and Confirm stay as they are until the
+         * answer (the notice says the order is being checked), and are
+         * offered again if no answer comes.
+         */
         intent() {
             const notice = this.doc.getElementById('two-intent-notice');
             // The merchant switched the preview off: confirm still asks its own intent.
@@ -325,7 +336,6 @@
             });
             notice.className = 'form-text';
             notice.textContent = this.config.i18n.checking || '';
-            this.offer(true);
             return this.api.post('intent', params)
                 .then((json) => {
                     if (seq !== this.intentSeq) {
@@ -341,6 +351,7 @@
                     if (seq === this.intentSeq) {
                         notice.className = '';
                         notice.textContent = '';
+                        this.offer(true);
                     }
                 });
         }

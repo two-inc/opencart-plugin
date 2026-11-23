@@ -186,23 +186,65 @@ describe('order intent from the tile', () => {
         expect([calls.filter(([route]) => route === 'i').length, description]).toEqual([asked, description]);
     });
 
+    const WITHDRAWN = { outcome: 'refused', notice: 'choose another', withdrawn: true };
+    const APPROVED = { outcome: 'approved', notice: 'likely', withdrawn: false };
+    const UNANSWERED = new Promise(() => {});
+    const OTHER_COMPANY = { company_name: 'Example & Co Ltd', organization_number: '0456', country_code: 'GB', source: 'search' };
+
+    /**
+     * The first step is the tile's own ask; each later step is the buyer
+     * picking another company (the intent answers with it: an answer, an
+     * Error for no answer, or UNANSWERED for one still out) or 'clear'.
+     * Expected: [terms hidden, Confirm disabled, notice text].
+     */
     test.each([
-        [[{ outcome: 'refused', notice: 'choose another', withdrawn: true }], [true, true], 'TWO-27369: a withdrawn tile hides its terms and disables confirm'],
-        [[{ outcome: 'approved', notice: 'likely', withdrawn: false }], [false, false], 'an approval offers both'],
-        [[{ outcome: 'declined', notice: 'cannot' }], [false, false], 'a decline leaves both, as confirm asks again'],
-        [[{ outcome: 'refused', notice: 'choose another', withdrawn: true }, { outcome: 'approved', notice: 'likely', withdrawn: false }], [false, false], 'a later approval offers both again'],
-    ])('withdrawal %#', async (answers, expected, description) => {
+        [[WITHDRAWN], [true, true, 'choose another'], 'TWO-27369: a withdrawn tile hides its terms and disables confirm'],
+        [[APPROVED], [false, false, 'likely'], 'an approval offers both'],
+        [[{ outcome: 'declined', notice: 'cannot' }], [false, false, 'cannot'], 'a decline leaves both, as confirm asks again'],
+        [[WITHDRAWN, APPROVED], [false, false, 'likely'], 'another company approved after a withdrawal offers both again'],
+        [[WITHDRAWN, 'clear'], [false, false, ''], 'the company cleared after a withdrawal offers both again (confirm then asks for a company)'],
+        [[WITHDRAWN, UNANSWERED], [true, true, 'checking'], 'another company being checked after a withdrawal keeps both off and says so'],
+        [[WITHDRAWN, new Error('down')], [false, false, ''], 'another company with no answer after a withdrawal offers both again'],
+        [[APPROVED, UNANSWERED], [false, false, 'checking'], 'another company being checked after an approval leaves both offered'],
+        [[WITHDRAWN, 'clear', WITHDRAWN], [true, true, 'choose another'], 'a company withdrawn again after a clear withdraws both again'],
+    ])('withdrawal %#', async (steps, expected, description) => {
         const form = tile('address', '<p data-two-company-summary>Buying for Acme</p><div data-two-terms></div>');
         document.body.insertAdjacentHTML('beforeend', '<button id="button-two-confirm">Confirm</button>');
-        let asked = 0;
-        const { fetchImpl } = shop({ i: () => answers[Math.min(asked++, answers.length - 1)] });
+        const answers = steps.filter((step) => step !== 'clear');
+        const { fetchImpl } = shop({ i: () => answers.shift() });
         const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
         await checkout.tileReady(form);
-        for (let again = 1; again < answers.length; again++) {
-            await checkout.intent();
+        for (const step of steps.slice(1)) {
+            checkout.companyChanged('payment', step === 'clear' ? null : OTHER_COMPANY);
+            await flush();
         }
-        const state = [form.querySelector('[data-two-terms]').hidden, document.getElementById('button-two-confirm').disabled];
+        const notice = document.getElementById('two-intent-notice').textContent;
+        const state = [form.querySelector('[data-two-terms]').hidden, document.getElementById('button-two-confirm').disabled, notice];
         expect([state, description]).toEqual([expected, description]);
+        // Every state that disables Confirm tells the buyer why.
+        expect([state[1] && notice === '', description]).toEqual([false, description]);
+    });
+
+    test('TWO-27369: a withdrawal that lands while confirm runs keeps confirm off', async () => {
+        const form = tile('address', '<p data-two-company-summary>Buying for Acme</p><div data-two-terms></div>');
+        document.body.insertAdjacentHTML('beforeend', '<button id="button-two-confirm">Confirm</button>');
+        const button = document.getElementById('button-two-confirm');
+        const later = {};
+        const deferred = (name) => () => new Promise((resolve) => {
+            later[name] = resolve;
+        });
+        const cfg = config({ urls: Object.assign({}, config().urls, { confirm: 'index.php?route=confirm' }) });
+        const { fetchImpl } = shop({ i: deferred('intent'), confirm: deferred('confirm') });
+        const checkout = new Checkout(cfg, document, new Api(cfg, fetchImpl), window);
+        checkout.tileReady(form);
+        await flush();
+        const confirming = checkout.confirm(button, form);
+        await flush();
+        later.intent(WITHDRAWN);
+        await flush();
+        later.confirm({ error: 'choose another' });
+        await confirming;
+        expect([button.disabled, document.getElementById('two-intent-notice').textContent]).toEqual([true, 'choose another']);
     });
 
     test.each([
