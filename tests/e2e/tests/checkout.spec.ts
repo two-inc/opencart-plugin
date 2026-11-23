@@ -42,20 +42,39 @@ test("a buyer finds their company, places the order with Two and sees the confir
   expect(intent.line_items.every((l: any) => "discount_amount" in l), "intent lines keep their own discount_amount").toBe(true);
 });
 
+/** Runs `body` with the shop's config settings set to `values`, then puts back what was there: the value found, or no row. */
+async function withConfig(values: Record<string, string>, body: () => Promise<void>): Promise<void> {
+  const set = (key: string, value: string) => sql(`DELETE FROM oc_setting WHERE store_id = 0 AND \`key\` = '${key}'; INSERT INTO oc_setting SET store_id = 0, code = 'config', \`key\` = '${key}', value = '${value}', serialized = 0`);
+  const found = Object.keys(values).map((key) => [key, sql(`SELECT value FROM oc_setting WHERE store_id = 0 AND \`key\` = '${key}'`)] as const);
+  Object.entries(values).forEach(([key, value]) => set(key, value));
+  try {
+    await body();
+  } finally {
+    found.forEach(([key, rows]) => (rows.length ? set(key, rows[0][0]) : sql(`DELETE FROM oc_setting WHERE store_id = 0 AND \`key\` = '${key}'`)));
+  }
+}
+
 test("company autofill writes the registry's phone into the buyer's telephone field", async ({ page }) => {
   // OpenCart shows the telephone field only when the shop asks for it (TWO-27110).
-  const found = sql("SELECT value FROM oc_setting WHERE store_id = 0 AND `key` = 'config_telephone_display'");
-  const set = (value: string) => sql(`DELETE FROM oc_setting WHERE store_id = 0 AND \`key\` = 'config_telephone_display'; INSERT INTO oc_setting SET store_id = 0, code = 'config', \`key\` = 'config_telephone_display', value = '${value}', serialized = 0`);
-  set("1");
-  try {
+  await withConfig({ config_telephone_display: "1" }, async () => {
     await addToCart(page, 1);
     await guestDetails(page, "E2E Trad");
     await expect(page.locator("#input-telephone"), "the picked company's registry phone").toHaveValue("+44 20 7946 0000");
-  } finally {
-    // Put back what was there: the value found, or no row.
-    if (found.length) set(found[0][0]);
-    else sql("DELETE FROM oc_setting WHERE store_id = 0 AND `key` = 'config_telephone_display'");
-  }
+  });
+});
+
+test("a buyer who gives no phone number is asked for one, Two is not asked, and Confirm stays disabled", async ({ page }) => {
+  // Two refuses an order with no phone number, so the tile withdraws itself without asking Two (TWO-27369).
+  await withConfig({ config_telephone_display: "0", config_telephone_required: "0" }, async () => {
+    const seen = (await requests("")).length;
+    await addToCart(page, 1);
+    await chooseTwo(page, await guestDetails(page, "E2E Trad"));
+    await expect(page.locator("#two-intent-notice"), "the buyer is asked for a phone number").toContainText("needs a phone number");
+    await expect(page.locator("#button-two-confirm"), "Confirm is withdrawn").toBeDisabled();
+    await expect(page.locator("#checkout-confirm [data-two-terms]"), "the terms are withdrawn").toBeHidden();
+    const sent = (await requests("")).slice(seen);
+    expect(sent.filter((r) => r.path === "/v1/order_intent"), "no order intent reaches Two").toEqual([]);
+  });
 });
 
 test("a coupon reaches Two as a negative discount line, and Two accepts the order", async ({ page }) => {

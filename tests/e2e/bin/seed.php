@@ -15,6 +15,9 @@ declare(strict_types=1);
  *   the default currency at 1 and every other relative to it.
  * - Turns on the demo data's 10% coupon (2222), which has expired, with no
  *   use limit, so a spec can send an order with a discount line.
+ * - Shows and requires the buyer's telephone at checkout, as the extension's
+ *   health row asks: Two refuses an order with no phone number, so the tile
+ *   withdraws itself from a buyer who gave none (TWO-27369).
  */
 
 // CLI only: the staging shops serve the whole repo under the web root.
@@ -55,3 +58,9 @@ echo "[seed] the store's currency is GBP\n";
 
 $db->query("UPDATE `{$prefix}coupon` SET status = 1, date_start = '2020-01-01', date_end = '2099-12-31', uses_total = 0, uses_customer = '0' WHERE code = '2222'");
 echo "[seed] coupon 2222 (10% off) is on\n";
+
+foreach (['config_telephone_display', 'config_telephone_required'] as $key) {
+    $db->query("DELETE FROM `{$prefix}setting` WHERE store_id = 0 AND `key` = '{$key}'");
+    $db->query("INSERT INTO `{$prefix}setting` SET store_id = 0, code = 'config', `key` = '{$key}', value = '1', serialized = 0");
+}
+echo "[seed] the checkout shows and requires the buyer's telephone\n";
