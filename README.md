@@ -34,6 +34,7 @@ What the buyer sees at checkout:
 
 - The payment method title and an optional subtitle, per language. The extension ships English, Norwegian (Bokmål), Swedish, Dutch and Spanish, in the admin and at checkout; install the matching OpenCart language pack for each.
 - Company search in the address form, and autofill of the company address.
+- Region with company search: OpenCart requires a region on every address in a country that has regions, but the address data in company search results does not always carry one (UK registry addresses usually do not). Autofill then leaves Region empty and the buyer picks it before continuing. If you do not need regions for a country, you can remove that country's zones under System > Localisation > Zones; OpenCart then accepts its addresses with no region, which saves the buyer that step.
 - Optional invoice email, PO number, project and department fields.
 - The minimum order value, and whether it is measured with or without tax.
 - The order intent pre-approval check, the "What is Two" link and the field tooltips.
