@@ -187,6 +187,25 @@ describe('order intent from the tile', () => {
     });
 
     test.each([
+        [[{ outcome: 'refused', notice: 'choose another', withdrawn: true }], [true, true], 'TWO-27369: a withdrawn tile hides its terms and disables confirm'],
+        [[{ outcome: 'approved', notice: 'likely', withdrawn: false }], [false, false], 'an approval offers both'],
+        [[{ outcome: 'declined', notice: 'cannot' }], [false, false], 'a decline leaves both, as confirm asks again'],
+        [[{ outcome: 'refused', notice: 'choose another', withdrawn: true }, { outcome: 'approved', notice: 'likely', withdrawn: false }], [false, false], 'a later approval offers both again'],
+    ])('withdrawal %#', async (answers, expected, description) => {
+        const form = tile('address', '<p data-two-company-summary>Buying for Acme</p><div data-two-terms></div>');
+        document.body.insertAdjacentHTML('beforeend', '<button id="button-two-confirm">Confirm</button>');
+        let asked = 0;
+        const { fetchImpl } = shop({ i: () => answers[Math.min(asked++, answers.length - 1)] });
+        const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
+        await checkout.tileReady(form);
+        for (let again = 1; again < answers.length; again++) {
+            await checkout.intent();
+        }
+        const state = [form.querySelector('[data-two-terms]').hidden, document.getElementById('button-two-confirm').disabled];
+        expect([state, description]).toEqual([expected, description]);
+    });
+
+    test.each([
         [true, 1, 'the preview on asks once the company is known'],
         [undefined, 1, 'a page without the switch asks, as before it existed'],
         [false, 0, 'the preview switched off asks nothing'],

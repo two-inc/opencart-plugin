@@ -57,7 +57,8 @@ final class CheckoutCaptureSpec
             [[], [], '', OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNPROCESSABLE], 0, 'no session: nothing sent, so no key is ever shared'],
             [[], [], 'not-a-hash', OrderFlow::UNDECIDED, [OrderFlow::INTENT_UNPROCESSABLE], 0, 'a session value that is not a hash: nothing sent'],
             [[], ['company' => ['company_name' => 'Acme AS', 'organization_number' => '', 'country_code' => 'NO']], self::SESSION, OrderFlow::REFUSED, [ErrorMapper::COMPANY_REQUIRED], 0, 'no organisation number: asked for, nothing sent'],
-            [[], ['total' => 300], self::SESSION, OrderFlow::REFUSED, [ErrorMapper::GENERIC], 0, 'a failed shop-match check: nothing sent'],
+            [[], ['total' => 300], self::SESSION, OrderFlow::REFUSED, [OrderFlow::INTENT_NOT_OFFERED], 0, 'a failed shop-match check: nothing sent, another method is asked for'],
+            [[], ['buyer' => ['email' => 'buyer@example.com', 'first_name' => 'Kari', 'last_name' => 'Nordmann', 'phone_number' => ' ']], self::SESSION, OrderFlow::REFUSED, [OrderFlow::INTENT_PHONE_REQUIRED], 0, 'TWO-27369: no phone number: asked for, nothing sent'],
         ];
         foreach ($cases as [$responses, $order, $session, $outcome, $buyer, $calls, $description]) {
             [$flow, $transport] = self::flow($responses);
@@ -139,6 +140,18 @@ final class CheckoutCaptureSpec
         ];
         foreach ($cases as [$outcome, $buyer, $expected, $description]) {
             TinyAssert::same($expected, OrderFlow::afterIntent(['outcome' => $outcome, 'reason' => '', 'buyer' => $buyer]), 'placement after the intent: ' . $description);
+        }
+
+        $withdrawn = [
+            [OrderFlow::REFUSED, [OrderFlow::INTENT_NOT_OFFERED], true, 'an order that cannot be put to Two'],
+            [OrderFlow::REFUSED, [OrderFlow::INTENT_PHONE_REQUIRED], true, 'no phone number'],
+            [OrderFlow::REFUSED, [ErrorMapper::COMPANY_REQUIRED], false, 'no company: the buyer can still give one'],
+            [OrderFlow::APPROVED, [], false, 'approved'],
+            [OrderFlow::DECLINED, [], false, 'declined'],
+            [OrderFlow::UNDECIDED, [OrderFlow::INTENT_CONNECTION], false, 'no answer: confirm asks again'],
+        ];
+        foreach ($withdrawn as [$outcome, $buyer, $expected, $description]) {
+            TinyAssert::same($expected, OrderFlow::withdrawsTile(['outcome' => $outcome, 'buyer' => $buyer]), 'TWO-27369: the tile is withdrawn: ' . $description);
         }
     }
 

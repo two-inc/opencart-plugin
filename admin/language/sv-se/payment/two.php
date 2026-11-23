@@ -131,6 +131,7 @@ $_['text_basis_gross'] = 'inklusive skatt';
 $_['text_basis_net'] = 'exklusive skatt';
 $_['text_or'] = 'eller';
 $_['text_health_countries'] = 'erbjuds endast köpare i %s';
+$_['text_health_telephone'] = 'avvisas för en köpare som inte anger något telefonnummer, eftersom %s behöver ett: aktivera Visa telefon och Telefon krävs under System > Inställningar > Alternativ';
 $_['text_health_currencies'] = 'döljs för varukorgar i %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Ladda ner kreditnota';

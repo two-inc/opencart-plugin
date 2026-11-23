@@ -46,6 +46,7 @@ $_['note_cancel_callback_placed'] = 'De annulering is geweigerd: de bestelling i
 $_['note_cancel_callback_session'] = 'De annulering is geweigerd: die kwam niet uit de sessie van de koper.';
 $_['note_intent_no_session'] = 'De aanvraag voor de bestelling is niet verzonden: geen afrekensessie.';
 $_['note_intent_not_built'] = 'De aanvraag voor de bestelling is niet verzonden: %s';
+$_['note_intent_no_phone'] = 'De aanvraag voor de bestelling is niet verzonden: de koper heeft geen telefoonnummer opgegeven, en Two heeft dat nodig.';
 $_['note_intent_approved'] = 'Two heeft de aanvraag voor de bestelling goedgekeurd.';
 $_['note_intent_declined'] = 'Two heeft de aanvraag voor de bestelling afgewezen.';
 $_['note_intent_undecided'] = 'Two antwoordde op de aanvraag voor de bestelling zonder besluit (HTTP %s).';

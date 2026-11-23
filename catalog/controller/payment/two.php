@@ -275,7 +275,8 @@ class Two extends \Opencart\System\Engine\Controller
             $result['buyer'] !== [] => $this->buyerMessage($result['buyer']),
             default => '',
         };
-        $this->json(['outcome' => $result['outcome'], 'notice' => $notice]);
+        // A withdrawn tile hides its terms and its confirm button (TWO-27369).
+        $this->json(['outcome' => $result['outcome'], 'notice' => $notice, 'withdrawn' => OrderFlow::withdrawsTile($result)]);
     }
 
     /**

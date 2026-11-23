@@ -1195,6 +1195,10 @@ class Two extends \Opencart\System\Engine\Controller
         if ($health['refused_currencies'] !== []) {
             $clauses[] = sprintf($this->language->get('text_health_currencies'), implode(', ', $health['refused_currencies']));
         }
+        // Two needs the buyer's phone number (TWO-27369).
+        if (!$this->config->get('config_telephone_display') || !$this->config->get('config_telephone_required')) {
+            $clauses[] = sprintf($this->language->get('text_health_telephone'), $brand->productName);
+        }
         $fx = $services->fx->table();
         if ($fx !== null && $fx['fetched_at'] > 0) {
             $clauses[] = sprintf($this->language->get('text_health_fx'), $brand->productName, gmdate('Y-m-d H:i', $fx['fetched_at']) . 'Z');

@@ -131,6 +131,7 @@ $_['text_basis_gross'] = 'inclusief btw';
 $_['text_basis_net'] = 'exclusief btw';
 $_['text_or'] = 'of';
 $_['text_health_countries'] = 'alleen aangeboden aan kopers in %s';
+$_['text_health_telephone'] = 'geweigerd voor een koper zonder telefoonnummer, omdat %s er een nodig heeft: zet Telefoon tonen en Telefoon verplicht aan onder Systeem > Instellingen > Optie';
 $_['text_health_currencies'] = 'verborgen voor winkelwagens in %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Creditnota downloaden';

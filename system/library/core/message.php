@@ -63,6 +63,7 @@ final class Message
         'note_cancel_callback_session' => 'Cancel callback refused: it did not come from the buyer\'s session.',
         'note_intent_no_session' => 'Order intent not sent: no checkout session.',
         'note_intent_not_built' => 'Order intent not sent: %s',
+        'note_intent_no_phone' => 'Order intent not sent: the buyer gave no phone number, which Two needs.',
         'note_intent_approved' => 'Two approved the order intent.',
         'note_intent_declined' => 'Two declined the order intent.',
         'note_intent_undecided' => 'Two answered the order intent without a decision (HTTP %s).',

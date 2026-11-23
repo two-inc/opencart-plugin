@@ -131,6 +131,7 @@ $_['text_basis_gross'] = 'including tax';
 $_['text_basis_net'] = 'excluding tax';
 $_['text_or'] = 'or';
 $_['text_health_countries'] = 'offered only to buyers in %s';
+$_['text_health_telephone'] = 'refused for a buyer who gives no phone number, as %s needs one: turn on Telephone Display and Telephone Required under System > Settings > Option';
 $_['text_health_currencies'] = 'hidden for baskets in %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Download credit note';

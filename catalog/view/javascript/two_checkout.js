@@ -295,6 +295,22 @@
             summary.classList.remove('text-danger');
         }
 
+        /**
+         * Offers the payment terms and the confirm button, or withdraws both
+         * when the intent rules Two out of this checkout (TWO-27369): its
+         * notice then tells the buyer to choose another payment method.
+         */
+        offer(on) {
+            const terms = this.tile && this.tile.querySelector('[data-two-terms]');
+            if (terms) {
+                terms.hidden = !on;
+            }
+            const button = this.doc.getElementById('button-two-confirm');
+            if (button && !this.confirming) {
+                button.disabled = !on;
+            }
+        }
+
         /** Asks the order intent and shows its notice; a later ask supersedes an earlier one. */
         intent() {
             const notice = this.doc.getElementById('two-intent-notice');
@@ -309,6 +325,7 @@
             });
             notice.className = 'form-text';
             notice.textContent = this.config.i18n.checking || '';
+            this.offer(true);
             return this.api.post('intent', params)
                 .then((json) => {
                     if (seq !== this.intentSeq) {
@@ -318,6 +335,7 @@
                     notice.className = outcome === 'approved' ? 'alert alert-success' : (json && json.notice ? 'alert alert-warning' : '');
                     // The shop escapes the notice.
                     notice.innerHTML = (json && json.notice) || '';
+                    this.offer(!(json && json.withdrawn));
                 })
                 .catch(() => {
                     if (seq === this.intentSeq) {

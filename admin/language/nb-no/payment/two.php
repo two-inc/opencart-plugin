@@ -131,6 +131,7 @@ $_['text_basis_gross'] = 'inklusiv mva.';
 $_['text_basis_net'] = 'eksklusiv mva.';
 $_['text_or'] = 'eller';
 $_['text_health_countries'] = 'tilbys bare kjøpere i %s';
+$_['text_health_telephone'] = 'avvist for en kjøper som ikke oppgir telefonnummer, siden %s trenger et: slå på Vis telefon og Telefon påkrevd under System > Innstillinger > Alternativ';
 $_['text_health_currencies'] = 'skjult for handlekorger i %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Last ned kreditnota';

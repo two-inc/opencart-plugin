@@ -131,6 +131,7 @@ $_['text_basis_gross'] = 'con impuestos';
 $_['text_basis_net'] = 'sin impuestos';
 $_['text_or'] = 'o';
 $_['text_health_countries'] = 'se ofrece solo a compradores en %s';
+$_['text_health_telephone'] = 'rechazado si el comprador no indica un número de teléfono, ya que %s lo necesita: activa Mostrar teléfono y Teléfono obligatorio en Sistema > Configuración > Opción';
 $_['text_health_currencies'] = 'oculto para carritos en %s';
 // Order page: refunds and the credit note
 $_['button_credit_note'] = 'Descargar nota de crédito';
