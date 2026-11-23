@@ -133,6 +133,8 @@ describe('transport', () => {
     test.each([
         [{ items: [{ name: 'Acme Ltd', organization_number: '0123', highlight: '<mark>Acme</mark> Ltd', lookup_id: 'L1' }] }, 'GB', { items: [{ text: 'Acme Ltd', html: '<mark>Acme</mark> Ltd (0123)', companyId: '0123', lookupId: 'L1' }] }, 'a row carries its number in brackets'],
         [{ items: [{ name: 'Jo Bloggs', organization_number: 'TWO:ST1', highlight: '', lookup_id: '' }] }, 'GB', { items: [{ text: 'Jo Bloggs', html: 'Jo Bloggs', companyId: 'TWO:ST1', lookupId: '' }] }, 'a TWO: number is never shown'],
+        [{ items: [{ name: 'Example & Co <Ltd>', organization_number: '0123', highlight: '', lookup_id: '' }] }, 'GB', { items: [{ text: 'Example & Co <Ltd>', html: 'Example &amp; Co &lt;Ltd&gt; (0123)', companyId: '0123', lookupId: '' }] }, 'TWO-27368: a name with no highlight is escaped, as the panel reads HTML'],
+        [{ items: [{ name: 'Example & Co Ltd', organization_number: '0123', highlight: '<mark>Exam</mark>ple &amp; Co Ltd', lookup_id: '' }] }, 'GB', { items: [{ text: 'Example & Co Ltd', html: '<mark>Exam</mark>ple &amp; Co Ltd (0123)', companyId: '0123', lookupId: '' }] }, 'TWO-27368: the API highlight is already HTML and passes as it is'],
         [{ error: 'unavailable' }, 'GB', { unavailable: true }, 'the relay failing reads as unavailable, not as no match'],
         [{ items: [], degraded: true }, 'GB', { unavailable: true }, 'a degraded answer is unavailable'],
         [{ error: 'Too many', code: 'rate_limited' }, 'GB', { unavailable: true }, 'the shop\'s rate limit is unavailable'],

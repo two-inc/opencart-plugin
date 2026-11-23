@@ -163,10 +163,15 @@
         if (this.cache.size > CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value);
     };
 
+    /** The panel reads a row's label as HTML, so a plain name is escaped first. */
+    function escapeHtml(text) {
+        return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     function toItem(row) {
         const number = String(row.organization_number || '');
         const shown = /^\s*two:/i.test(number) ? '' : number.trim();
-        const label = row.highlight || row.name || '';
+        const label = row.highlight || escapeHtml(row.name || '');
         return {
             text: row.name,
             html: shown ? label + ' (' + shown + ')' : label,
