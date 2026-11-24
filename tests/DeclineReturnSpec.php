@@ -37,8 +37,8 @@ final class DeclineReturnSpec
             [$canc, OrderFlow::REJECTED, false, false, 'note|cart|declined', 'declined at Two, no session: the message on the cart'],
             [$canc, OrderFlow::CLOSED, false, true, 'none|checkout|declined', 'a second click, same session: no second note'],
             [$canc, OrderFlow::CLOSED, false, false, 'none|cart|declined', 'a second click, no session: no second note'],
-            [$canc, OrderFlow::REFUSED, false, true, 'note|cart|pending', 'Two refused the cancel: noted, no decline claimed'],
-            [$canc, OrderFlow::WAITING, false, true, 'none|cart|pending', 'Two could not be read: nothing changed, no decline claimed'],
+            [$canc, OrderFlow::REFUSED, false, true, 'note|cart|unanswered', 'Two refused the cancel: noted, no decline claimed'],
+            [$canc, OrderFlow::WAITING, false, true, 'none|cart|unanswered', 'Two could not be read: nothing changed, no decline claimed'],
             [$canc, OrderFlow::UNAUTHORISED, false, true, 'none|cart|generic', 'a stale or foreign token: nothing changed'],
             [$canc, OrderFlow::CANCELLED, true, true, 'none|cart|generic', 'placed meanwhile: nothing written over it'],
         ];

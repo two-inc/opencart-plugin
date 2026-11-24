@@ -69,6 +69,7 @@ $_['text_cancelled'] = 'Tu pedido ha sido cancelado.';
 $_['text_pending'] = 'Todavía estamos confirmando tu pago. Espera un minuto antes de volver a intentarlo, para que el pedido no se haga dos veces.';
 $_['text_cart_changed'] = 'Tu carrito cambió durante la verificación del pago. Revisa tu carrito y vuelve a intentarlo.';
 $_['text_payment_declined'] = '%s no ha podido aprobar esta compra. Por favor, selecciona otro método de pago.';
+$_['text_no_answer'] = 'No hemos obtenido respuesta de %s. Vuelve a intentarlo o selecciona otro método de pago.';
 $_['text_history_prefix'] = 'Two: ';
 
 $_['error_order'] = 'No se ha encontrado tu pedido. Vuelve al checkout e inténtalo de nuevo.';

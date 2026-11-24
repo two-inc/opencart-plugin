@@ -131,9 +131,12 @@ final class OrderFlow
 
         // A re-create (the buyer placed the order again) replaces the earlier
         // Two order, so cancel that first rather than leave it open at Two.
+        // One Two cancelled or declined (as last read: the decline return, the
+        // pending check) is not open, so nothing is sent and nothing blocks the retry.
         $earlier = $this->records->get($orderId) ?? [];
         $earlierId = $earlier['two_order_id'] ?? '';
-        if ($earlierId !== '' && self::validTwoOrderId($earlierId) && ($earlier['two_order_state'] ?? '') !== 'CANCELLED') {
+        $earlierClosed = ($earlier['two_order_state'] ?? '') === 'CANCELLED' || in_array($earlier['two_order_status'] ?? '', self::REJECTED_STATUSES, true);
+        if ($earlierId !== '' && self::validTwoOrderId($earlierId) && !$earlierClosed) {
             $failure = $this->sendCancel($earlierId, 'order_recreate', $orderId);
             if ($failure !== null && $this->readState($orderId, $earlierId) !== 'CANCELLED') {
                 return $this->refused($orderId, Message::of('note_create_earlier_open', $earlierId, $failure));
@@ -228,9 +231,10 @@ final class OrderFlow
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
      * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null $rows
      * @param Message|null $by who checked, for the note of an order the schedule or the button places
+     * @param array{state: string|null, status: int, reason: Message|string, two_status: string}|null $read Two's answer when the caller has just read it (the decline return), so it is not asked twice
      * @return array{outcome: string, reason: string, message: Message, two_order_id: string, state: string}
      */
-    public function resolve(int $orderId, array $record, string $trigger, \Closure $rebuild, ?array $rows = null, ?Message $by = null): array
+    public function resolve(int $orderId, array $record, string $trigger, \Closure $rebuild, ?array $rows = null, ?Message $by = null, ?array $read = null): array
     {
         $twoOrderId = $record['two_order_id'] ?? '';
         if ($twoOrderId === '' || !self::validTwoOrderId($twoOrderId)) {
@@ -249,7 +253,7 @@ final class OrderFlow
             }
         }
 
-        $read = $this->read($orderId, $twoOrderId);
+        $read ??= $this->read($orderId, $twoOrderId);
         $state = $read['state'];
         if ($state === null) {
             if ($buyer) {
@@ -372,7 +376,7 @@ final class OrderFlow
             return $as + self::outcome($closed ? self::CLOSED : self::REJECTED, Message::of('note_check_declined', $twoOrderId), $twoOrderId, $state);
         }
         if ($state === 'VERIFIED' || in_array($state, self::PLACED_STATES, true)) {
-            return ['as' => self::CALLBACK_CONFIRM] + $this->resolve($orderId, $record, self::TRIGGER_BUYER, $rebuild, $rows);
+            return ['as' => self::CALLBACK_CONFIRM] + $this->resolve($orderId, $record, self::TRIGGER_BUYER, $rebuild, $rows, null, $read);
         }
         if ($state !== 'UNVERIFIED') {
             return $as + self::outcome(self::WAITING, Message::of('note_check_state', $twoOrderId, $state), $twoOrderId, $state);

@@ -607,8 +607,8 @@ class Two extends \Opencart\System\Engine\Controller
         $after = isset($result['as'])
             ? DeclineReturn::after($result['as'], $result['outcome'], $placed, $owner && $this->cart->hasProducts() && ($this->cart->hasStock() || $this->config->get('config_stock_checkout')) && $this->cart->hasMinimum())
             : OrderFlow::afterCallback($kind, $result['outcome'], $placed);
-        if ($after['notice'] === 'declined' && $owner) {
-            // Two stays offered, but is no longer the chosen method.
+        if ($after['notice'] === 'declined' && $owner && ($this->session->data['payment_method']['code'] ?? '') === 'two.two') {
+            // Two stays offered, but is no longer the chosen method; a method the buyer chose since is kept.
             unset($this->session->data['payment_method']);
         }
         if ($after['place']) {
@@ -679,7 +679,7 @@ class Two extends \Opencart\System\Engine\Controller
      * checkout shows none of its own).
      *
      * @param 'success'|'cart'|'checkout' $goto
-     * @param 'declined'|'cancelled'|'changed'|'pending'|'generic'|null $notice
+     * @param 'declined'|'unanswered'|'cancelled'|'changed'|'pending'|'generic'|null $notice
      */
     private function leave(string $goto, ?string $notice): void
     {
@@ -687,6 +687,7 @@ class Two extends \Opencart\System\Engine\Controller
         if ($notice !== null) {
             $text = match ($notice) {
                 'declined' => sprintf($this->language->get('text_payment_declined'), Brand::default()->productName),
+                'unanswered' => sprintf($this->language->get('text_no_answer'), Brand::default()->productName),
                 'cancelled' => $this->language->get('text_cancelled'),
                 'changed' => $this->language->get('text_cart_changed'),
                 'pending' => $this->language->get('text_pending'),

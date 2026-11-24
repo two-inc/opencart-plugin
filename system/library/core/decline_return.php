@@ -20,7 +20,7 @@ final class DeclineReturn
      * @param string $as      OrderFlow::declined's `as`: the route the outcome is settled as
      * @param bool   $placed  whether the shop order is placed now (read again after the flow ran)
      * @param bool   $basket  whether the order's basket is in this browser and OpenCart's checkout will take it
-     * @return array{place: bool, note: bool, goto: 'success'|'cart'|'checkout', notice: 'declined'|'pending'|'cancelled'|'changed'|'generic'|null}
+     * @return array{place: bool, note: bool, goto: 'success'|'cart'|'checkout', notice: 'declined'|'unanswered'|'pending'|'cancelled'|'changed'|'generic'|null}
      */
     public static function after(string $as, string $outcome, bool $placed, bool $basket): array
     {
@@ -31,8 +31,8 @@ final class DeclineReturn
             return ['place' => false, 'note' => false, 'goto' => 'cart', 'notice' => 'generic'];
         }
         if ($outcome === OrderFlow::REFUSED || $outcome === OrderFlow::WAITING) {
-            // Two's answer is not known: claim no decline.
-            return ['place' => false, 'note' => $outcome === OrderFlow::REFUSED, 'goto' => 'cart', 'notice' => 'pending'];
+            // Two's answer is not known: claim no decline, and no payment in progress either.
+            return ['place' => false, 'note' => $outcome === OrderFlow::REFUSED, 'goto' => 'cart', 'notice' => 'unanswered'];
         }
 
         return ['place' => false, 'note' => $outcome !== OrderFlow::CLOSED, 'goto' => $basket ? 'checkout' : 'cart', 'notice' => 'declined'];
