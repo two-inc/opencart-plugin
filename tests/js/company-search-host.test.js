@@ -133,6 +133,8 @@ describe('transport', () => {
     test.each([
         [{ items: [{ name: 'Acme Ltd', organization_number: '0123', highlight: '<mark>Acme</mark> Ltd', lookup_id: 'L1' }] }, 'GB', { items: [{ text: 'Acme Ltd', html: '<mark>Acme</mark> Ltd (0123)', companyId: '0123', lookupId: 'L1' }] }, 'a row carries its number in brackets'],
         [{ items: [{ name: 'Jo Bloggs', organization_number: 'TWO:ST1', highlight: '', lookup_id: '' }] }, 'GB', { items: [{ text: 'Jo Bloggs', html: 'Jo Bloggs', companyId: 'TWO:ST1', lookupId: '' }] }, 'a TWO: number is never shown'],
+        [{ items: [{ name: 'Example & Co <Ltd>', organization_number: '0123', highlight: '', lookup_id: '' }] }, 'GB', { items: [{ text: 'Example & Co <Ltd>', html: 'Example &amp; Co &lt;Ltd&gt; (0123)', companyId: '0123', lookupId: '' }] }, 'TWO-27368: a name with no highlight is escaped, as the panel reads HTML'],
+        [{ items: [{ name: 'Example & Co Ltd', organization_number: '0123', highlight: '<mark>Exam</mark>ple &amp; Co Ltd', lookup_id: '' }] }, 'GB', { items: [{ text: 'Example & Co Ltd', html: '<mark>Exam</mark>ple &amp; Co Ltd (0123)', companyId: '0123', lookupId: '' }] }, 'TWO-27368: the API highlight is already HTML and passes as it is'],
         [{ error: 'unavailable' }, 'GB', { unavailable: true }, 'the relay failing reads as unavailable, not as no match'],
         [{ items: [], degraded: true }, 'GB', { unavailable: true }, 'a degraded answer is unavailable'],
         [{ error: 'Too many', code: 'rate_limited' }, 'GB', { unavailable: true }, 'the shop\'s rate limit is unavailable'],
@@ -143,6 +145,28 @@ describe('transport', () => {
         await flush();
         expect([await term(hosts.payment, 'acme', country), description]).toEqual([expected, description]);
         expect(calls.filter(([route]) => route === 's').length).toBe(country ? 1 : 0);
+    });
+
+    /** The row the buyer sees: the transport's item, rendered by the vendored panel. Expected: [row text, elements in the row]. */
+    test.each([
+        [{ name: 'Example & Co Ltd', organization_number: '0123', highlight: '<mark>Exam</mark>ple &amp; Co Ltd' }, ['Example & Co Ltd (0123)', ['MARK']], 'TWO-27368: an entity in the highlight reads as "&", and the match stays marked'],
+        [{ name: 'Example Ltd', organization_number: '0123', highlight: '&lt;img src=x onerror=alert(1)&gt;' }, ['<img src=x onerror=alert(1)> (0123)', []], 'TWO-27368: an escaped tag in the highlight stays text'],
+        [{ name: 'A & <b>B</b>', organization_number: '0123', highlight: '' }, ['A & <b>B</b> (0123)', []], 'TWO-27368: a plain name reads literally, its tags as text'],
+        [{ name: 'Example Ltd', organization_number: '<b>1</b>', highlight: '' }, ['Example Ltd (<b>1</b>)', []], 'a number with markup reads as text'],
+    ])('rendered row %#', async (row, expected, description) => {
+        document.body.innerHTML = ADDRESS('payment');
+        start(config(), { s: { items: [Object.assign({ lookup_id: '' }, row)] } });
+        await flush();
+        const field = document.getElementById('input-payment-company');
+        field.click();
+        const panel = field.parentElement.querySelector('.two-company-dropdown');
+        const query = panel.querySelector('.two-company-dropdown__query');
+        query.value = 'exam';
+        query.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        await flush();
+        const rendered = panel.querySelector('.two-company-dropdown__row');
+        expect([rendered && rendered.textContent, rendered && Array.from(rendered.querySelectorAll('*')).map((node) => node.tagName), description]).toEqual(expected.concat([description]));
     });
 
     test('a 429 parks this instance alone, and an answer is cached per country and term', async () => {

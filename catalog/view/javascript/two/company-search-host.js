@@ -163,13 +163,22 @@
         if (this.cache.size > CACHE_LIMIT) this.cache.delete(this.cache.keys().next().value);
     };
 
+    /**
+     * The panel reads a row's label as HTML, so plain text in it is escaped
+     * first. Element content only: quotes are left, so never use it for an
+     * attribute value.
+     */
+    function escapeHtml(text) {
+        return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     function toItem(row) {
         const number = String(row.organization_number || '');
         const shown = /^\s*two:/i.test(number) ? '' : number.trim();
-        const label = row.highlight || row.name || '';
+        const label = row.highlight || escapeHtml(row.name || '');
         return {
             text: row.name,
-            html: shown ? label + ' (' + shown + ')' : label,
+            html: shown ? label + ' (' + escapeHtml(shown) + ')' : label,
             companyId: number,
             lookupId: row.lookup_id || ''
         };
