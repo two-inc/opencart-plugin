@@ -46,6 +46,7 @@ $_['note_cancel_callback_placed'] = 'Kanselleringen ble avvist: ordren er allere
 $_['note_cancel_callback_session'] = 'Kanselleringen ble avvist: den kom ikke fra kjøperens økt.';
 $_['note_intent_no_session'] = 'Ordreforespørselen ble ikke sendt: ingen utsjekkingsøkt.';
 $_['note_intent_not_built'] = 'Ordreforespørselen ble ikke sendt: %s';
+$_['note_intent_no_phone'] = 'Ordreforespørselen ble ikke sendt: kjøperen oppga ikke noe telefonnummer, som Two trenger.';
 $_['note_intent_approved'] = 'Two godkjente ordreforespørselen.';
 $_['note_intent_declined'] = 'Two avslo ordreforespørselen.';
 $_['note_intent_undecided'] = 'Two svarte på ordreforespørselen uten en avgjørelse (HTTP %s).';

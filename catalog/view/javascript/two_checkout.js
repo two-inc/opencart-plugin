@@ -160,12 +160,15 @@
             }
             this.showCompany();
             if (!company) {
+                // No company, nothing to ask: Confirm is offered again and
+                // tells the buyer what is missing if pressed.
                 this.intentSeq += 1;
                 const notice = this.doc.getElementById('two-intent-notice');
                 if (notice) {
                     notice.className = '';
                     notice.textContent = '';
                 }
+                this.offer(true);
                 return Promise.resolve();
             }
             return this.intent();
@@ -200,7 +203,8 @@
             button.setAttribute('aria-busy', 'true');
             const reset = (message) => {
                 this.confirming = false;
-                button.disabled = false;
+                // An intent that withdrew the tile meanwhile keeps Confirm off; its notice says why.
+                button.disabled = this.offered === false;
                 button.removeAttribute('aria-busy');
                 if (message) {
                     this.alert(message);
@@ -254,6 +258,10 @@
 
         /** The payment tile has rendered (Two is the chosen method). */
         tileReady(form) {
+            // A new tile: an answer meant for the one it replaced is dropped,
+            // and nothing withdrawn there carries over (re-asked below).
+            this.intentSeq += 1;
+            this.offered = undefined;
             this.tile = form;
             const group = form.querySelector('[data-two-term-chips]');
             if (group) {
@@ -295,7 +303,30 @@
             summary.classList.remove('text-danger');
         }
 
-        /** Asks the order intent and shows its notice; a later ask supersedes an earlier one. */
+        /**
+         * Offers the payment terms and the confirm button, or withdraws both
+         * when the intent rules Two out of this checkout (TWO-27369): its
+         * notice then tells the buyer to choose another payment method.
+         * Every state that withdraws them shows a notice.
+         */
+        offer(on) {
+            this.offered = on;
+            const terms = this.tile && this.tile.querySelector('[data-two-terms]');
+            if (terms) {
+                terms.hidden = !on;
+            }
+            const button = this.doc.getElementById('button-two-confirm');
+            if (button && !this.confirming) {
+                button.disabled = !on;
+            }
+        }
+
+        /**
+         * Asks the order intent and shows its notice; a later ask supersedes
+         * an earlier one. The terms and Confirm stay as they are until the
+         * answer (the notice says the order is being checked), and are
+         * offered again if no answer comes.
+         */
         intent() {
             const notice = this.doc.getElementById('two-intent-notice');
             // The merchant switched the preview off: confirm still asks its own intent.
@@ -318,11 +349,13 @@
                     notice.className = outcome === 'approved' ? 'alert alert-success' : (json && json.notice ? 'alert alert-warning' : '');
                     // The shop escapes the notice.
                     notice.innerHTML = (json && json.notice) || '';
+                    this.offer(!(json && json.withdrawn));
                 })
                 .catch(() => {
                     if (seq === this.intentSeq) {
                         notice.className = '';
                         notice.textContent = '';
+                        this.offer(true);
                     }
                 });
         }

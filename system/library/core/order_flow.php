@@ -59,6 +59,10 @@ final class OrderFlow
     public const INTENT_CONNECTION = 'error_intent_connection';
     public const INTENT_UNAVAILABLE = 'error_intent_unavailable';
     public const INTENT_UNPROCESSABLE = 'error_intent_unprocessable';
+    /** The order cannot be put to Two as it stands, so the buyer chooses another method (TWO-27369). */
+    public const INTENT_NOT_OFFERED = 'error_intent_not_offered';
+    /** Two needs the buyer's phone number, and the order has none (TWO-27369). */
+    public const INTENT_PHONE_REQUIRED = 'error_intent_phone_required';
 
     /**
      * What the order intent asks about: the create payload without what only an order needs.
@@ -484,6 +488,19 @@ final class OrderFlow
     }
 
     /**
+     * Whether the intent rules Two out of this checkout as it stands, so the
+     * tile withdraws its terms and its confirm button (TWO-27369): the order
+     * cannot be put to Two, or has no phone number.
+     *
+     * @param array{outcome: string, buyer: list<string>} $intent
+     */
+    public static function withdrawsTile(array $intent): bool
+    {
+        return $intent['outcome'] === self::REFUSED
+            && array_intersect($intent['buyer'], [self::INTENT_NOT_OFFERED, self::INTENT_PHONE_REQUIRED]) !== [];
+    }
+
+    /**
      * Whether placement goes on after the intent (section 6.3): only an
      * approval lets the order be created. Anything else (a decline, no
      * answer, an error, an answer without a decision, a refused build)
@@ -538,7 +555,15 @@ final class OrderFlow
         } catch (OrderRefused $refused) {
             $this->logger->error('Order ' . $orderId . ': order intent not sent: ' . $refused->note->english());
 
-            return self::intentOutcome(self::REFUSED, Message::of('note_intent_not_built', $refused->note), [ErrorMapper::GENERIC]);
+            return self::intentOutcome(self::REFUSED, Message::of('note_intent_not_built', $refused->note), [self::INTENT_NOT_OFFERED]);
+        }
+        // Two refuses an order without one (HTTP 400), so it is asked for here,
+        // after the hook, which may supply it (TWO-27369).
+        if (trim((string) ($payload['buyer']['representative']['phone_number'] ?? '')) === '') {
+            $message = Message::of('note_intent_no_phone');
+            $this->logger->error('Order ' . $orderId . ': ' . $message->english());
+
+            return self::intentOutcome(self::REFUSED, $message, [self::INTENT_PHONE_REQUIRED]);
         }
 
         $response = $this->client->request('POST', '/v1/order_intent', $payload, Client::TIMEOUT_SECONDS, true, IdempotencyKey::header(IdempotencyKey::orderIntent($sessionHash, self::payloadHash($payload))));

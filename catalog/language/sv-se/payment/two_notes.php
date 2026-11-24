@@ -46,6 +46,7 @@ $_['note_cancel_callback_placed'] = 'Avbrytandet avvisades: ordern är redan lag
 $_['note_cancel_callback_session'] = 'Avbrytandet avvisades: det kom inte från köparens session.';
 $_['note_intent_no_session'] = 'Orderförfrågan skickades inte: ingen kassasession.';
 $_['note_intent_not_built'] = 'Orderförfrågan skickades inte: %s';
+$_['note_intent_no_phone'] = 'Orderförfrågan skickades inte: köparen angav inget telefonnummer, vilket Two behöver.';
 $_['note_intent_approved'] = 'Two godkände orderförfrågan.';
 $_['note_intent_declined'] = 'Two avslog orderförfrågan.';
 $_['note_intent_undecided'] = 'Two svarade på orderförfrågan utan ett beslut (HTTP %s).';

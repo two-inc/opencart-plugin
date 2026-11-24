@@ -49,6 +49,13 @@ export async function guestDetails(page: Page, search: string, stubbed = true, r
     await expect(page.locator(".two-company-id-text"), "the number shows under the field, as text").toHaveText("12345678");
     await expect(page.locator("#input-shipping-address-1"), "the registered address is filled in").toHaveValue("1 Registry Road");
   }
+  // Two needs the buyer's phone (TWO-27369). The seed shows the field and the
+  // pick fills it from the registry; a spec that hides the field gives none.
+  const phone = page.locator("#input-telephone");
+  if (await phone.isVisible()) {
+    if (stubbed) await expect(phone, "the registry's phone is filled in").toHaveValue("+44 20 7946 0000");
+    else if ((await phone.inputValue()).trim() === "") await phone.fill("+44 20 7946 0000");
+  }
   await page.fill("#input-shipping-address-1", "1 Test Street");
   await page.fill("#input-shipping-city", "London");
   await page.fill("#input-shipping-postcode", "EC1A 1BB");

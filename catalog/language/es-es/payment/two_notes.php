@@ -46,6 +46,7 @@ $_['note_cancel_callback_placed'] = 'Se ha rechazado la cancelación: el pedido 
 $_['note_cancel_callback_session'] = 'Se ha rechazado la cancelación: no procedía de la sesión del comprador.';
 $_['note_intent_no_session'] = 'La solicitud del pedido no se ha enviado: no hay sesión de pago.';
 $_['note_intent_not_built'] = 'La solicitud del pedido no se ha enviado: %s';
+$_['note_intent_no_phone'] = 'La solicitud del pedido no se ha enviado: el comprador no ha indicado un número de teléfono, que Two necesita.';
 $_['note_intent_approved'] = 'Two ha aprobado la solicitud del pedido.';
 $_['note_intent_declined'] = 'Two ha rechazado la solicitud del pedido.';
 $_['note_intent_undecided'] = 'Two respondió a la solicitud del pedido sin una decisión (HTTP %s).';
