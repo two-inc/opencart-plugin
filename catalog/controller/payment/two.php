@@ -727,6 +727,10 @@ class Two extends \Opencart\System\Engine\Controller
     {
         $heading = sprintf($this->language->get('text_return_heading'), Brand::default()->productName);
         $this->document->setTitle($heading);
+        // Served at the callback URL, which carries the attempt's token: keep it
+        // out of caches and out of the Referer sent by the page's links and assets.
+        $this->response->addHeader('Cache-Control: no-store');
+        $this->response->addHeader('Referrer-Policy: no-referrer');
         $this->response->setOutput($this->load->view(self::ROUTE . '_notice', [
             'heading_title' => htmlspecialchars($heading, ENT_QUOTES, 'UTF-8'),
             'notice' => $html,
