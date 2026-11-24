@@ -17,6 +17,29 @@
 
     const MARKER = 'twoPreselectPayment';
     const CODE = 'two.two';
+    /** The hidden element the checkout event puts beside the decline notice. */
+    const DECLINED = 'two-declined';
+
+    function notChosen(doc, win) {
+        let picked = false;
+        doc.addEventListener('change', (event) => {
+            if (event.isTrusted && event.target && event.target.name === 'payment_method') {
+                picked = true;
+            }
+        }, true);
+        const clear = () => {
+            const form = doc.getElementById('form-payment-method');
+            const saved = doc.getElementById('input-payment-code');
+            const option = form ? form.querySelector('input[type="radio"][name="payment_method"][value="' + CODE + '"]') : null;
+            if (!picked && option && option.checked && (!saved || saved.value === '')) {
+                option.checked = false;
+            }
+        };
+        clear();
+        if (typeof win.MutationObserver === 'function') {
+            new win.MutationObserver(clear).observe(doc.documentElement, { childList: true, subtree: true });
+        }
+    }
 
     function start(doc, win) {
         let observer = null;
@@ -70,6 +93,14 @@
             return true;
         }
 
+        // The decline return's landing (TWO-27391, the marker beside its
+        // notice): OpenCart checks the first listed method when none is
+        // saved, so on this page view Two is never chosen for the buyer,
+        // though it stays in the list, until the buyer picks a method.
+        if (doc.getElementById(DECLINED)) {
+            notChosen(doc, win);
+            return;
+        }
         if (!wanted()) {
             return;
         }
@@ -89,7 +120,7 @@
     }
 
     if (typeof module === 'object' && module.exports) {
-        module.exports = { start: start, MARKER: MARKER };
+        module.exports = { start: start, MARKER: MARKER, DECLINED: DECLINED };
         return;
     }
     start(root.document, root);

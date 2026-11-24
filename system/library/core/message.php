@@ -59,8 +59,6 @@ final class Message
         'note_cancel_no_order' => 'No Two order was created for this order.',
         'note_cancel_by_buyer' => 'The buyer cancelled Two order %s at Two.',
         'note_cancel_unconfirmed' => 'Two order %s could not be confirmed as cancelled.',
-        'note_cancel_callback_placed' => 'Cancel callback refused: the order is already placed.',
-        'note_cancel_callback_session' => 'Cancel callback refused: it did not come from the buyer\'s session.',
         'note_intent_no_session' => 'Order intent not sent: no checkout session.',
         'note_intent_not_built' => 'Order intent not sent: %s',
         'note_intent_no_phone' => 'Order intent not sent: the buyer gave no phone number, which Two needs.',

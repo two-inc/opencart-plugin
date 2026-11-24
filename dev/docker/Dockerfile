@@ -12,11 +12,20 @@ ARG OPENCART_SHA256=cdef537f5a0a7e1b4ddbe16f589dd2e80b10150a09bfbe93ce76ef2d5c32
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# OpenCart calls mb_* functions. The PHP images built mbstring in until a
+# newer minor left it out, so it is built (with its oniguruma dependency) only
+# where `php -m` lacks it, and the build fails if it is still missing.
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       libfreetype6-dev libjpeg62-turbo-dev libpng-dev libzip-dev unzip \
  && docker-php-ext-configure gd --with-freetype --with-jpeg \
  && docker-php-ext-install -j"$(nproc)" gd zip mysqli \
+ && if ! php -m | grep -qi '^mbstring$'; then \
+      apt-get install -y --no-install-recommends libonig-dev \
+      && docker-php-ext-install -j"$(nproc)" mbstring; \
+    fi \
+ && php -m | grep -qi '^mbstring$' \
  && a2enmod rewrite \
  && rm -rf /var/lib/apt/lists/*
 

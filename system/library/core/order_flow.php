@@ -36,8 +36,10 @@ final class OrderFlow
     public const WAITING = 'waiting';
     /** Two answered 404 for the Two order: it does not know it (counted only by PendingCheck, never on the buyer's return). */
     public const MISSING = 'missing';
-    /** Two's status is REJECTED or DECLINED (a check from the schedule or the admin): handled as a cancelled order. */
+    /** Two's status is REJECTED or DECLINED (a check from the schedule or the admin, or the decline return): handled as a cancelled order. */
     public const REJECTED = 'rejected';
+    /** The decline return found the attempt already closed (a second click, or the scheduled check got there first): nothing more to write. */
+    public const CLOSED = 'closed';
     /** Two's order statuses that mean Two will never approve the order. */
     public const REJECTED_STATUSES = ['REJECTED', 'DECLINED'];
 
@@ -129,9 +131,12 @@ final class OrderFlow
 
         // A re-create (the buyer placed the order again) replaces the earlier
         // Two order, so cancel that first rather than leave it open at Two.
+        // One Two cancelled or declined (as last read: the decline return, the
+        // pending check) is not open, so nothing is sent and nothing blocks the retry.
         $earlier = $this->records->get($orderId) ?? [];
         $earlierId = $earlier['two_order_id'] ?? '';
-        if ($earlierId !== '' && self::validTwoOrderId($earlierId) && ($earlier['two_order_state'] ?? '') !== 'CANCELLED') {
+        $earlierClosed = ($earlier['two_order_state'] ?? '') === 'CANCELLED' || in_array($earlier['two_order_status'] ?? '', self::REJECTED_STATUSES, true);
+        if ($earlierId !== '' && self::validTwoOrderId($earlierId) && !$earlierClosed) {
             $failure = $this->sendCancel($earlierId, 'order_recreate', $orderId);
             if ($failure !== null && $this->readState($orderId, $earlierId) !== 'CANCELLED') {
                 return $this->refused($orderId, Message::of('note_create_earlier_open', $earlierId, $failure));
@@ -226,9 +231,10 @@ final class OrderFlow
      * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
      * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null $rows
      * @param Message|null $by who checked, for the note of an order the schedule or the button places
+     * @param array{state: string|null, status: int, reason: Message|string, two_status: string}|null $read Two's answer when the caller has just read it (the decline return), so it is not asked twice
      * @return array{outcome: string, reason: string, message: Message, two_order_id: string, state: string}
      */
-    public function resolve(int $orderId, array $record, string $trigger, \Closure $rebuild, ?array $rows = null, ?Message $by = null): array
+    public function resolve(int $orderId, array $record, string $trigger, \Closure $rebuild, ?array $rows = null, ?Message $by = null, ?array $read = null): array
     {
         $twoOrderId = $record['two_order_id'] ?? '';
         if ($twoOrderId === '' || !self::validTwoOrderId($twoOrderId)) {
@@ -247,7 +253,7 @@ final class OrderFlow
             }
         }
 
-        $read = $this->read($orderId, $twoOrderId);
+        $read ??= $this->read($orderId, $twoOrderId);
         $state = $read['state'];
         if ($state === null) {
             if ($buyer) {
@@ -316,28 +322,72 @@ final class OrderFlow
     }
 
     /**
-     * Two sent the buyer back to the cancel URL. Cancels the Two order and
-     * reads it back whatever the cancel answered: the order counts as
-     * cancelled once Two says so, including when it already was.
+     * The decline return (TWO-27391): Two's checkout sends the buyer to the
+     * cancel URL when Two declines them or they leave, and to the
+     * verification failed URL, which is the same route. The buyer wants to
+     * pay for the same basket another way, not to cancel, and the click
+     * proves nothing: Two's state for this attempt decides, read as the
+     * scheduled check reads it. The caller holds the order's lock and has
+     * found the shop order still unplaced.
      *
-     * @return array{outcome: string, reason: string, message: Message, two_order_id: string, state: string}
+     * - VERIFIED or later: settled exactly as the confirmation return
+     *   (`as` confirmation, through resolve()).
+     * - CANCELLED, or a Two status of REJECTED or DECLINED: closed with
+     *   nothing sent to Two (a declined one stamped as the scheduled check
+     *   stamps it, so it is not selected again).
+     * - UNVERIFIED (the buyer left): cancelled at Two, then closed once Two
+     *   reads it back as cancelled. A cancel Two refuses or does not show
+     *   records nothing: the next return or the scheduled check settles it.
+     * - A failed read or any other state: nothing changes (WAITING).
+     * - An attempt already closed reads CLOSED: a second click writes nothing.
+     * - A token that is not this attempt's (a link from an earlier attempt):
+     *   UNAUTHORISED, nothing asked.
+     *
+     * @param \Closure(array<string, string>): (array{order: array<string, mixed>, lines: list<array<string, mixed>>, totals: list<array<string, mixed>>, context?: array<string, mixed>}|null) $rebuild
+     * @param array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>, currency?: string}|null $rows
+     * @return array{outcome: string, reason: string, message: Message, two_order_id: string, state: string, as: string}
      */
-    public function cancel(int $orderId, string $token): array
+    public function declined(int $orderId, string $token, \Closure $rebuild, ?array $rows = null): array
     {
+        $as = ['as' => self::CALLBACK_CANCEL];
         $record = $this->authorised($orderId, $token);
         if ($record === null) {
-            return self::outcome(self::UNAUTHORISED, Message::of('note_cancel_token'), '');
+            return $as + self::outcome(self::UNAUTHORISED, Message::of('note_cancel_token'), '');
         }
+        $closed = ($record['check_closed'] ?? '') === PendingCheck::CLOSED_DECLINED || ($record['two_order_state'] ?? '') === 'CANCELLED';
         $twoOrderId = $record['two_order_id'];
         if ($twoOrderId === '') {
-            return self::outcome(self::CANCELLED, Message::of('note_cancel_no_order'), '');
-        }
-        $this->sendCancel($twoOrderId, 'buyer_cancel', $orderId);
-        if ($this->readState($orderId, $twoOrderId) === 'CANCELLED') {
-            return self::outcome(self::CANCELLED, Message::of('note_cancel_by_buyer', $twoOrderId), $twoOrderId);
+            $this->records->put($orderId, ['check_closed' => PendingCheck::CLOSED_DECLINED]);
+
+            return $as + self::outcome($closed ? self::CLOSED : self::CANCELLED, Message::of('note_cancel_no_order'), '');
         }
 
-        return self::outcome(self::REFUSED, Message::of('note_cancel_unconfirmed', $twoOrderId), $twoOrderId);
+        $read = $this->read($orderId, $twoOrderId);
+        $state = $read['state'];
+        if ($state === null) {
+            return $as + self::outcome(self::WAITING, Message::of('note_confirm_unread', $twoOrderId), $twoOrderId);
+        }
+        if ($state === 'CANCELLED') {
+            return $as + self::outcome($closed ? self::CLOSED : self::CANCELLED, Message::of('note_check_cancelled', $twoOrderId), $twoOrderId, $state);
+        }
+        if (in_array($read['two_status'], self::REJECTED_STATUSES, true)) {
+            $this->records->put($orderId, ['check_closed' => PendingCheck::CLOSED_DECLINED]);
+
+            return $as + self::outcome($closed ? self::CLOSED : self::REJECTED, Message::of('note_check_declined', $twoOrderId), $twoOrderId, $state);
+        }
+        if ($state === 'VERIFIED' || in_array($state, self::PLACED_STATES, true)) {
+            return ['as' => self::CALLBACK_CONFIRM] + $this->resolve($orderId, $record, self::TRIGGER_BUYER, $rebuild, $rows, null, $read);
+        }
+        if ($state !== 'UNVERIFIED') {
+            return $as + self::outcome(self::WAITING, Message::of('note_check_state', $twoOrderId, $state), $twoOrderId, $state);
+        }
+
+        $failure = $this->sendCancel($twoOrderId, 'buyer_cancel', $orderId);
+        if ($failure === null && $this->readState($orderId, $twoOrderId) === 'CANCELLED') {
+            return $as + self::outcome(self::CANCELLED, Message::of('note_cancel_by_buyer', $twoOrderId), $twoOrderId, 'CANCELLED');
+        }
+
+        return $as + self::outcome(self::REFUSED, Message::of('note_cancel_unconfirmed', $twoOrderId), $twoOrderId, $state);
     }
 
     /** Whether the token is the order's own, without asking Two anything. */

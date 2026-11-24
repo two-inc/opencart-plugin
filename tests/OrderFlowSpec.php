@@ -33,7 +33,9 @@ final class OrderFlowSpec
         self::testCreateKeepsTermsAndFee();
         self::testTaxCodeRecord();
         self::testConfirm();
-        self::testCancel();
+        self::testDeclined();
+        self::testDeclinedTwice();
+        self::testDeclinedThenRecreate();
         self::testNewToken();
         self::testAfterCallback();
         self::testOwns();
@@ -110,9 +112,11 @@ final class OrderFlowSpec
             ['state' => 'UNVERIFIED', 'responses' => [self::json(409, []), self::json(200, ['state' => 'CANCELLED']), $created], 'ok' => true, 'calls' => [$cancel, $read, 'POST /v1/order'], 'id' => self::ID, 'description' => 'the cancel is refused but Two holds it cancelled: created'],
             ['state' => 'UNVERIFIED', 'responses' => [self::json(500, []), self::json(200, ['state' => 'VERIFIED'])], 'ok' => false, 'calls' => [$cancel, $read], 'id' => $earlier, 'description' => 'the earlier order stays open at Two: refused, its id kept'],
             ['state' => 'CANCELLED', 'responses' => [$created], 'ok' => true, 'calls' => ['POST /v1/order'], 'id' => self::ID, 'description' => 'the earlier order is already cancelled: no cancel sent'],
+            ['state' => 'UNVERIFIED', 'status' => 'REJECTED', 'responses' => [$created], 'ok' => true, 'calls' => ['POST /v1/order'], 'id' => self::ID, 'description' => 'Two declined the earlier order (status REJECTED): no cancel sent'],
+            ['state' => 'UNVERIFIED', 'status' => 'DECLINED', 'responses' => [$created], 'ok' => true, 'calls' => ['POST /v1/order'], 'id' => self::ID, 'description' => 'Two declined the earlier order (status DECLINED): no cancel sent'],
         ];
         foreach ($cases as $case) {
-            $records = new MemoryRecords([42 => ['token_hash' => 'old', 'two_order_id' => $earlier, 'two_order_state' => $case['state']]]);
+            $records = new MemoryRecords([42 => ['token_hash' => 'old', 'two_order_id' => $earlier, 'two_order_state' => $case['state'], 'two_order_status' => $case['status'] ?? 'APPROVED']]);
             [$flow, $transport] = self::flow($case['responses'], $records);
             $result = $flow->create(self::order(), self::lines(2), [], self::TOKEN);
             $d = 're-create: ' . $case['description'];
@@ -237,19 +241,112 @@ final class OrderFlowSpec
         self::runCallbackCases('confirm', $cases);
     }
 
-    private static function testCancel(): void
+    /**
+     * The decline return (the cancel URL, and the verification failed URL):
+     * Two's state decides, never the click. `as` is the route the outcome is
+     * settled as; `closed` the record's check_closed after.
+     */
+    private static function testDeclined(): void
     {
-        $cancelled = self::json(200, ['id' => self::ID, 'state' => 'CANCELLED']);
-        $paths = ['POST /v1/order/' . self::ID . '/cancel', 'GET /v1/order/' . self::ID];
+        $get = static fn (string $state, string $status = 'APPROVED'): HttpResponse => self::json(200, ['id' => self::ID, 'state' => $state, 'status' => $status]);
+        $g = 'GET /v1/order/' . self::ID;
+        $c = 'POST /v1/order/' . self::ID . '/cancel';
+        $f = 'POST /v1/order/' . self::ID . '/confirm';
+        $conf = OrderFlow::CALLBACK_CONFIRM;
+        $canc = OrderFlow::CALLBACK_CANCEL;
+        $closed = ['two_order_state' => 'CANCELLED'];
         $cases = [
-            ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(200, []), $cancelled], 'outcome' => OrderFlow::CANCELLED, 'calls' => $paths, 'state' => 'CANCELLED', 'description' => 'cancelled and read back as cancelled'],
-            ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(200, []), self::json(200, ['state' => 'VERIFIED'])], 'outcome' => OrderFlow::REFUSED, 'calls' => $paths, 'state' => 'VERIFIED', 'description' => 'Two still holds it verified: not cancelled'],
-            ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(409, []), self::json(200, ['state' => 'VERIFIED'])], 'outcome' => OrderFlow::REFUSED, 'calls' => $paths, 'state' => 'VERIFIED', 'description' => 'Two refuses the cancel and holds the order verified'],
-            ['row' => true, 'token' => self::TOKEN, 'responses' => [self::json(409, []), $cancelled], 'outcome' => OrderFlow::CANCELLED, 'calls' => $paths, 'state' => 'CANCELLED', 'description' => 'already cancelled at Two: the buyer is told it is cancelled'],
-            ['row' => 'no-id', 'token' => self::TOKEN, 'responses' => [], 'outcome' => OrderFlow::CANCELLED, 'calls' => [], 'state' => '', 'description' => 'no Two order was created: nothing to cancel'],
-            ['row' => true, 'token' => str_repeat('b', 48), 'responses' => [], 'outcome' => OrderFlow::UNAUTHORISED, 'calls' => [], 'state' => '', 'description' => 'another token: unauthorised, nothing sent'],
+            // [record, token, rebuild lines, responses, as, outcome, calls, stored state, check_closed, description]
+            [[], self::TOKEN, 2, [$get('VERIFIED'), self::json(200, ['state' => 'CONFIRMED'])], $conf, OrderFlow::CONFIRMED, [$g, $f], 'CONFIRMED', '', 'VERIFIED: confirmed exactly as the confirmation return, Two read once'],
+            [[], self::TOKEN, 2, [$get('CONFIRMED')], $conf, OrderFlow::CONFIRMED, [$g], 'CONFIRMED', '', 'CONFIRMED: placed, nothing sent'],
+            [[], self::TOKEN, 2, [$get('FULFILLED')], $conf, OrderFlow::CONFIRMED, [$g], 'FULFILLED', '', 'later than CONFIRMED: placed, nothing sent'],
+            [[], self::TOKEN, 3, [$get('VERIFIED'), self::json(200, []), $get('CANCELLED')], $conf, OrderFlow::CHANGED, [$g, $c, $g], 'CANCELLED', '', 'VERIFIED but the cart changed: cancelled at Two as the confirmation return does'],
+            [[], self::TOKEN, 2, [$get('CANCELLED')], $canc, OrderFlow::CANCELLED, [$g], 'CANCELLED', '', 'CANCELLED: closed, no cancel sent'],
+            [[], self::TOKEN, 2, [$get('UNVERIFIED', 'REJECTED')], $canc, OrderFlow::REJECTED, [$g], 'UNVERIFIED', 'declined', 'Two status REJECTED: closed as the scheduled check closes it, no cancel sent'],
+            [[], self::TOKEN, 2, [$get('UNVERIFIED', 'DECLINED')], $canc, OrderFlow::REJECTED, [$g], 'UNVERIFIED', 'declined', 'Two status DECLINED: closed, no cancel sent'],
+            [[], self::TOKEN, 2, [$get('UNVERIFIED'), self::json(200, []), $get('CANCELLED')], $canc, OrderFlow::CANCELLED, [$g, $c, $g], 'CANCELLED', '', 'UNVERIFIED (the buyer left): cancelled at Two, read back, closed'],
+            [[], self::TOKEN, 2, [$get('UNVERIFIED'), self::json(409, ['error_code' => 'X'])], $canc, OrderFlow::REFUSED, [$g, $c], 'UNVERIFIED', '', 'UNVERIFIED, Two refuses the cancel: not recorded as cancelled, left for the next return or check'],
+            [[], self::TOKEN, 2, [$get('UNVERIFIED'), self::json(200, []), $get('UNVERIFIED')], $canc, OrderFlow::REFUSED, [$g, $c, $g], 'UNVERIFIED', '', 'UNVERIFIED, the cancel is not read back as cancelled: not recorded as cancelled'],
+            [[], self::TOKEN, 2, [self::json(500, [])], $canc, OrderFlow::WAITING, [$g], '', '', 'the state cannot be read: no decline claimed, nothing changed'],
+            [[], self::TOKEN, 2, [HttpResponse::unreachable('timeout')], $canc, OrderFlow::WAITING, [$g], '', '', 'Two not reached: nothing changed'],
+            [[], self::TOKEN, 2, [$get('SOMETHING_NEW')], $canc, OrderFlow::WAITING, [$g], 'SOMETHING_NEW', '', 'a state the plugin does not know: nothing changed'],
+            [$closed, self::TOKEN, 2, [$get('CANCELLED')], $canc, OrderFlow::CLOSED, [$g], 'CANCELLED', '', 'already closed as CANCELLED (a second click, or the check got there first): nothing more written'],
+            [['check_closed' => 'declined'], self::TOKEN, 2, [$get('UNVERIFIED', 'REJECTED')], $canc, OrderFlow::CLOSED, [$g], 'UNVERIFIED', 'declined', 'already closed as declined: nothing more written'],
+            [['check_closed' => 'changed'], self::TOKEN, 2, [$get('UNVERIFIED', 'REJECTED')], $canc, OrderFlow::REJECTED, [$g], 'UNVERIFIED', 'declined', 'closed for another reason, now declined: noted'],
+            [[], str_repeat('b', 48), 2, [], $canc, OrderFlow::UNAUTHORISED, [], '', '', 'a stale attempt (an earlier token): nothing asked, nothing changed'],
+            [['two_order_id' => ''], self::TOKEN, 2, [], $canc, OrderFlow::CANCELLED, [], '', 'declined', 'no Two order was created: closed, nothing sent'],
+            [['two_order_id' => '', 'check_closed' => 'declined'], self::TOKEN, 2, [], $canc, OrderFlow::CLOSED, [], '', 'declined', 'no Two order, already closed: nothing more written'],
         ];
-        self::runCallbackCases('cancel', $cases);
+        foreach ($cases as [$record, $token, $lines, $responses, $as, $outcome, $calls, $state, $checkClosed, $description]) {
+            [$flow, $transport, $records] = self::declineFlow($responses, $record);
+            $result = $flow->declined(42, $token, self::rebuild($lines), self::declineRows());
+            $d = 'declined: ' . $description;
+            TinyAssert::same($as, $result['as'], $d . ': settled as');
+            TinyAssert::same($outcome, $result['outcome'], $d . ': outcome');
+            TinyAssert::same($calls, self::calls($transport), $d . ': requests');
+            TinyAssert::same($state, $records->rows[42]['two_order_state'] ?? null, $d . ': stored state');
+            TinyAssert::same($checkClosed, $records->rows[42]['check_closed'] ?? '', $d . ': check_closed');
+            self::assertKeys($transport, $d);
+        }
+    }
+
+    /** A second click on the same link after the first closed the order: Two is read again, nothing more is sent or noted. */
+    private static function testDeclinedTwice(): void
+    {
+        $get = static fn (string $state): HttpResponse => self::json(200, ['id' => self::ID, 'state' => $state, 'status' => 'APPROVED']);
+        [$flow, $transport, $records] = self::declineFlow([$get('UNVERIFIED'), self::json(200, []), $get('CANCELLED'), $get('CANCELLED')], []);
+        $first = $flow->declined(42, self::TOKEN, self::rebuild(2), self::declineRows());
+        $second = $flow->declined(42, self::TOKEN, self::rebuild(2), self::declineRows());
+        TinyAssert::same([OrderFlow::CANCELLED, OrderFlow::CLOSED], [$first['outcome'], $second['outcome']], 'declined twice: closed once, then already closed');
+        TinyAssert::same(1, count(array_filter(self::calls($transport), static fn (string $call): bool => str_ends_with($call, '/cancel'))), 'declined twice: one cancel sent');
+        TinyAssert::same('CANCELLED', $records->rows[42]['two_order_state'] ?? null, 'declined twice: still cancelled');
+    }
+
+    /** The buyer picks Two again after a decline: the declined Two order is not cancelled, so the retry is never blocked on it. */
+    private static function testDeclinedThenRecreate(): void
+    {
+        $cases = [
+            [[self::json(200, ['id' => self::ID, 'state' => 'UNVERIFIED', 'status' => 'REJECTED'])], 'declined at Two (status REJECTED)'],
+            [[self::json(200, ['id' => self::ID, 'state' => 'UNVERIFIED', 'status' => 'DECLINED'])], 'declined at Two (status DECLINED)'],
+            [[self::json(200, ['id' => self::ID, 'state' => 'CANCELLED', 'status' => 'APPROVED'])], 'cancelled at Two'],
+            [[self::json(200, ['id' => self::ID, 'state' => 'UNVERIFIED', 'status' => 'APPROVED']), self::json(200, []), self::json(200, ['id' => self::ID, 'state' => 'CANCELLED'])], 'left unverified, cancelled by the return'],
+        ];
+        $next = '5f1c2a7e-0000-4000-8000-000000000002';
+        foreach ($cases as [$responses, $description]) {
+            $created = self::json(201, ['id' => $next, 'state' => 'UNVERIFIED', 'payment_url' => 'https://checkout.sandbox.two.inc/o/2']);
+            [$flow, $transport, $records] = self::declineFlow([...$responses, $created], []);
+            $flow->declined(42, self::TOKEN, self::rebuild(2), self::declineRows());
+            $before = count($transport->calls);
+            $result = $flow->create(self::order(), self::lines(2), [], str_repeat('c', 48));
+            $d = 'declined then re-created: ' . $description;
+            TinyAssert::true($result['ok'], $d . ': created');
+            TinyAssert::same(['POST /v1/order'], array_slice(self::calls($transport), $before), $d . ': no cancel sent to the declined Two order');
+        }
+    }
+
+    /**
+     * @param list<HttpResponse>    $responses
+     * @param array<string, string> $record merged over a stored attempt
+     * @return array{0: OrderFlow, 1: ScriptedTransport, 2: MemoryRecords}
+     */
+    private static function declineFlow(array $responses, array $record): array
+    {
+        $records = new MemoryRecords([42 => $record + ['token_hash' => OrderFlow::tokenHash(self::TOKEN), 'payload_hash' => OrderFlow::payloadHash((new OrderBuilder())->build(self::order(), self::lines(2), [])), 'two_order_id' => self::ID, 'two_order_state' => '', 'check_closed' => '', 'company_name' => 'Acme AS']]);
+        [$flow, $transport] = self::flow($responses, $records);
+
+        return [$flow, $transport, $records];
+    }
+
+    /** @return \Closure(array<string, string>): array<string, mixed> */
+    private static function rebuild(int $lines): \Closure
+    {
+        return static fn (array $record): array => ['order' => ['total' => 125 * $lines, 'tax_total' => 25 * $lines] + self::order(), 'lines' => self::lines($lines), 'totals' => []];
+    }
+
+    /** @return array{products: list<array<string, mixed>>, totals: list<array<string, mixed>>, addresses: array<string, mixed>} */
+    private static function declineRows(): array
+    {
+        return ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => ['payment_city' => 'Oslo']];
     }
 
     /** @param list<array<string, mixed>> $cases */
@@ -265,7 +362,7 @@ final class OrderFlowSpec
             $spec = array_key_exists('rebuild', $case) ? $case['rebuild'] : [2, []];
             $rebuild = static fn (array $record): ?array => $spec === null ? null : ['order' => $spec[1] + self::order(), 'lines' => self::lines($spec[0]), 'totals' => []];
             $rows = ['products' => [['product_id' => '7', 'quantity' => '2']], 'totals' => [], 'addresses' => ['payment_city' => 'Oslo']];
-            $result = $kind === 'confirm' ? $flow->confirm(42, $case['token'], $rebuild, $rows) : $flow->cancel(42, $case['token']);
+            $result = $flow->confirm(42, $case['token'], $rebuild, $rows);
             $d = $kind . ': ' . $case['description'];
             TinyAssert::same($case['outcome'], $result['outcome'], $d . ': outcome');
             TinyAssert::same($case['calls'], self::calls($transport), $d . ': requests');

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Opencart\Catalog\Controller\Extension\Two\Event;
 
 use Opencart\System\Library\Extension\Two\Core\CompanyCapture;
+use Opencart\System\Library\Extension\Two\Core\DeclineReturn;
 use Opencart\System\Library\Extension\Two\Opencart\Services;
 
 /**
@@ -44,7 +45,13 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
     public function index(string &$route = '', array &$args = [], mixed &$output = null): void
     {
         $pages = ['checkout/checkout' => null, 'account/address_form' => ['account']];
-        if (!array_key_exists($route, $pages) || !is_string($output) || !$this->config->get('payment_two_status')) {
+        if (!array_key_exists($route, $pages) || !is_string($output)) {
+            return;
+        }
+        if ($route === 'checkout/checkout') {
+            $output = $this->withNotice($output);
+        }
+        if (!$this->config->get('payment_two_status')) {
             return;
         }
         if ((new Services($this->db, $this->log, (int) $this->config->get('config_store_id')))->settings->apiKey() === '') {
@@ -84,6 +91,29 @@ class TwoCheckout extends \Opencart\System\Engine\Controller
         }
         $at = strripos($output, '</body>');
         $output = $at === false ? $output . $island : substr($output, 0, $at) . $island . substr($output, $at);
+    }
+
+    /**
+     * The decline return's message (TWO-27391), shown once at the top of the
+     * checkout: OpenCart's checkout shows no session notice of its own. The
+     * return sends the buyer here only when OpenCart's checkout takes the
+     * basket, so the message is never left waiting in the session.
+     */
+    private function withNotice(string $output): string
+    {
+        $notice = $this->session->data['two_checkout']['notice'] ?? null;
+        if (!is_string($notice) || $notice === '') {
+            return $output;
+        }
+        unset($this->session->data['two_checkout']['notice']);
+        $placed = DeclineReturn::placeNotice($output, DeclineReturn::alert($notice));
+        if ($placed === null) {
+            $this->log->write('Two: the checkout page has no content column or alert container, so the payment declined notice was not shown.');
+
+            return $output;
+        }
+
+        return $placed;
     }
 
     /**

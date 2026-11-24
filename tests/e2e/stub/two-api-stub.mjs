@@ -313,10 +313,12 @@ function control(method, path, body, query, res) {
   if (method === "GET" && m) {
     return orders.has(m[1]) ? send(res, 200, orders.get(m[1])) : send(res, 404, {});
   }
-  // Sets the order's state as Two would on its own: a buyer verifying at Two, or Two cancelling an order.
+  // Sets the order's state, and its status when given, as Two would on its own: a buyer verifying at Two,
+  // Two cancelling an order, or Two declining the buyer (status REJECTED).
   if (method === "POST" && m) {
     if (!orders.has(m[1])) return send(res, 404, {});
     orders.get(m[1]).state = String(body.state || "");
+    if (body.status !== undefined) orders.get(m[1]).status = String(body.status);
     return send(res, 200, orders.get(m[1]));
   }
   return send(res, 404, { error: `no control route ${method} ${path}` });
