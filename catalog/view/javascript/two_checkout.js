@@ -258,6 +258,10 @@
 
         /** The payment tile has rendered (Two is the chosen method). */
         tileReady(form) {
+            // A new tile: an answer meant for the one it replaced is dropped,
+            // and nothing withdrawn there carries over (re-asked below).
+            this.intentSeq += 1;
+            this.offered = undefined;
             this.tile = form;
             const group = form.querySelector('[data-two-term-chips]');
             if (group) {

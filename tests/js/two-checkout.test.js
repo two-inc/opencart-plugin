@@ -190,11 +190,14 @@ describe('order intent from the tile', () => {
     const APPROVED = { outcome: 'approved', notice: 'likely', withdrawn: false };
     const UNANSWERED = new Promise(() => {});
     const OTHER_COMPANY = { company_name: 'Example & Co Ltd', organization_number: '0456', country_code: 'GB', source: 'search' };
+    const HELD_WITHDRAWN = { held: WITHDRAWN };
 
     /**
      * The first step is the tile's own ask; each later step is the buyer
      * picking another company (the intent answers with it: an answer, an
-     * Error for no answer, or UNANSWERED for one still out) or 'clear'.
+     * Error for no answer, or UNANSWERED for one still out), 'clear', or
+     * 'redraw' (OpenCart renders the tile again, with no company). An answer
+     * in HELD_WITHDRAWN lands only after every step.
      * Expected: [terms hidden, Confirm disabled, notice text].
      */
     test.each([
@@ -207,19 +210,34 @@ describe('order intent from the tile', () => {
         [[WITHDRAWN, new Error('down')], [false, false, ''], 'another company with no answer after a withdrawal offers both again'],
         [[APPROVED, UNANSWERED], [false, false, 'checking'], 'another company being checked after an approval leaves both offered'],
         [[WITHDRAWN, 'clear', WITHDRAWN], [true, true, 'choose another'], 'a company withdrawn again after a clear withdraws both again'],
+        [[HELD_WITHDRAWN, 'redraw'], [false, false, ''], 'a withdrawal meant for a tile OpenCart has since redrawn leaves the new tile offered'],
     ])('withdrawal %#', async (steps, expected, description) => {
-        const form = tile('address', '<p data-two-company-summary>Buying for Acme</p><div data-two-terms></div>');
-        document.body.insertAdjacentHTML('beforeend', '<button id="button-two-confirm">Confirm</button>');
-        const answers = steps.filter((step) => step !== 'clear');
-        const { fetchImpl } = shop({ i: () => answers.shift() });
+        const draw = (summary) => {
+            tile('address', summary + '<div data-two-terms></div>');
+            document.body.insertAdjacentHTML('beforeend', '<button id="button-two-confirm">Confirm</button>');
+            return document.getElementById('form-two');
+        };
+        const answers = steps.filter((step) => step !== 'clear' && step !== 'redraw');
+        const held = [];
+        const { fetchImpl } = shop({ i: () => {
+            const answer = answers.shift();
+            return answer && answer.held ? new Promise((resolve) => held.push(() => resolve(answer.held))) : answer;
+        } });
         const checkout = new Checkout(config(), document, new Api(config(), fetchImpl), window);
-        await checkout.tileReady(form);
+        checkout.tileReady(draw('<p data-two-company-summary>Buying for Acme</p>'));
+        await flush();
         for (const step of steps.slice(1)) {
-            checkout.companyChanged('payment', step === 'clear' ? null : OTHER_COMPANY);
+            if (step === 'redraw') {
+                checkout.tileReady(draw('<p class="text-danger" data-two-company-summary>Search first</p>'));
+            } else {
+                checkout.companyChanged('payment', step === 'clear' ? null : OTHER_COMPANY);
+            }
             await flush();
         }
+        held.forEach((release) => release());
+        await flush();
         const notice = document.getElementById('two-intent-notice').textContent;
-        const state = [form.querySelector('[data-two-terms]').hidden, document.getElementById('button-two-confirm').disabled, notice];
+        const state = [document.querySelector('[data-two-terms]').hidden, document.getElementById('button-two-confirm').disabled, notice];
         expect([state, description]).toEqual([expected, description]);
         // Every state that disables Confirm tells the buyer why.
         expect([state[1] && notice === '', description]).toEqual([false, description]);

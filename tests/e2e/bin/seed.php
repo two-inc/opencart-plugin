@@ -16,8 +16,9 @@ declare(strict_types=1);
  * - Turns on the demo data's 10% coupon (2222), which has expired, with no
  *   use limit, so a spec can send an order with a discount line.
  * - Shows and requires the buyer's telephone at checkout, as the extension's
- *   Diagnostics buyer telephone row asks: Two refuses an order with no phone number, so the tile
- *   withdraws itself from a buyer who gave none (TWO-27369).
+ *   Diagnostics buyer telephone row asks: Two refuses an order with no phone
+ *   number, so the tile withdraws itself from a buyer who gave none
+ *   (TWO-27369).
  */
 
 // CLI only: the staging shops serve the whole repo under the web root.
