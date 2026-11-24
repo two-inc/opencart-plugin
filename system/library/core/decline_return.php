@@ -57,11 +57,13 @@ final class DeclineReturn
         return null;
     }
 
-    /** OpenCart's own dismissible alert, as its cart shows a notice, around the escaped text. */
+    /** OpenCart's own dismissible alert, as its cart shows a notice, around the escaped text, and the decline landing's marker. */
     public static function alert(string $text): string
     {
         return '<div class="alert alert-danger alert-dismissible"><i class="fa-solid fa-circle-exclamation"></i> '
             . htmlspecialchars($text, ENT_QUOTES, 'UTF-8')
-            . ' <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>';
+            . ' <button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>'
+            // Outside the alert, which OpenCart removes on the next form post: the checkout script keeps Two unchosen on this page view.
+            . '<span id="two-declined" hidden></span>';
     }
 }

@@ -74,6 +74,7 @@ final class DeclineReturnSpec
             $html = DeclineReturn::alert($text);
             TinyAssert::true(str_contains($html, ' ' . $inner . ' '), 'alert: ' . $description);
             TinyAssert::true(str_starts_with($html, '<div class="alert alert-danger alert-dismissible">'), 'alert: OpenCart\'s own alert markup: ' . $description);
+            TinyAssert::true(str_ends_with($html, '</div><span id="two-declined" hidden></span>'), 'alert: the landing marker, outside the alert: ' . $description);
         }
     }
 }

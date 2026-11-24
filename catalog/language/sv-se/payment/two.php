@@ -70,6 +70,7 @@ $_['text_pending'] = 'Vi bekräftar fortfarande din betalning. Vänta en minut i
 $_['text_cart_changed'] = 'Din varukorg ändrades under betalningsverifieringen. Kontrollera din varukorg och försök igen.';
 $_['text_payment_declined'] = '%s kunde inte godkänna det här köpet. Välj en annan betalningsmetod.';
 $_['text_no_answer'] = 'Vi fick inget svar från %s. Försök igen eller välj en annan betalningsmetod.';
+$_['text_return_heading'] = 'Betalning med %s';
 $_['text_history_prefix'] = 'Two: ';
 
 $_['error_order'] = 'Din order kunde inte hittas. Gå tillbaka till kassan och försök igen.';

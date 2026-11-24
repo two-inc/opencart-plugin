@@ -3,7 +3,7 @@
  * payment method list checks Two's option once, never over a method the
  * buyer saved, and the marker is spent whether or not Two is offered.
  */
-const { start, MARKER } = require('../../catalog/view/javascript/two_preselect.js');
+const { start, MARKER, DECLINED } = require('../../catalog/view/javascript/two_preselect.js');
 
 /** OpenCart's payment method modal as its checkout script builds it, the first option checked. */
 function modal(codes) {
@@ -73,5 +73,34 @@ describe('checkout preselection', () => {
         doc.body.insertAdjacentHTML('beforeend', modal(['cod.cod', 'two.two']));
         await flush();
         expect(doc.querySelector('input[name="payment_method"]:checked').value).toBe('cod.cod');
+    });
+});
+
+/**
+ * TWO-27391: on the decline return's landing (the marker beside its notice)
+ * Two stays in the list but is never chosen for the buyer, however often the
+ * list is built; a normal checkout keeps OpenCart's own first-option default.
+ */
+const DECLINE_CASES = [
+    { declined: true, saved: '', codes: ['two.two', 'cod.cod'], checked: [], description: 'declined: OpenCart checked Two first, unchecked' },
+    { declined: true, saved: '', codes: ['cod.cod', 'two.two'], checked: ['cod.cod'], description: 'declined: another method first, left as OpenCart checked it' },
+    { declined: true, saved: 'two.two', codes: ['two.two', 'cod.cod'], checked: ['two.two'], description: 'declined, then the buyer saved Two again: kept' },
+    { declined: false, saved: '', codes: ['two.two', 'cod.cod'], checked: ['two.two'], description: 'a normal checkout: unchanged' },
+];
+
+describe('decline return landing', () => {
+    test.each(DECLINE_CASES)('$description', async (c) => {
+        const doc = checkout(c.saved, CART);
+        if (c.declined) {
+            doc.body.insertAdjacentHTML('beforeend', '<span id="' + DECLINED + '" hidden></span>');
+        }
+        start(doc, win(false));
+        for (let built = 0; built < 2; built++) {
+            doc.getElementById('modal-payment')?.remove();
+            doc.body.insertAdjacentHTML('beforeend', modal(c.codes));
+            await flush();
+            expect(Array.from(doc.querySelectorAll('input[name="payment_method"]:checked')).map((i) => i.value)).toEqual(c.checked);
+            expect(doc.querySelector('input[value="two.two"]')).not.toBeNull();
+        }
     });
 });

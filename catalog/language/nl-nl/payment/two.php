@@ -70,6 +70,7 @@ $_['text_pending'] = 'We zijn je betaling nog aan het bevestigen. Wacht een minu
 $_['text_cart_changed'] = 'Je winkelwagen is gewijzigd tijdens de betaalverificatie. Controleer je winkelwagen en probeer het opnieuw.';
 $_['text_payment_declined'] = '%s kon deze aankoop niet goedkeuren. Kies een andere betaalmethode.';
 $_['text_no_answer'] = 'We kregen geen antwoord van %s. Probeer het opnieuw of kies een andere betaalmethode.';
+$_['text_return_heading'] = 'Betalen met %s';
 $_['text_history_prefix'] = 'Two: ';
 
 $_['error_order'] = 'Je bestelling kon niet worden gevonden. Ga terug naar het afrekenen en probeer het opnieuw.';

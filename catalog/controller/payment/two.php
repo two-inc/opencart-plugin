@@ -41,6 +41,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Library\Response $response
  * @property-read \Opencart\System\Library\Cart\Customer $customer
  * @property-read \Opencart\System\Library\Cart\Cart $cart
+ * @property-read \Opencart\System\Library\Document $document
  * @property-read \Opencart\System\Library\DB $db
  * @property-read \Opencart\System\Library\Log $log
  * @property-read \Opencart\System\Library\Cart\Tax $tax
@@ -676,7 +677,9 @@ class Two extends \Opencart\System\Engine\Controller
     /**
      * The success page, the cart with a notice (where OpenCart shows it), or
      * the checkout with one (shown by the checkout event, since OpenCart's
-     * checkout shows none of its own).
+     * checkout shows none of its own). OpenCart's cart shows a notice only
+     * beside products, so a buyer with an empty cart (another device or
+     * browser) gets the extension's own page with the notice instead.
      *
      * @param 'success'|'cart'|'checkout' $goto
      * @param 'declined'|'unanswered'|'cancelled'|'changed'|'pending'|'generic'|null $notice
@@ -691,12 +694,18 @@ class Two extends \Opencart\System\Engine\Controller
                 'cancelled' => $this->language->get('text_cancelled'),
                 'changed' => $this->language->get('text_cart_changed'),
                 'pending' => $this->language->get('text_pending'),
-                default => $this->buyerMessage([ErrorMapper::GENERIC]),
+                default => null,
             };
+            // The checkout event and the notice page escape it; OpenCart's cart prints it as HTML.
+            $html = $text === null ? $this->buyerMessage([ErrorMapper::GENERIC]) : htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
             if ($goto === 'checkout') {
-                $this->remember('notice', $text);
+                $this->remember('notice', (string) $text);
+            } elseif ($goto === 'cart' && !$this->cart->hasProducts()) {
+                $this->noticePage($html);
+
+                return;
             } else {
-                $this->session->data['error'] = $text;
+                $this->session->data['error'] = $html;
             }
         }
         $route = match ($goto) {
@@ -705,6 +714,31 @@ class Two extends \Opencart\System\Engine\Controller
             default => 'checkout/cart',
         };
         $this->response->redirect($this->url->link($route, 'language=' . $this->config->get('config_language'), true));
+    }
+
+    /**
+     * The notice on a page of its own, in the shop's layout (header, columns,
+     * footer), with a Continue button to the home page. Nothing is restored:
+     * the basket is in another browser.
+     *
+     * @param string $html the notice, already escaped
+     */
+    private function noticePage(string $html): void
+    {
+        $heading = sprintf($this->language->get('text_return_heading'), Brand::default()->productName);
+        $this->document->setTitle($heading);
+        $this->response->setOutput($this->load->view(self::ROUTE . '_notice', [
+            'heading_title' => htmlspecialchars($heading, ENT_QUOTES, 'UTF-8'),
+            'notice' => $html,
+            'button_continue' => $this->language->get('button_continue'),
+            'continue' => $this->url->link('common/home', 'language=' . $this->config->get('config_language')),
+            'column_left' => $this->load->controller('common/column_left'),
+            'column_right' => $this->load->controller('common/column_right'),
+            'content_top' => $this->load->controller('common/content_top'),
+            'content_bottom' => $this->load->controller('common/content_bottom'),
+            'footer' => $this->load->controller('common/footer'),
+            'header' => $this->load->controller('common/header'),
+        ]));
     }
 
     /**
