@@ -678,7 +678,7 @@ class Two extends \Opencart\System\Engine\Controller
      * The success page, the cart with a notice (where OpenCart shows it), or
      * the checkout with one (shown by the checkout event, since OpenCart's
      * checkout shows none of its own). OpenCart's cart shows a notice only
-     * beside products, so a buyer with an empty cart (another device or
+     * beside products, so the decline return's buyer with an empty cart (another device or
      * browser) gets the extension's own page with the notice instead.
      *
      * @param 'success'|'cart'|'checkout' $goto
@@ -700,7 +700,7 @@ class Two extends \Opencart\System\Engine\Controller
             $html = $text === null ? $this->buyerMessage([ErrorMapper::GENERIC]) : htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
             if ($goto === 'checkout') {
                 $this->remember('notice', (string) $text);
-            } elseif ($goto === 'cart' && !$this->cart->hasProducts()) {
+            } elseif ($goto === 'cart' && in_array($notice, ['declined', 'unanswered'], true) && !$this->cart->hasProducts()) {
                 $this->noticePage($html);
 
                 return;
