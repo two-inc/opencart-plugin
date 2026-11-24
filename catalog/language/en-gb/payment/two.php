@@ -68,6 +68,7 @@ $_['text_continue'] = 'Continue';
 $_['text_cancelled'] = 'Your order is cancelled.';
 $_['text_pending'] = 'We\'re still confirming your payment. Please wait a minute before you try again, so that the order is not placed twice.';
 $_['text_cart_changed'] = 'Your cart changed during payment verification. Please review your cart and try again.';
+$_['text_payment_declined'] = '%s could not approve this purchase. Please choose another payment method.';
 $_['text_history_prefix'] = 'Two: ';
 
 $_['error_order'] = 'Your order could not be found. Please go back to checkout and try again.';

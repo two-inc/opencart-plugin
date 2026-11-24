@@ -68,6 +68,7 @@ $_['text_continue'] = 'Fortsett';
 $_['text_cancelled'] = 'Ordren din er kansellert.';
 $_['text_pending'] = 'Vi bekrefter fortsatt betalingen din. Vent et minutt før du prøver igjen, slik at ordren ikke legges inn to ganger.';
 $_['text_cart_changed'] = 'Handlekurven din ble endret under verifiseringen av betalingen. Gå gjennom handlekurven og prøv igjen.';
+$_['text_payment_declined'] = '%s kunne ikke godkjenne dette kjøpet. Velg en annen betalingsmåte.';
 $_['text_history_prefix'] = 'Two: ';
 
 $_['error_order'] = 'Ordren din ble ikke funnet. Gå tilbake til utsjekken og prøv igjen.';

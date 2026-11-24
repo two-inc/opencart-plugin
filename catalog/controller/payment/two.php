@@ -8,6 +8,7 @@ use Opencart\System\Library\Extension\Two\Core\Brand;
 use Opencart\System\Library\Extension\Two\Core\BuyerFields;
 use Opencart\System\Library\Extension\Two\Core\CompanyCapture;
 use Opencart\System\Library\Extension\Two\Core\CompanyLookup;
+use Opencart\System\Library\Extension\Two\Core\DeclineReturn;
 use Opencart\System\Library\Extension\Two\Core\IdempotencyKey;
 use Opencart\System\Library\Extension\Two\Core\Message;
 use Opencart\System\Library\Extension\Two\Core\RateLimiter;
@@ -39,6 +40,7 @@ use Opencart\System\Library\Extension\Two\Opencart\Services;
  * @property-read \Opencart\System\Library\Request $request
  * @property-read \Opencart\System\Library\Response $response
  * @property-read \Opencart\System\Library\Cart\Customer $customer
+ * @property-read \Opencart\System\Library\Cart\Cart $cart
  * @property-read \Opencart\System\Library\DB $db
  * @property-read \Opencart\System\Library\Log $log
  * @property-read \Opencart\System\Library\Cart\Tax $tax
@@ -192,7 +194,8 @@ class Two extends \Opencart\System\Engine\Controller
             'merchant_confirmation_url' => $this->callbackUrl(OrderFlow::CALLBACK_CONFIRM, $orderId, $token, false),
             'merchant_cancel_order_url' => $this->callbackUrl(OrderFlow::CALLBACK_CANCEL, $orderId, $token, false),
             'merchant_edit_order_url' => '',
-            'merchant_order_verification_failed_url' => '',
+            // The decline return's own route: Two's state decides what it does (OrderFlow::declined).
+            'merchant_order_verification_failed_url' => $this->callbackUrl(OrderFlow::CALLBACK_CANCEL, $orderId, $token, false),
             'merchant_invoice_url' => '',
             'merchant_shipping_document_url' => '',
         ];
@@ -497,7 +500,12 @@ class Two extends \Opencart\System\Engine\Controller
         $this->callback(OrderFlow::CALLBACK_CONFIRM);
     }
 
-    /** Two sent the buyer back after cancelling: cancel, then back to the cart with a notice. */
+    /**
+     * Two sent the buyer back declined, or after leaving its checkout (the
+     * cancel URL and the verification failed URL): Two's state decides
+     * (OrderFlow::declined). A declined buyer whose basket is here goes back
+     * to the payment step to choose another payment method.
+     */
     public function cancel(): void
     {
         $this->callback(OrderFlow::CALLBACK_CANCEL);
@@ -565,28 +573,24 @@ class Two extends \Opencart\System\Engine\Controller
             return;
         }
         $flow = $this->services()->orderFlow($this->event);
+        $this->load->model(self::ROUTE);
+        $model = $this->model_extension_two_payment_two;
+        $rebuild = OrderFlow::rebuildFrom(static fn (array $company, array $fields, array $terms): ?array => $model->orderInput($orderId, $company, [], $fields, $terms));
 
+        if ($kind === OrderFlow::CALLBACK_CANCEL && !$this->unplaced($order)) {
+            // Placed already (Two confirmed it, or the buyer paid another way since): nothing to write.
+            $this->leave((string) ($order['payment_method']['code'] ?? '') === 'two.two' ? 'success' : 'cart', null);
+
+            return;
+        }
         if ($kind === OrderFlow::CALLBACK_CANCEL) {
-            $owner = (int) ($this->session->data['order_id'] ?? 0) === $orderId
-                || ($this->customer->isLogged() && (int) $order['customer_id'] === $this->customer->getId());
-            if (!$owner || !$this->unplaced($order)) {
-                $message = Message::of($owner ? 'note_cancel_callback_placed' : 'note_cancel_callback_session');
-                $this->log->write('Two error: order ' . $orderId . ': ' . $message->english());
-                $this->note($orderId, $message);
-                $this->leave('cart', 'generic');
-
-                return;
-            }
-            $result = $flow->cancel($orderId, $token);
+            $result = $flow->declined($orderId, $token, $rebuild, $model->orderRows($orderId));
         } elseif (!$this->unplaced($order) && $flow->owns($orderId, $token)) {
             // A second hit (the bounce page's link and its refresh) on the order the first hit placed.
             $this->leave('success', null);
 
             return;
         } else {
-            $this->load->model(self::ROUTE);
-            $model = $this->model_extension_two_payment_two;
-            $rebuild = OrderFlow::rebuildFrom(static fn (array $company, array $fields, array $terms): ?array => $model->orderInput($orderId, $company, [], $fields, $terms));
             $result = $flow->confirm($orderId, $token, $rebuild, $model->orderRows($orderId));
         }
 
@@ -595,7 +599,18 @@ class Two extends \Opencart\System\Engine\Controller
         }
         // Read again before any write, under the lock.
         $order = $this->model_checkout_order->getOrder($orderId);
-        $after = OrderFlow::afterCallback($kind, $result['outcome'], $order && !$this->unplaced($order));
+        $placed = $order && !$this->unplaced($order);
+        // The buyer's own session (the order it is checking out, or the logged-in owner), and
+        // whether OpenCart's checkout will take its basket (else checkout/checkout bounces to the cart).
+        $owner = (int) ($this->session->data['order_id'] ?? 0) === $orderId
+            || ($this->customer->isLogged() && $order && (int) $order['customer_id'] === $this->customer->getId());
+        $after = isset($result['as'])
+            ? DeclineReturn::after($result['as'], $result['outcome'], $placed, $owner && $this->cart->hasProducts() && ($this->cart->hasStock() || $this->config->get('config_stock_checkout')) && $this->cart->hasMinimum())
+            : OrderFlow::afterCallback($kind, $result['outcome'], $placed);
+        if ($after['notice'] === 'declined' && $owner) {
+            // Two stays offered, but is no longer the chosen method.
+            unset($this->session->data['payment_method']);
+        }
         if ($after['place']) {
             // At the merchant's confirmed status (Order management), else the shop's default order status.
             $this->load->model(self::ROUTE);
@@ -659,22 +674,35 @@ class Two extends \Opencart\System\Engine\Controller
     }
 
     /**
-     * The success page, or the cart with a notice (where OpenCart shows it).
+     * The success page, the cart with a notice (where OpenCart shows it), or
+     * the checkout with one (shown by the checkout event, since OpenCart's
+     * checkout shows none of its own).
      *
-     * @param 'cancelled'|'changed'|'pending'|'generic'|null $notice
+     * @param 'success'|'cart'|'checkout' $goto
+     * @param 'declined'|'cancelled'|'changed'|'pending'|'generic'|null $notice
      */
     private function leave(string $goto, ?string $notice): void
     {
         $this->releaseLock();
         if ($notice !== null) {
-            $this->session->data['error'] = match ($notice) {
+            $text = match ($notice) {
+                'declined' => sprintf($this->language->get('text_payment_declined'), Brand::default()->productName),
                 'cancelled' => $this->language->get('text_cancelled'),
                 'changed' => $this->language->get('text_cart_changed'),
                 'pending' => $this->language->get('text_pending'),
                 default => $this->buyerMessage([ErrorMapper::GENERIC]),
             };
+            if ($goto === 'checkout') {
+                $this->remember('notice', $text);
+            } else {
+                $this->session->data['error'] = $text;
+            }
         }
-        $route = $goto === 'success' ? 'checkout/success' : 'checkout/cart';
+        $route = match ($goto) {
+            'success' => 'checkout/success',
+            'checkout' => 'checkout/checkout',
+            default => 'checkout/cart',
+        };
         $this->response->redirect($this->url->link($route, 'language=' . $this->config->get('config_language'), true));
     }
 

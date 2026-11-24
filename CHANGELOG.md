@@ -27,6 +27,7 @@ A rewrite of the extension for OpenCart 4.1. It does not run on OpenCart 3, and 
 - **Order postprocessing event** (TWO-26651). A permanent, documented OpenCart event that lets your developer adjust every order request just before it is sent to Two.
 
 ### Changed
+- **A buyer Two declines goes back to choose another payment method** (TWO-27391). Coming back from Two's checkout declined, the buyer lands on your checkout with the same cart and the message "Two could not approve this purchase. Please choose another payment method.", instead of being told the order is cancelled. The extension asks Two for the order's state rather than trusting the link, so an order Two in fact approved is still placed.
 - **Two API connection** (TWO-26648). Calls Two's current API hosts, for both Sandbox and Production.
 - **"What is Two?" explainer** (TWO-27110). The checkout tile shows it as a question-mark icon with the explainer in its tooltip, in place of the words.
 - **Product page message and buy button** (TWO-27110). Both show the Two logo beside the Two name, as in Two's other plugins.
