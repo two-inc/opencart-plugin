@@ -3,7 +3,7 @@
 # stay off: the version is bumped on a PR into staging, and the Release
 # workflow tags it and cuts the GitHub release once it reaches main.
 [tool.bumpver]
-current_version = "2.0.0"
+current_version = "4.2.0"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "chore: Bump version {old_version} -> {new_version}"
 commit = true

@@ -5,7 +5,9 @@ All notable changes to the Two payment extension for OpenCart will be documented
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] - Unreleased
+## [4.2.0] - Unreleased
+
+The version jumps to 4.2.0 to align with the other Two plugins.
 
 A rewrite of the extension for OpenCart 4.1. It does not run on OpenCart 3, and the 1.x extension for OpenCart 3 can no longer reach Two, so moving to OpenCart 4.1 and this version is the way to keep offering Two.
 
